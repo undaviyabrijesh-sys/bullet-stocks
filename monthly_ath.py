@@ -1,4 +1,4 @@
-name: ATH Monthly Scan
+name: ATH Monthly Alert
 
 on:
   schedule:
@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: ath-scan
+  group: ath-alert
   cancel-in-progress: false
 
 jobs:
