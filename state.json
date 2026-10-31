@@ -1,5 +1,53 @@
 {
- "2026-10": [
-  "KOTAKBANK.NS"
- ]
+ "triggered": {
+  "2026-10": [
+   "KINGFA",
+   "MBAPL",
+   "SMSPHARMA",
+   "SONACOMS"
+  ]
+ },
+ "potential": {
+  "2026-10-31": [
+   "COFORGE",
+   "DIVISLAB",
+   "NAVINFLUOR",
+   "SHYAMMETL"
+  ]
+ },
+ "positions": {
+  "SMSPHARMA": {
+   "entry": 504.33901245117187,
+   "sl": 484.56101196289063,
+   "target": 543.8950134277343,
+   "level": 494.45001220703125,
+   "opened": "2026-10-31",
+   "setup_month": "Sep'26"
+  },
+  "MBAPL": {
+   "entry": 176.97,
+   "sl": 170.03,
+   "target": 190.85,
+   "level": 173.5,
+   "opened": "2026-10-31",
+   "setup_month": "Sep'26"
+  },
+  "KINGFA": {
+   "entry": 6733.02,
+   "sl": 6468.98,
+   "target": 7261.100000000002,
+   "level": 6601.0,
+   "opened": "2026-10-31",
+   "setup_month": "Sep'26"
+  },
+  "SONACOMS": {
+   "entry": 853.74,
+   "sl": 820.26,
+   "target": 920.7,
+   "level": 837.0,
+   "opened": "2026-10-31",
+   "setup_month": "Sep'26"
+  }
+ },
+ "closed": []
 }
