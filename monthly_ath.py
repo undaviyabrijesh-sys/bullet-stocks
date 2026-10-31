@@ -3,6 +3,7 @@ import json
 import time
 from io import StringIO
 from datetime import datetime
+from urllib.parse import quote
 
 import pandas as pd
 import requests
@@ -22,16 +23,71 @@ MAX_BASE_RANGE = 1.30    # prior 6 months range (high / low) at most 30%
 BATCH = 50
 ALLOWED_SERIES = {"EQ"}  # add "BE" if you also want trade-to-trade stocks
 
+EMBED_COLOR = 0x2ECC71   # green
 
-def discord(msg):
+
+# ---------- Discord ----------
+def discord_post(payload):
     if not WEBHOOK:
         print("No DISCORD_WEBHOOK_URL set")
-        print(msg)
+        print(json.dumps(payload, indent=1, ensure_ascii=False))
         return
+    try:
+        r = requests.post(WEBHOOK, json=payload, timeout=30)
+        if r.status_code >= 300:
+            print("Discord error:", r.status_code, r.text[:300])
+    except Exception as e:
+        print("Discord failed:", e)
+
+
+def discord(msg):
     for i in range(0, len(msg), 1900):
-        requests.post(WEBHOOK, json={"content": msg[i:i + 1900]}, timeout=30)
+        discord_post({"content": msg[i:i + 1900]})
 
 
+def stock_entry(rank, r):
+    link = f"https://www.tradingview.com/chart/?symbol={quote('NSE:' + r['symbol'], safe=':')}"
+    return (
+        f"**{rank}. [{r['symbol']}]({link})** · ₹{r['close']:,.2f}\n"
+        f"Old ATH ₹{r['old_high']:,.2f} → **+{r['above'] * 100:.1f}%** above · "
+        f"Volume **{r['vol_ratio']:.1f}x** · 6M **{r['score'] * 100:+.0f}%**\n"
+    )
+
+
+def send_alert(top, found_count, scanned, month_label):
+    entries = [stock_entry(i, r) for i, r in enumerate(top, 1)]
+
+    # Split into several embeds if the text gets too long (Discord limit is 4096)
+    descriptions, current = [], ""
+    for e in entries:
+        if len(current) + len(e) + 1 > 3800:
+            descriptions.append(current)
+            current = ""
+        current += e + "\n"
+    if current:
+        descriptions.append(current)
+
+    embeds = []
+    for idx, desc in enumerate(descriptions):
+        embed = {"description": desc.strip(), "color": EMBED_COLOR}
+        if idx == 0:
+            embed["title"] = f"📈 ATH Monthly Alert · {month_label}"
+            embed["description"] = (
+                f"Top **{len(top)}** of **{found_count}** stocks that passed your filters\n\n"
+                + desc.strip()
+            )
+        if idx == len(descriptions) - 1:
+            embed["footer"] = {
+                "text": f"Scanned {scanned:,} NSE stocks · Closed above old ATH with volume"
+            }
+            embed["timestamp"] = datetime.utcnow().isoformat()
+        embeds.append(embed)
+
+    for i in range(0, len(embeds), 10):  # Discord allows 10 embeds per message
+        discord_post({"embeds": embeds[i:i + 10]})
+
+
+# ---------- State ----------
 def load_state():
     try:
         with open(STATE_FILE) as f:
@@ -45,6 +101,7 @@ def save_state(state):
         json.dump(state, f, indent=1)
 
 
+# ---------- Symbols ----------
 def load_symbols():
     # 1. Full NSE equity list
     try:
@@ -70,6 +127,7 @@ def load_symbols():
     return []
 
 
+# ---------- Filters ----------
 def monthly(df):
     agg = {"High": "max", "Close": "last", "Volume": "sum"}
     try:
@@ -130,6 +188,7 @@ def quality_check(df, nifty_6m):
         "score": float(ret6),
         "close": float(close.iloc[-1]),
         "old_high": float(old_high),
+        "above": float(cur["Close"] / old_high - 1),
         "vol_ratio": float(cur["Volume"] / avg_vol),
     }
 
@@ -160,13 +219,16 @@ def download_batch(batch):
     return None
 
 
+# ---------- Main ----------
 def main():
     symbols = load_symbols()
     if not symbols:
-        discord("ATH scan: could not load stock list.")
+        discord("⚠️ ATH scan: could not load the stock list.")
         return
 
-    month_key = datetime.utcnow().strftime("%Y-%m")
+    now = datetime.utcnow()
+    month_key = now.strftime("%Y-%m")
+    month_label = now.strftime("%B %Y")
     state = load_state()
     already = set(state.get(month_key, []))
     nifty_6m = get_nifty_6m()
@@ -197,13 +259,7 @@ def main():
     top = found[:MAX_ALERTS]
 
     if top:
-        lines = [f"**ATH Monthly Alert ({month_key})**: top {len(top)} of {len(found)} passed filters (scanned {scanned} NSE stocks)\n"]
-        for r in top:
-            lines.append(
-                f"**{r['symbol']}**  Close {r['close']:.2f} | Old ATH {r['old_high']:.2f} | "
-                f"Vol {r['vol_ratio']:.1f}x | 6M {r['score'] * 100:.0f}%"
-            )
-        discord("\n".join(lines))
+        send_alert(top, len(found), scanned, month_label)
         already.update(r["symbol"] + ".NS" for r in top)
     else:
         print("No new stocks passed the filters.")
