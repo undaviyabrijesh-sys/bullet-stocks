@@ -23,7 +23,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install pandas requests yfinance
-      - run: python scan.py
+      - run: python monthly_ath.py
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       - name: Save state
