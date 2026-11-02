@@ -2,7 +2,8 @@ name: ATH Monthly Alert
 
 on:
   schedule:
-    - cron: "30 11 * * 1-5"     # 5:00 PM IST, Mon-Fri, after market close
+    - cron: "30 5 * * 1-5"      # 11:00 AM IST, Mon-Fri
+    - cron: "30 10 * * 1-5"     # 4:00 PM IST, Mon-Fri
   workflow_dispatch:
 
 permissions:
