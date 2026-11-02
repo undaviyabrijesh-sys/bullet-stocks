@@ -1,30 +1,53 @@
-name: ATH Monthly Alert
+name: ATH Monthly Alert 
 
 on:
   schedule:
-    - cron: "30 5 * * 1-5"      # 11:00 AM IST, Mon-Fri
-    - cron: "30 10 * * 1-5"     # 4:00 PM IST, Mon-Fri
+    # NSE hours 9:15-15:30 IST = 03:45-10:00 UTC, Mon-Fri, every 30 min
+    - cron: '45 3 * * 1-5'
+    - cron: '15,45 4-9 * * 1-5'
+    - cron: '0 10 * * 1-5'
   workflow_dispatch:
+    inputs:
+      force:
+        description: 'Ignore market-hours guard (testing)'
+        type: boolean
+        default: false
+
+# never let two runs overlap or race on state.json
+concurrency:
+  group: ath-scan
+  cancel-in-progress: false
 
 permissions:
   contents: write
 
 jobs:
-  run:
+  scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: '3.12'
+          cache: 'pip'
+
       - run: pip install -r requirements.txt
-      - run: python monthly_ath.py
+
+      - name: Run scanner
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-      - name: Save state
         run: |
-          git config user.name "bot"
-          git config user.email "bot@users.noreply.github.com"
-          git add state.json
-          git diff --staged --quiet || (git commit -m "update state" && git push)
+          if [ "${{ inputs.force }}" = "true" ]; then
+            python monthly_ath.py --force
+          else
+            python monthly_ath.py
+          fi
+
+      - name: Commit state (only if changed)
+        run: |
+          git config user.name  "ath-bot"
+          git config user.email "ath-bot@users.noreply.github.com"
+          git add state.json watchlist.json
+          git diff --cached --quiet || (git commit -m "scan $(date -u +%F\ %H:%M) UTC" && git pull --rebase && git push)
