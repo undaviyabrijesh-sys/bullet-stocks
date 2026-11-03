@@ -117,7 +117,9 @@ def market_snapshot(symbol):
             close = close.dropna()
             # Exclude the developing month; SMA values must not repaint intramonth.
             if len(close) > 1:
-                completed = close.iloc[:-1]
+                last_month = pd.Timestamp(close.index[-1]).to_period("M")
+                current_month = pd.Timestamp.now(tz=IST).tz_localize(None).to_period("M")
+                completed = close.iloc[:-1] if last_month == current_month else close
                 if len(completed) >= 20:
                     sma20 = float(completed.rolling(20).mean().iloc[-1])
                 if len(completed) >= 10:
@@ -228,7 +230,7 @@ def portfolio_metrics(capital, trades):
     invested = sum(t["entry"] * t["remaining_qty"] for t in open_trades)
     realised = sum(t["realised_pnl"] for t in trades)
     unrealised = sum(((t["last_price"] or t["entry"]) - t["entry"]) * t["remaining_qty"] for t in open_trades)
-    cash = capital - sum(t["invested"] for t in trades) + sum(t["realised_pnl"] for t in trades)
+    cash = capital - invested + realised
     equity = cash + invested + unrealised
     return open_trades, closed_trades, cash, equity, realised, unrealised
 
@@ -292,7 +294,8 @@ def dashboard():
             if available < ticket:
                 break
             px, src, sma20, sma10 = market_snapshot(symbol)
-            if px is None or px < float(item.get("trigger", float("inf"))):
+            trigger = float(item.get("trigger", float("inf")))
+            if px is None or px < trigger or px / trigger - 1 > 0.06:
                 continue
             ok, msg = open_trade(item, px, min(ticket, available), sma20, sma10)
             if ok:
