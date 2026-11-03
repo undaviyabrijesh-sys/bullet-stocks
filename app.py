@@ -835,7 +835,7 @@ def dashboard():
                     _, _, _, sma10 = market_snapshot(trade["symbol"], include_monthly=True)
                     update_trade(trade, q["ltp"], sma10)
             current_open = {t["symbol"] for t in load_trades("OPEN")}
-            already_traded = {t["symbol"] for t in load_trades()}
+            already_traded = {t["symbol"] for t in load_trades()} | set(scanner_positions) | {str(x.get("symbol", "")) for x in scanner_closed if x.get("symbol")}
             all_trades = load_trades()
             invested_now = sum(t["entry"] * t["remaining_qty"] for t in load_trades("OPEN"))
             available = cap - invested_now + sum(t["realised_pnl"] for t in all_trades)
