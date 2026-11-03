@@ -19,7 +19,7 @@ The dashboard is a simulation only. It does not connect to a broker or place rea
 Default portfolio settings:
 - Starting capital: ₹10,00,000
 - Allocation per new entry: ₹50,000
-- Auto paper processing: every 5 minutes (can be switched off in the sidebar)
+- Auto paper processing: every 5 minutes (toggle in the Command Center)
 
 The app reads `watchlist.json` produced by `monthly_ath.py`, checks intraday Yahoo Finance prices, and records paper positions in a local SQLite database named `paper_portfolio.db`.
 
