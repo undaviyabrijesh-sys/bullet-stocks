@@ -20,19 +20,34 @@ DB_PATH = Path("paper_portfolio.db")
 WATCH_FILE = Path("watchlist.json")
 IST = "Asia/Kolkata"
 
-st.set_page_config(page_title="BULLET // CYBER TRADING DESK", page_icon="🛰️", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="SALTY TRADES // CYBER TRADING DESK", page_icon="🛰️", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Orbitron:wght@500;600;700;800&display=swap');
 :root { --neon:#00f5d4; --blue:#39a0ff; --violet:#a78bfa; --bg:#070b12; --panel:#0c1420; --muted:#8193a8; }
-.stApp { background: radial-gradient(ellipse at 12% 0%, #102333 0%, #080d16 42%, #05080e 100%); color:#d9e8f5; }
+.stApp {
+  background:
+    radial-gradient(circle at 12% 8%, rgba(0,245,212,.13), transparent 27%),
+    radial-gradient(circle at 82% 72%, rgba(57,160,255,.12), transparent 30%),
+    repeating-linear-gradient(0deg, rgba(0,245,212,.035) 0px, rgba(0,245,212,.035) 1px, transparent 1px, transparent 54px),
+    repeating-linear-gradient(90deg, rgba(57,160,255,.035) 0px, rgba(57,160,255,.035) 1px, transparent 1px, transparent 54px),
+    linear-gradient(135deg,#070b12,#0b1724 48%,#060a12);
+  background-size: auto, auto, 54px 54px, 54px 54px, 220% 220%;
+  animation: circuit-drift 24s linear infinite, ambient-shift 12s ease-in-out infinite;
+  color:#d9e8f5;
+}
 header[data-testid="stHeader"] { background:rgba(5,9,15,.86); }
 [data-testid="stSidebar"] { background:linear-gradient(180deg,#0b1724,#080d15); border-right:1px solid #17354a; }
 [data-testid="stSidebar"] * { font-family:'IBM Plex Mono',monospace; }
 h1,h2,h3 { font-family:'Orbitron',sans-serif !important; letter-spacing:.08em; }
 p, label, span, div { }
-[data-testid="stMetric"] { background:linear-gradient(145deg,rgba(13,28,42,.96),rgba(7,15,25,.96)); border:1px solid #1a3b50; border-radius:10px; padding:14px 16px; box-shadow:0 0 18px rgba(0,245,212,.045); }
+[data-testid="stMetric"] {
+  background:linear-gradient(115deg,rgba(7,22,34,.98),rgba(13,47,57,.96),rgba(12,23,43,.98),rgba(7,22,34,.98));
+  background-size:260% 260%; border:1px solid #1a3b50; border-radius:10px;
+  padding:14px 16px; box-shadow:0 0 18px rgba(0,245,212,.045);
+  animation:metric-shift 5s ease-in-out infinite;
+}
 [data-testid="stMetricLabel"] { color:#8da5b9 !important; font-family:'IBM Plex Mono',monospace; font-size:.72rem; letter-spacing:.09em; text-transform:uppercase; }
 [data-testid="stMetricValue"] { color:#e8fbff !important; font-family:'Orbitron',sans-serif; font-size:1.45rem; }
 [data-testid="stMetricDelta"] { font-family:'IBM Plex Mono',monospace; }
@@ -70,7 +85,51 @@ hr { border-color:#1b3549; }
   from { opacity:0; transform:translateY(7px); }
   to { opacity:1; transform:translateY(0); }
 }
-.cyber-banner { position:relative; overflow:hidden; animation:bullet-card-breathe 5s ease-in-out infinite; }
+/* Visible circuit-board motion and stronger colour shifts. */
+@keyframes circuit-drift {
+  0% { background-position: 0 0, 0 0, 0 0, 0 0, 0% 0%; }
+  100% { background-position: 0 0, 0 0, 54px 54px, -54px -54px, 100% 100%; }
+}
+@keyframes ambient-shift {
+  0%,100% { filter:hue-rotate(0deg) brightness(1); }
+  50% { filter:hue-rotate(13deg) brightness(1.09); }
+}
+@keyframes circuit-trace {
+  0% { background-position:0 0, 0 0; opacity:.2; }
+  50% { opacity:.7; }
+  100% { background-position:160px 0, 0 110px; opacity:.2; }
+}
+@keyframes node-travel {
+  0% { left:3%; top:15%; opacity:.2; }
+  25% { left:42%; top:15%; opacity:1; }
+  50% { left:42%; top:82%; opacity:.7; }
+  75% { left:88%; top:82%; opacity:1; }
+  100% { left:96%; top:15%; opacity:.2; }
+}
+@keyframes metric-shift {
+  0%,100% { background-position:0% 50%; border-color:#174154; box-shadow:0 0 12px rgba(0,245,212,.04); }
+  50% { background-position:100% 50%; border-color:#287b88; box-shadow:0 0 24px rgba(0,245,212,.17); }
+}
+.cyber-banner {
+  position:relative; overflow:hidden; isolation:isolate;
+  animation:bullet-card-breathe 3.5s ease-in-out infinite;
+  background-size:220% 220%;
+}
+.cyber-banner:before {
+  content:""; position:absolute; inset:0; z-index:0; pointer-events:none;
+  background-image:
+    repeating-linear-gradient(90deg,transparent 0 34px,rgba(0,245,212,.20) 35px,transparent 36px 72px),
+    repeating-linear-gradient(0deg,transparent 0 24px,rgba(57,160,255,.18) 25px,transparent 26px 52px);
+  background-size:160px 110px,160px 110px;
+  animation:circuit-trace 7s linear infinite;
+  mask-image:linear-gradient(90deg,transparent,#000 12%,#000 88%,transparent);
+}
+.cyber-banner > div { position:relative; z-index:1; }
+.cyber-banner:after {
+  content:""; position:absolute; z-index:2; width:9px; height:9px;
+  border-radius:50%; background:#00f5d4; box-shadow:0 0 8px #00f5d4,0 0 20px #00f5d4;
+  animation:node-travel 9s linear infinite; pointer-events:none;
+}
 .cyber-banner:after {
   content:""; position:absolute; top:0; bottom:0; left:0; width:24%;
   background:linear-gradient(90deg,transparent,rgba(0,245,212,.09),transparent);
@@ -93,8 +152,8 @@ hr { border-color:#1b3549; }
 }
 </style>
 <div class="cyber-banner">
- <div class="cyber-kicker">BULLET SYSTEMS // NSE EQUITY INTELLIGENCE</div>
- <div class="cyber-title">CYBER TRADING DESK <span style="color:#00f5d4">◈</span></div>
+ <div class="cyber-kicker">SALTY TRADES // NSE EQUITY INTELLIGENCE</div>
+ <div class="cyber-title">SALTY TRADES <span style="color:#00f5d4">◈</span></div>
  <div class="cyber-sub">MONTHLY ATH ENGINE · LIVE QUOTES · PAPER EXECUTION SIMULATOR · IST</div>
 </div>
 """, unsafe_allow_html=True)
@@ -480,7 +539,7 @@ def portfolio_metrics(capital, trades):
 
 
 init_db()
-st.title("📈 Bullet Stocks — Paper Portfolio")
+st.title("🛰️ Salty Trades — Paper Portfolio")
 st.caption("Monthly ATH breakout strategy · Simulation only · No broker orders or real money transactions")
 
 capital, allocation = get_settings()
