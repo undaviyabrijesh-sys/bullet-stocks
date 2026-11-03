@@ -7,9 +7,9 @@ on:
       - monthly_ath.py
       - .github/workflows/ath-alert.yml
   schedule:
-    # NSE hours 9:15-15:30 IST = 03:45-10:00 UTC, Mon-Fri, every 30 min
-    - cron: '45 3 * * 1-5'
-    - cron: '15,45 4-9 * * 1-5'
+    # NSE hours 9:15-15:30 IST = 03:45-10:00 UTC, Mon-Fri, every 5 min
+    - cron: '45-59/5 3 * * 1-5'
+    - cron: '*/5 4-9 * * 1-5'
     - cron: '0 10 * * 1-5'
   workflow_dispatch:
     inputs:
