@@ -37,10 +37,12 @@ SETUP_LOOKBACK = 3
 ENTRY_BUFFER = 0.02       # trigger = monthly high + 2%
 MAX_CHASE = 0.06          # triggered: skip if price is > 6% above the trigger
 POTENTIAL_BAND = 0.05     # potential: price within 5% below the trigger
-SL_BELOW_LEVEL = 0.02     # SL = monthly high - 2%
-RR = 2.0
-ENTRY_AT_CMP = True       # True = entry is the live price when triggered (honest P&L);
-                          # False = entry is the trigger price (old behaviour)
+ENTRY_AT_CMP = True       # Enter at the first observed live price at/above trigger.
+STOP_FRACTION = 0.25
+T1_RETURN = 0.25
+T2_RETURN = 0.40
+T3_RETURN = 0.50
+T4_RETURN = 1.00
 
 # Watchlist is wider than the alert bands so live runs can catch moves during the day
 WATCH_UP = 0.10
@@ -108,7 +110,8 @@ def stock_entry(rank, r):
         f"**{rank}. [{r['symbol']}]({link})** · Score **{r['score']:.0f}**/100\n"
         f"💰 CMP **{fmt(r['price'])}** · {gap}\n"
         f"📌 Monthly ATH high {fmt(r['level'])} ({r['setup_month']}) → Trigger **{fmt(r['trigger'])}**\n"
-        f"🎯 Entry {fmt(r['entry'])} · 🛑 SL {fmt(r['sl'])} · 🏁 Target {fmt(r['target'])} (1:{RR:g})\n"
+        f"🎯 Entry {fmt(r['entry'])} · 🛑 Initial SL {fmt(r['sl'])}\n"
+        f"Milestones: T1 +25% · T2 +40% (SL to cost) · T3 +50% · T4 +100% (monthly SMA10 trail)\n"
         f"📊 Vol **{r['vol_ratio']:.1f}x** · RS **{r['rs'] * 100:+.0f}%** vs Nifty · "
         f"Base range {r['base_range'] * 100:.0f}%\n"
     )
@@ -179,8 +182,9 @@ def open_embed(positions, prices, closed_hist, today):
             lines.append(
                 f"{dot} **[{sym}]({tv_link(sym)})** · CMP {fmt(last)} · "
                 f"P&L **{pnl * 100:+.1f}%** · {days}d\n"
-                f"↳ Entry {fmt(pos['entry'])} · 🛑 {fmt(pos['sl'])} ({(pos['sl'] / last - 1) * 100:+.1f}%) · "
-                f"🏁 {fmt(pos['target'])} ({(pos['target'] / last - 1) * 100:+.1f}%)"
+                f"↳ Entry {fmt(pos['entry'])} · 🛑 Active SL {fmt(pos['sl'])} · "
+                f"Remaining {pos.get('remaining_fraction', 1.0) * 100:.0f}% · "
+                f"Stage {'T4 trail' if pos.get('trailing') else 'T3 done' if pos.get('t3_done') else 'T2 done' if pos.get('t2_done') else 'T1 done' if pos.get('t1_done') else 'Initial'}"
             )
         else:
             lines.append(f"⚪ **{sym}** · price unavailable · {days}d")
@@ -316,14 +320,17 @@ def analyse(df, nifty_6m, today):
     if len(hist) < MIN_AGE_MONTHS:
         return None
 
-    closes = hist["Close"]
-    is_ath_close = closes >= closes.cummax()
-    recent = is_ath_close.iloc[-SETUP_LOOKBACK:]
-    if not recent.any():
+    closes = hist["Close"].dropna()
+    # Only the latest completed monthly candle can qualify as the current ATH setup.
+    if len(closes) < MIN_AGE_MONTHS or closes.iloc[-1] < closes.iloc[:-1].max():
         return None
-    setup_idx = recent[recent].index[-1]
-    level = float(hist.loc[setup_idx:, "High"].max())
+
+    setup_idx = hist.index[-1]
+    # Confirmed rule: breakout is 2% above the previous completed month's HIGH.
+    level = float(hist["High"].iloc[-1])
     trigger = level * (1 + ENTRY_BUFFER)
+    sma20 = float(closes.rolling(20).mean().iloc[-1]) if len(closes) >= 20 else None
+    sma10 = float(closes.rolling(10).mean().iloc[-1]) if len(closes) >= 10 else None
 
     gap = price / trigger - 1
     if gap > WATCH_UP or -gap > WATCH_DOWN:
@@ -334,7 +341,7 @@ def analyse(df, nifty_6m, today):
     recent_vol = vol.tail(5).mean()
     base_vol = vol.iloc[-55:-5].mean()
     vol_ratio = float(recent_vol / base_vol) if base_vol > 0 else 0.0
-    pre = hist.loc[:setup_idx].iloc[:-1].tail(6)
+    pre = hist.iloc[:-1].tail(6)
     base_range = float(pre["High"].max() / pre["Close"].min()) if len(pre) >= 3 else 1.6
 
     rs_pts = clip(rs / 0.25) if nifty_6m is not None else 0.5
@@ -346,7 +353,8 @@ def analyse(df, nifty_6m, today):
     return {
         "level": level,
         "trigger": float(trigger),
-        "sl": float(level * (1 - SL_BELOW_LEVEL)),
+        "monthly_sma20": sma20,
+        "monthly_sma10": sma10,
         "static_score": float(static_score),
         "vol_ratio": vol_ratio,
         "rs": float(rs),
@@ -356,7 +364,7 @@ def analyse(df, nifty_6m, today):
 
 
 def classify(item, price):
-    """Live step: turn a watchlist item + current price into TRIGGERED / POTENTIAL (or None)."""
+    """Live step: classify price vs trigger and calculate the agreed initial stop."""
     trigger = item["trigger"]
     gap = price / trigger - 1
     if gap >= 0:
@@ -370,9 +378,14 @@ def classify(item, price):
         status = "POTENTIAL"
         prox = 1 - (-gap) / POTENTIAL_BAND
     score = 30 * prox + item["static_score"]
-    sl = item["sl"]
     entry = price if (ENTRY_AT_CMP and status == "TRIGGERED") else trigger
-    target = entry + RR * (entry - sl)
+    sma20 = item.get("monthly_sma20")
+    if sma20 is None or pd.isna(sma20):
+        return None
+    # Higher of 25% below entry and completed-month monthly SMA20.
+    sl = max(entry * (1 - STOP_FRACTION), float(sma20))
+    if sl >= entry:
+        return None
     return {
         "symbol": item["symbol"],
         "status": status,
@@ -382,7 +395,8 @@ def classify(item, price):
         "trigger": float(trigger),
         "entry": float(entry),
         "sl": float(sl),
-        "target": float(target),
+        "monthly_sma20": float(sma20),
+        "monthly_sma10": item.get("monthly_sma10"),
         "gap": float(gap),
         "vol_ratio": item["vol_ratio"],
         "rs": item["rs"],
@@ -421,11 +435,92 @@ def fetch_daily(symbols, period="6mo", chunk=100):
     return out
 
 
-def evaluate_position(pos, df, today):
-    sl, target = pos["sl"], pos["target"]
+def make_position(entry, level, opened, setup_month, monthly_sma20, monthly_sma10):
+    """Create a position using the agreed staged exit model."""
+    sl = max(entry * (1 - STOP_FRACTION), float(monthly_sma20))
+    if sl >= entry:
+        return None
+    return {
+        "entry": float(entry),
+        "initial_sl": float(sl),
+        "sl": float(sl),
+        "level": float(level),
+        "opened": opened,
+        "setup_month": setup_month,
+        "monthly_sma20": float(monthly_sma20),
+        "monthly_sma10": float(monthly_sma10) if monthly_sma10 is not None else None,
+        "t1": float(entry * (1 + T1_RETURN)),
+        "t2": float(entry * (1 + T2_RETURN)),
+        "t3": float(entry * (1 + T3_RETURN)),
+        "t4": float(entry * (1 + T4_RETURN)),
+        "t1_done": False,
+        "t2_done": False,
+        "t3_done": False,
+        "trailing": False,
+        "remaining_fraction": 1.0,
+        "realised_pnl_fraction": 0.0,
+    }
+
+
+def migrate_position(pos, monthly_sma20, monthly_sma10):
+    """Upgrade legacy single-target state records without losing their entry/history."""
+    if "t1" in pos and "remaining_fraction" in pos:
+        if monthly_sma10 is not None:
+            pos["monthly_sma10"] = float(monthly_sma10)
+        return pos
+    entry = float(pos["entry"])
+    sma20 = float(monthly_sma20) if monthly_sma20 is not None and monthly_sma20 < entry else entry * (1 - STOP_FRACTION)
+    upgraded = make_position(
+        entry, float(pos.get("level", entry)), pos.get("opened", datetime.now(IST).strftime("%Y-%m-%d")),
+        pos.get("setup_month", ""), sma20, monthly_sma10,
+    )
+    if upgraded is None:
+        return pos
+    upgraded["migration_note"] = "Migrated from legacy single-target state; staged targets start from original entry."
+    return upgraded
+
+
+def fetch_monthly_indicators(symbols, today, chunk=50):
+    """Fetch completed monthly closes and calculate non-repainting SMA10/SMA20."""
+    out = {}
+    for i in range(0, len(symbols), chunk):
+        part = symbols[i:i + chunk]
+        tickers = [sym + ".NS" for sym in part]
+        try:
+            data = yf.download(tickers, period="5y", interval="1mo", group_by="ticker",
+                               auto_adjust=False, threads=True, progress=False)
+        except Exception as e:
+            print("Monthly indicator fetch failed:", e)
+            continue
+        if data is None or data.empty:
+            continue
+        for sym, ticker in zip(part, tickers):
+            try:
+                frame = pick(data, ticker)
+                close = frame["Close"]
+                if isinstance(close, pd.DataFrame):
+                    close = close.iloc[:, 0]
+                close = close.dropna()
+                if len(close) and pd.Timestamp(close.index[-1]).to_period("M") == today.to_period("M"):
+                    close = close.iloc[:-1]
+                out[sym] = {
+                    "sma20": float(close.rolling(20).mean().iloc[-1]) if len(close) >= 20 else None,
+                    "sma10": float(close.rolling(10).mean().iloc[-1]) if len(close) >= 10 else None,
+                }
+            except Exception:
+                continue
+    return out
+
+
+def evaluate_position(pos, df, today, monthly_sma10=None):
+    """Evaluate daily OHLC conservatively; if SL and a target touch on one bar, assume SL first."""
+    entry = float(pos["entry"])
+    sl = float(pos["sl"])
+    remaining = float(pos.get("remaining_fraction", 1.0))
+    realised = float(pos.get("realised_pnl_fraction", 0.0))
+    events = []
     opened = pd.Timestamp(pos["opened"])
-    last = float(df["Close"].iloc[-1])
-    last_date = df.index[-1]
+    closed = None
 
     for ts, row in df[df.index > opened].iterrows():
         o = row.get("Open")
@@ -433,40 +528,89 @@ def evaluate_position(pos, df, today):
         hi, lo = float(row["High"]), float(row["Low"])
         if lo <= sl:
             exit_p = min(sl, o) if o is not None else sl
-            note = "SL and target both touched this day; SL assumed first" if hi >= target else ""
-            if o is not None and o < sl:
-                note = (note + "; " if note else "") + "gapped below SL, exit at open"
-            return {"result": "SL", "exit": exit_p, "date": ts, "note": note}
-        if hi >= target:
-            exit_p = max(target, o) if o is not None else target
-            return {"result": "TARGET", "exit": exit_p, "date": ts, "note": ""}
+            if remaining > 0:
+                realised += remaining * (exit_p / entry - 1)
+                events.append({"type": "SL", "price": exit_p, "date": ts, "remaining": remaining})
+                remaining = 0.0
+            closed = {
+                "result": "SL", "exit": exit_p, "date": ts,
+                "pnl": realised, "note": "Stop assumed first when stop and target touched in the same daily candle."
+            }
+            break
 
-    if last <= sl:
-        return {"result": "SL", "exit": sl, "date": last_date, "note": ""}
-    if last >= target:
-        return {"result": "TARGET", "exit": target, "date": last_date, "note": ""}
-    if (today - opened).days >= MAX_HOLD_DAYS:
-        return {"result": "EXPIRED", "exit": last, "date": last_date, "note": ""}
-    return {"result": "OPEN"}
+        # OHLC cannot reveal the exact order of intraday target touches, so milestones
+        # are processed in ascending order when the candle high reaches them.
+        if not pos.get("t1_done") and hi >= pos["t1"]:
+            sold = min(remaining, 0.50)
+            realised += sold * (pos["t1"] / entry - 1)
+            remaining -= sold
+            pos["t1_done"] = True
+            events.append({"type": "T1", "price": pos["t1"], "sold_fraction": sold, "date": ts})
+        if not pos.get("t2_done") and hi >= pos["t2"]:
+            sl = max(sl, entry)
+            pos["t2_done"] = True
+            events.append({"type": "T2", "price": pos["t2"], "new_sl": sl, "date": ts})
+        if not pos.get("t3_done") and hi >= pos["t3"] and remaining > 0:
+            sold = min(remaining, remaining * 0.50)
+            realised += sold * (pos["t3"] / entry - 1)
+            remaining -= sold
+            pos["t3_done"] = True
+            events.append({"type": "T3", "price": pos["t3"], "sold_fraction": sold, "date": ts})
+        if not pos.get("trailing") and hi >= pos["t4"]:
+            pos["trailing"] = True
+            events.append({"type": "T4", "price": pos["t4"], "date": ts})
+
+    pos["sl"] = float(sl)
+    pos["remaining_fraction"] = max(0.0, remaining)
+    pos["realised_pnl_fraction"] = float(realised)
+
+    # SMA10 trailing is a completed-month value. Apply it after historical bars have
+    # been processed, then check the latest available price against the updated stop.
+    if pos.get("trailing") and monthly_sma10 is not None:
+        new_sl = max(float(pos["sl"]), float(monthly_sma10))
+        if new_sl > float(pos["sl"]):
+            pos["sl"] = new_sl
+            events.append({"type": "TRAIL", "price": new_sl, "date": df.index[-1]})
+
+    if closed is None and remaining > 0:
+        last = float(df["Close"].iloc[-1])
+        last_date = df.index[-1]
+        if last <= float(pos["sl"]):
+            realised += remaining * (last / entry - 1)
+            events.append({"type": "SL", "price": last, "date": last_date, "remaining": remaining})
+            closed = {"result": "SL", "exit": last, "date": last_date, "pnl": realised,
+                      "note": "Latest price at/below active stop."}
+            remaining = 0.0
+        elif (today - opened).days >= MAX_HOLD_DAYS:
+            realised += remaining * (last / entry - 1)
+            closed = {"result": "EXPIRED", "exit": last, "date": last_date, "pnl": realised, "note": ""}
+            remaining = 0.0
+
+    pos["remaining_fraction"] = max(0.0, remaining)
+    pos["realised_pnl_fraction"] = float(realised)
+    if remaining <= 0:
+        if closed is None:
+            closed = {"result": "COMPLETED", "exit": float(df["Close"].iloc[-1]),
+                      "date": df.index[-1], "pnl": realised, "note": "All planned quantities booked."}
+        return events, closed
+    return events, None
 
 
 def close_position(sym, pos, ev):
-    entry, sl = pos["entry"], pos["sl"]
-    exit_p = float(ev["exit"])
-    risk = entry - sl
-    opened = pd.Timestamp(pos["opened"])
+    entry = float(pos["entry"])
+    risk = entry - float(pos.get("initial_sl", pos["sl"]))
     return {
         "symbol": sym,
         "result": ev["result"],
-        "entry": float(entry),
-        "exit": exit_p,
-        "sl": float(sl),
-        "target": float(pos["target"]),
-        "pnl": float(exit_p / entry - 1),
-        "r": float((exit_p - entry) / risk) if risk > 0 else 0.0,
+        "entry": entry,
+        "exit": float(ev["exit"]),
+        "sl": float(pos["sl"]),
+        "target": float(pos["t4"]),
+        "pnl": float(ev.get("pnl", pos.get("realised_pnl_fraction", 0.0))),
+        "r": float(ev.get("pnl", 0.0) * entry / risk) if risk > 0 else 0.0,
         "opened": pos["opened"],
         "closed": ev["date"].strftime("%Y-%m-%d"),
-        "days": int(max((ev["date"] - opened).days, 0)),
+        "days": int(max((ev["date"] - pd.Timestamp(pos["opened"])).days, 0)),
         "note": ev.get("note", ""),
     }
 
@@ -564,16 +708,24 @@ def main():
     syms = sorted(set(positions) | {i["symbol"] for i in wl.get("items", [])})
     data = fetch_daily(syms)
 
-    # ---- 3. update open positions (SL / target) ----
+    # ---- 3. update open positions using completed-month SMA values ----
     prices = {}
     newly_closed = []
+    milestone_alerts = []
+    monthly_values = fetch_monthly_indicators(list(positions), today)
     for sym in list(positions):
         df = data.get(sym)
         if df is None:
             continue
         prices[sym] = float(df["Close"].iloc[-1])
-        ev = evaluate_position(positions[sym], df, today)
-        if ev["result"] != "OPEN":
+        smas = monthly_values.get(sym, {})
+        old = positions[sym]
+        if "t1" not in old:
+            positions[sym] = migrate_position(old, smas.get("sma20"), smas.get("sma10"))
+        evs, ev = evaluate_position(positions[sym], df, today, smas.get("sma10"))
+        for item in evs:
+            milestone_alerts.append((sym, item))
+        if ev is not None:
             newly_closed.append(close_position(sym, positions.pop(sym), ev))
     closed_hist = (closed_hist + newly_closed)[-KEEP_CLOSED:]
     print("Open positions:", len(positions), "| closed this run:", len(newly_closed))
@@ -608,17 +760,27 @@ def main():
 
     # ---- 5. open a tracked position for every new triggered entry ----
     for r in trig:
-        positions[r["symbol"]] = {
-            "entry": r["entry"],
-            "sl": r["sl"],
-            "target": r["target"],
-            "level": r["level"],
-            "opened": day_key,
-            "setup_month": r["setup_month"],
-        }
+        positions[r["symbol"]] = make_position(
+            r["entry"], r["level"], day_key, r["setup_month"],
+            r["monthly_sma20"], r.get("monthly_sma10"),
+        )
         prices[r["symbol"]] = r["price"]
 
     # ---- 6. Discord ----
+    if milestone_alerts:
+        names = {"T1": "T1 +25%: sold 50% of original quantity",
+                 "T2": "T2 +40%: stop moved to cost",
+                 "T3": "T3 +50%: sold 50% of remaining quantity",
+                 "T4": "T4 +100%: monthly SMA10 trailing activated",
+                 "TRAIL": "Monthly SMA10 trailing stop raised",
+                 "SL": "Active stop-loss hit"}
+        for sym, ev in milestone_alerts:
+            discord_post({"content": (
+                f"📣 **{sym} — {names.get(ev['type'], ev['type'])}**\n"
+                f"Entry {fmt(positions.get(sym, {}).get('entry', 0) or 0)} · "
+                f"Event price/SL {fmt(ev['price'])} · "
+                f"Remaining {positions.get(sym, {}).get('remaining_fraction', 0) * 100:.0f}%"
+            )})
     if newly_closed:
         discord_post({
             "content": f"🔔 **Position Update** · {now:%d %b %Y} · {now:%I:%M %p} IST",
