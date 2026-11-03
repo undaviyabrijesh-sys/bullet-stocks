@@ -850,6 +850,12 @@ def dashboard():
     with tabs[1]:
         st.markdown('<div class="panel-tag">LIVE MARKET RADAR // ALL ELIGIBLE MONTHLY ATH SETUPS</div>', unsafe_allow_html=True)
         st.caption("LTP and intraday statistics refresh automatically. Trigger and setup levels come from the latest scanner watchlist.")
+        st.markdown("#### ◈ OPEN SCANNER POSITIONS")
+        if scanner_rows:
+            st.dataframe(pd.DataFrame(scanner_rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("No open scanner positions.")
+        st.divider()
         search = st.text_input("⌕ FILTER SYMBOL", placeholder="Type a stock symbol...", key="scanner_filter").strip().upper()
         status_filter = st.selectbox("SIGNAL FILTER", ["ALL", "TRIGGER CROSSED", "WITHIN 2%", "WITHIN 5%"], index=0)
         rows = []
@@ -1032,7 +1038,27 @@ def dashboard():
         risk_cols[1].metric("Capital deployed", f"₹{open_cost:,.0f}")
         risk_cols[2].metric("Exposure", f"{exposure_pct:.1f}%")
         risk_cols[3].metric("Remaining cash", f"₹{cash:,.0f}")
-        if open_trades:
+        if scanner_positions:
+            scanner_risk_rows = []
+            for symbol, pos in scanner_positions.items():
+                entry = float(pos.get("entry", 0) or 0)
+                sl = float(pos.get("sl", pos.get("initial_sl", 0)) or 0)
+                q = quotes.get(symbol, {})
+                ltp = float(q.get("ltp") or entry)
+                if entry <= 0:
+                    continue
+                scanner_risk_rows.append({
+                    "SYMBOL": symbol, "ENTRY ₹": entry, "LTP ₹": ltp,
+                    "ACTIVE SL ₹": sl, "RISK / SHARE ₹": max(0, entry-sl),
+                    "RISK FROM ENTRY %": (max(0, entry-sl)/entry*100),
+                    "DISTANCE TO SL %": ((ltp-sl)/ltp*100) if ltp else None,
+                    "REMAINING %": float(pos.get("remaining_fraction", 1) or 0)*100,
+                    "STAGE": "T4 TRAIL" if pos.get("trailing") else "T3" if pos.get("t3_done") else "T2" if pos.get("t2_done") else "T1" if pos.get("t1_done") else "INITIAL",
+                })
+            st.markdown("#### SCANNER POSITION RISK · PER-SHARE VIEW")
+            st.dataframe(pd.DataFrame(scanner_risk_rows), use_container_width=True, hide_index=True)
+            st.caption("Scanner state does not store allocated share quantity, so rupee portfolio exposure is not inferred here.")
+        elif open_trades:
             risk_rows = []
             for t in open_trades:
                 q = quotes.get(t["symbol"], {})
@@ -1063,13 +1089,36 @@ def dashboard():
             st.caption("Read-only view. Portfolio configuration is available to the owner only.")
 
     with tabs[5]:
-        st.markdown('<div class="panel-tag">EVENT TAPE // LAST 200 SYSTEM EVENTS</div>', unsafe_allow_html=True)
+        st.markdown('<div class="panel-tag">EVENT TAPE // SCANNER + LOCAL PAPER ACTIVITY</div>', unsafe_allow_html=True)
+        scanner_activity = []
+        for symbol, pos in scanner_positions.items():
+            stage = "T4 TRAILING" if pos.get("trailing") else "T3 BOOKED" if pos.get("t3_done") else "T2 · STOP TO COST" if pos.get("t2_done") else "T1 · PARTIAL BOOKED" if pos.get("t1_done") else "ENTRY OPEN"
+            scanner_activity.append({
+                "SOURCE": "SCANNER", "TIME": pos.get("last_processed_bar") or pos.get("opened"),
+                "SYMBOL": symbol, "EVENT / STATUS": stage,
+                "PRICE ₹": quotes.get(symbol, {}).get("ltp") or pos.get("entry"),
+                "DETAIL": f"Entry ₹{float(pos.get('entry', 0)):,.2f} · Active SL ₹{float(pos.get('sl', pos.get('initial_sl', 0))):,.2f}",
+            })
+        for item in scanner_state.get("closed", [])[-200:]:
+            scanner_activity.append({
+                "SOURCE": "SCANNER", "TIME": item.get("closed"),
+                "SYMBOL": item.get("symbol"), "EVENT / STATUS": f"CLOSED · {item.get('result', 'EXIT')}",
+                "PRICE ₹": item.get("exit"),
+                "DETAIL": f"Entry ₹{float(item.get('entry', 0) or 0):,.2f} · P&L {float(item.get('pnl', 0) or 0)*100:+.2f}%",
+            })
+        if scanner_activity:
+            st.markdown("#### SCANNER POSITION ACTIVITY")
+            st.dataframe(pd.DataFrame(scanner_activity).sort_values("TIME", ascending=False, na_position="last"),
+                         use_container_width=True, hide_index=True, height=300)
         with db() as con:
             logs = con.execute("""SELECT e.event_time,t.symbol,e.event,e.qty,e.price,e.pnl
                 FROM events e JOIN trades t ON t.id=e.trade_id ORDER BY e.id DESC LIMIT 200""").fetchall()
         if logs:
-            st.dataframe(pd.DataFrame([dict(x) for x in logs]), use_container_width=True, hide_index=True, height=540)
+            st.markdown("#### LOCAL PAPER-TRADING EVENTS")
+            st.dataframe(pd.DataFrame([dict(x) for x in logs]), use_container_width=True, hide_index=True, height=300)
+        elif not scanner_activity:
+            st.caption("No scanner or local paper-trading activity recorded.")
         else:
-            st.caption("No paper-trading events recorded.")
+            st.caption("No separate local paper-trading events recorded.")
 
 dashboard()
