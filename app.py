@@ -365,6 +365,16 @@ st.info("The app reads watchlist.json from the scanner. Run monthly_ath.py first
 @st.fragment(run_every=60)
 def dashboard():
     cap, ticket = get_settings()
+    with st.sidebar:
+        st.markdown("### ◈ SYSTEM CONSOLE")
+        st.markdown('<span class="status-live">● DATA LINK ACTIVE</span>', unsafe_allow_html=True)
+        st.caption("NSE / IST · Monthly ATH engine")
+        st.metric("Paper capital", f"₹{cap:,.0f}")
+        st.metric("Ticket allocation", f"₹{ticket:,.0f}")
+        st.divider()
+        st.caption("Market quotes refresh every 60 seconds.")
+        st.caption("Paper processing cadence: 5 minutes.")
+        st.caption("Data: Yahoo Finance 1-minute candles.")
     watchlist = get_watchlist()
     trades = load_trades()
     open_trades = [t for t in trades if t["status"] == "OPEN"]
@@ -436,7 +446,10 @@ def dashboard():
                     get_live_quotes.clear()
                     st.rerun()
                 st.caption("Simulation only · No broker connection")
-        if run_now or auto_paper:
+        last_auto = float(st.session_state.get("last_auto_process", 0))
+        auto_due = auto_paper and (datetime.now().timestamp() - last_auto >= 300)
+        if run_now or auto_due:
+            st.session_state["last_auto_process"] = datetime.now().timestamp()
             messages = []
             current = load_trades("OPEN")
             for trade in current:
@@ -529,7 +542,10 @@ def dashboard():
                 "DAY %": q.get("change_pct"), "DAY HIGH": q.get("day_high"),
                 "DAY LOW": q.get("day_low"), "TRIGGER ₹": trigger,
                 "TO TRIGGER %": distance, "ATH LEVEL ₹": item.get("level"),
+                "MONTHLY SMA20": item.get("sma20"), "MONTHLY SMA10": item.get("sma10"),
+                "VOL RATIO": item.get("vol_ratio"), "RS NIFTY %": (float(item.get("rs", 0) or 0) * 100),
                 "SCORE": item.get("static_score"), "SETUP MONTH": item.get("setup_month"),
+                "QUOTE TIME": q.get("time"),
             })
         if rows:
             st.dataframe(pd.DataFrame(rows).sort_values("SCORE", ascending=False, na_position="last"),
