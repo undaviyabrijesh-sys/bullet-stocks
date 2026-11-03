@@ -9,6 +9,7 @@ import math
 import sqlite3
 import os
 import hmac
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -20,6 +21,7 @@ import yfinance as yf
 
 DB_PATH = Path("paper_portfolio.db")
 WATCH_FILE = Path("watchlist.json")
+SCANNER_STATE_URL = "https://raw.githubusercontent.com/undaviyabrijesh-sys/bullet-stocks/main/state.json"
 IST = "Asia/Kolkata"
 
 def configured_admin_password():
@@ -253,6 +255,62 @@ def get_watchlist():
         return data.get("items", [])
     except Exception:
         return []
+
+@st.cache_data(ttl=30, show_spinner=False)
+def get_scanner_state():
+    """Read the scanner's authoritative positions, updated by GitHub Actions."""
+    try:
+        req = urllib.request.Request(
+            SCANNER_STATE_URL,
+            headers={"User-Agent": "Salty-Trades-Dashboard/1.0", "Cache-Control": "no-cache"},
+        )
+        with urllib.request.urlopen(req, timeout=8) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+            if isinstance(payload, dict):
+                return payload
+    except Exception:
+        pass
+    try:
+        path = Path("state.json")
+        if path.exists():
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                return payload
+    except Exception:
+        pass
+    return {}
+
+
+def scanner_position_rows(positions, quotes):
+    """Create display-only rows from scanner state; never writes to the local paper DB."""
+    rows = []
+    for symbol, pos in sorted(positions.items()):
+        entry = float(pos.get("entry", 0) or 0)
+        if entry <= 0:
+            continue
+        quote = quotes.get(symbol, {})
+        ltp = quote.get("ltp")
+        remaining = float(pos.get("remaining_fraction", 1.0) or 0)
+        booked = float(pos.get("realised_pnl_fraction", 0) or 0)
+        stage = (
+            "T4 TRAIL" if pos.get("trailing") else
+            "T3 BOOKED" if pos.get("t3_done") else
+            "T2 · COST SL" if pos.get("t2_done") else
+            "T1 BOOKED" if pos.get("t1_done") else "INITIAL"
+        )
+        rows.append({
+            "SYMBOL": symbol,
+            "ENTRY ₹": entry,
+            "LTP ₹": ltp,
+            "MOVE %": ((float(ltp) / entry - 1) * 100) if ltp else None,
+            "ACTIVE SL ₹": float(pos.get("sl", pos.get("initial_sl", 0)) or 0),
+            "REMAINING %": remaining * 100,
+            "BOOKED RETURN %": booked * 100,
+            "STAGE": stage,
+            "OPENED": str(pos.get("opened", ""))[:19],
+            "LAST PROCESSED BAR": str(pos.get("last_processed_bar", ""))[:19],
+        })
+    return rows
 
 
 def market_snapshot(symbol, include_monthly=True):
@@ -643,10 +701,13 @@ def dashboard():
         st.caption("Paper processing cadence: 5 minutes.")
         st.caption("Data: Yahoo Finance 1-minute candles.")
     watchlist = get_watchlist()
+    scanner_state = get_scanner_state()
+    scanner_positions = scanner_state.get("positions", {}) if isinstance(scanner_state.get("positions", {}), dict) else {}
     trades = load_trades()
     open_trades = [t for t in trades if t["status"] == "OPEN"]
-    symbols = [x.get("symbol") for x in watchlist] + [t["symbol"] for t in open_trades]
-    quotes = get_live_quotes(symbols)
+    symbols = [x.get("symbol") for x in watchlist] + [t["symbol"] for t in open_trades] + list(scanner_positions)
+    quotes = get_live_quotes(sorted(set(symbols)))
+    scanner_rows = scanner_position_rows(scanner_positions, quotes)
 
     # Use fresh quotes for displayed equity even when paper processing is paused.
     display_trades = [dict(t) for t in trades]
@@ -684,7 +745,11 @@ def dashboard():
         with left:
             with st.container(border=True):
                 st.markdown('<div class="panel-tag">01 // OPEN POSITION MONITOR</div>', unsafe_allow_html=True)
-                if open_trades:
+                if scanner_rows:
+                    st.dataframe(pd.DataFrame(scanner_rows), use_container_width=True, hide_index=True)
+                    st.caption("Authoritative strategy entries from the scanner state used by Discord alerts. Last processed: " +
+                               max((r["LAST PROCESSED BAR"] for r in scanner_rows), default="—"))
+                elif open_trades:
                     rows = []
                     for t in open_trades:
                         q = quotes.get(t["symbol"], {})
@@ -699,7 +764,7 @@ def dashboard():
                         })
                     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
                 else:
-                    st.info("No active paper positions. New entries appear when a watchlist trigger is crossed.")
+                    st.info("No scanner-managed entries yet. A Discord trigger alert should appear here after the scanner saves state.json.")
         with right:
             with st.container(border=True):
                 st.markdown('<div class="panel-tag">02 // EXECUTION CONTROL</div>', unsafe_allow_html=True)
@@ -831,7 +896,11 @@ def dashboard():
 
     with tabs[2]:
         st.markdown('<div class="panel-tag">POSITION MATRIX // ENTRY · MTM · RISK · EXIT LADDER</div>', unsafe_allow_html=True)
-        if open_trades:
+        if scanner_positions:
+            st.markdown("#### SCANNER-RECORDED ENTRIES · LIVE STATE")
+            st.dataframe(pd.DataFrame(scanner_rows), use_container_width=True, hide_index=True)
+            st.caption("These positions are written by monthly_ath.py and are the same positions behind the scanner's Discord entry alerts.")
+        elif open_trades:
             rows = []
             for t in open_trades:
                 q = quotes.get(t["symbol"], {})
@@ -848,7 +917,7 @@ def dashboard():
                 })
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         else:
-            st.info("No open paper positions.")
+            st.info("No open scanner or local paper positions.")
         st.markdown('<div class="panel-tag">CLOSED POSITIONS</div>', unsafe_allow_html=True)
         if closed_trades:
             st.dataframe(pd.DataFrame([{
@@ -863,8 +932,9 @@ def dashboard():
         st.markdown('<div class="panel-tag">CHART LAB // MULTI-TIMEFRAME PRICE ACTION</div>', unsafe_allow_html=True)
         st.caption("Candles, volume and Nilesh Trio strategy levels. Select any scanner candidate or paper position.")
         trade_by_symbol = {t["symbol"]: t for t in trades}
+        scanner_trade_by_symbol = {symbol: pos for symbol, pos in scanner_positions.items()}
         item_by_symbol = {str(x.get("symbol", "")): x for x in watchlist}
-        chart_symbols = sorted(set(item_by_symbol) | set(trade_by_symbol))
+        chart_symbols = sorted(set(item_by_symbol) | set(trade_by_symbol) | set(scanner_trade_by_symbol))
         if chart_symbols:
             preferred = next((t["symbol"] for t in open_trades), chart_symbols[0])
             controls = st.columns([1.35, 1, 1, 1])
@@ -888,7 +958,7 @@ def dashboard():
                     get_chart_history.clear()
                     st.rerun()
 
-            selected_trade = trade_by_symbol.get(selected_symbol)
+            selected_trade = trade_by_symbol.get(selected_symbol) or scanner_trade_by_symbol.get(selected_symbol)
             selected_item = item_by_symbol.get(selected_symbol, {})
             selected_quote = quotes.get(selected_symbol, {})
             levels = {
@@ -939,11 +1009,17 @@ def dashboard():
                     if level_rows:
                         st.dataframe(pd.DataFrame(level_rows), use_container_width=True, hide_index=True)
                     if selected_trade:
-                        st.write(
-                            f"Paper position: **{selected_trade['remaining_qty']} shares remaining** "
-                            f"· Entry ₹{selected_trade['entry']:,.2f} · "
-                            f"Stage: {'T4 TRAIL' if selected_trade.get('trailing') else 'T3' if selected_trade.get('t3_done') else 'T2' if selected_trade.get('t2_done') else 'T1' if selected_trade.get('t1_done') else 'INITIAL'}"
-                        )
+                        if "remaining_qty" in selected_trade:
+                            st.write(
+                                f"Local paper position: **{selected_trade['remaining_qty']} shares remaining** "
+                                f"· Entry ₹{selected_trade['entry']:,.2f}"
+                            )
+                        else:
+                            st.write(
+                                f"Scanner position: **{float(selected_trade.get('remaining_fraction', 1))*100:.0f}% remaining** "
+                                f"· Entry ₹{float(selected_trade['entry']):,.2f} · "
+                                f"Stage: {'T4 TRAIL' if selected_trade.get('trailing') else 'T3' if selected_trade.get('t3_done') else 'T2' if selected_trade.get('t2_done') else 'T1' if selected_trade.get('t1_done') else 'INITIAL'}"
+                            )
             else:
                 st.warning("No chart candles returned for this symbol/timeframe. Try another timeframe or refresh.")
         else:
