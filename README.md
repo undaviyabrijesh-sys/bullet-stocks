@@ -2,7 +2,17 @@
 
 Monthly ATH breakout scanner with Discord alerts and a Streamlit paper portfolio.
 
-## Paper portfolio dashboard
+## Cyber trading desk dashboard
+
+The Streamlit app now uses a cyberpunk multi-workspace layout:
+
+- **Command Center:** portfolio equity, cash, exposure, live open-position monitor and top signals.
+- **Market Scanner:** LTP, day change, day high/low, trigger distance, monthly ATH level, monthly SMA20/SMA10, volume ratio, relative strength and setup score.
+- **Positions:** entry, remaining quantity, MTM, active stop, and T1–T4 progress.
+- **Portfolio Risk:** deployed capital, risk to active stop and configurable capital/allocation.
+- **Activity Log:** timestamped paper entries, target bookings, stop exits and trailing-stop updates.
+
+Quotes are batch-fetched from Yahoo Finance 1-minute candles and cached briefly to reduce repeated requests. LTP is the latest available Yahoo 1-minute close, not a guaranteed real-time exchange tick. The dashboard refreshes quote panels every 60 seconds; automatic paper processing remains on a five-minute cadence and can be disabled.
 
 The dashboard is a simulation only. It does not connect to a broker or place real orders.
 
