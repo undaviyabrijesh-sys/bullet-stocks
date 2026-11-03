@@ -11,6 +11,8 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import streamlit as st
 import yfinance as yf
 
@@ -271,6 +273,105 @@ def get_live_quotes(symbols):
     return quotes
 
 
+@st.cache_data(ttl=90, show_spinner=False)
+def get_chart_history(symbol, period, interval):
+    """Fetch OHLCV history for the chart workspace."""
+    ticker = symbol if symbol.endswith(".NS") else symbol + ".NS"
+    try:
+        frame = yf.download(
+            ticker, period=period, interval=interval, auto_adjust=False,
+            prepost=False, progress=False, threads=False,
+        )
+        if frame is None or frame.empty:
+            return pd.DataFrame()
+        if isinstance(frame.columns, pd.MultiIndex):
+            # yfinance may return a one-ticker MultiIndex depending on its version.
+            frame.columns = frame.columns.get_level_values(0)
+        frame = frame.rename(columns={str(c).title(): str(c).title() for c in frame.columns})
+        needed = ["Open", "High", "Low", "Close"]
+        if not all(c in frame.columns for c in needed):
+            return pd.DataFrame()
+        keep = needed + (["Volume"] if "Volume" in frame.columns else [])
+        frame = frame[keep].dropna(subset=["Open", "High", "Low", "Close"]).copy()
+        frame.index = pd.to_datetime(frame.index)
+        if frame.index.tz is not None:
+            frame.index = frame.index.tz_convert(IST).tz_localize(None)
+        return frame
+    except Exception:
+        return pd.DataFrame()
+
+
+def build_price_chart(frame, symbol, levels, interval_label):
+    """Build a terminal-style candlestick + volume chart with strategy levels."""
+    rows = 2 if "Volume" in frame.columns else 1
+    heights = [0.76, 0.24] if rows == 2 else [1.0]
+    fig = make_subplots(
+        rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.035,
+        row_heights=heights,
+    )
+    fig.add_trace(go.Candlestick(
+        x=frame.index, open=frame["Open"], high=frame["High"],
+        low=frame["Low"], close=frame["Close"], name=symbol,
+        increasing_line_color="#00e5a8", decreasing_line_color="#ff5577",
+        increasing_fillcolor="#00b889", decreasing_fillcolor="#d94365",
+    ), row=1, col=1)
+    if rows == 2:
+        volume_colors = [
+            "rgba(0,229,168,.48)" if c >= o else "rgba(255,85,119,.48)"
+            for o, c in zip(frame["Open"], frame["Close"])
+        ]
+        fig.add_trace(go.Bar(
+            x=frame.index, y=frame["Volume"], name="Volume",
+            marker_color=volume_colors, hovertemplate="Volume: %{y:,.0f}<extra></extra>",
+        ), row=2, col=1)
+
+    palette = {
+        "LTP": "#f5f7ff", "TRIGGER": "#00f5d4", "ENTRY": "#39a0ff",
+        "INITIAL SL": "#ff5577", "ACTIVE SL": "#ff9f43",
+        "T1": "#b7f34a", "T2": "#c4a7ff", "T3": "#f5c451",
+        "T4": "#ff80bf", "MONTHLY SMA20": "#7aa2ff",
+        "MONTHLY SMA10": "#a78bfa", "ATH LEVEL": "#8ca4b8",
+    }
+    for label, value in levels.items():
+        if value is None:
+            continue
+        try:
+            value = float(value)
+            if not math.isfinite(value) or value <= 0:
+                continue
+        except (TypeError, ValueError):
+            continue
+        color = palette.get(label, "#8ca4b8")
+        dash = "solid" if label in ("LTP", "ACTIVE SL") else "dot" if "SMA" in label else "dash"
+        fig.add_hline(
+            y=value, line_color=color, line_width=1.25, line_dash=dash,
+            annotation_text=f"{label}  ₹{value:,.2f}",
+            annotation_position="right", annotation_font_color=color,
+            annotation_font_size=10, row=1, col=1,
+        )
+
+    fig.update_layout(
+        template="plotly_dark", height=660 if rows == 2 else 540,
+        paper_bgcolor="rgba(5,10,18,0)", plot_bgcolor="rgba(7,14,24,.92)",
+        margin=dict(l=12, r=115, t=38, b=12),
+        title=dict(text=f"{symbol}  //  {interval_label} PRICE MATRIX", x=0.015,
+                   font=dict(family="Orbitron, monospace", size=14, color="#dffaff")),
+        font=dict(family="IBM Plex Mono, monospace", color="#9db3c5", size=10),
+        xaxis_rangeslider_visible=False, hovermode="x unified",
+        legend=dict(orientation="h", y=1.02, x=0.01),
+        showlegend=False,
+    )
+    fig.update_xaxes(
+        showgrid=True, gridcolor="rgba(67,103,128,.16)",
+        zeroline=False, showspikes=True, spikemode="across",
+        spikesnap="cursor", spikethickness=1, spikecolor="#00f5d4",
+    )
+    fig.update_yaxes(showgrid=True, gridcolor="rgba(67,103,128,.16)", zeroline=False, side="right", row=1, col=1)
+    if rows == 2:
+        fig.update_yaxes(showgrid=False, row=2, col=1, side="right")
+    return fig
+
+
 def event(con, trade_id, name, qty, price, pnl):
     con.execute(
         "INSERT INTO events(trade_id,event_time,event,qty,price,pnl) VALUES(?,?,?,?,?,?)",
@@ -444,7 +545,7 @@ def dashboard():
     top[5].metric("Watchlist", len(watchlist))
     st.caption(f"Quote source: Yahoo Finance 1-minute candles · Last available bar: {max((q['time'] for q in quotes.values()), default='—')} IST · Cached for 45 seconds")
 
-    tabs = st.tabs(["◈ COMMAND CENTER", "⌁ MARKET SCANNER", "▣ POSITIONS", "◉ PORTFOLIO RISK", "≋ ACTIVITY LOG"])
+    tabs = st.tabs(["◈ COMMAND CENTER", "⌁ MARKET SCANNER", "▣ POSITIONS", "⌗ CHART LAB", "◉ PORTFOLIO RISK", "≋ ACTIVITY LOG"])
 
     with tabs[0]:
         k = st.columns(5)
@@ -626,6 +727,89 @@ def dashboard():
             st.caption("No closed paper trades yet.")
 
     with tabs[3]:
+        st.markdown('<div class="panel-tag">CHART LAB // MULTI-TIMEFRAME PRICE ACTION</div>', unsafe_allow_html=True)
+        st.caption("Candles, volume and Nilesh Trio strategy levels. Select any scanner candidate or paper position.")
+        trade_by_symbol = {t["symbol"]: t for t in trades}
+        item_by_symbol = {str(x.get("symbol", "")): x for x in watchlist}
+        chart_symbols = sorted(set(item_by_symbol) | set(trade_by_symbol))
+        if chart_symbols:
+            preferred = next((t["symbol"] for t in open_trades), chart_symbols[0])
+            controls = st.columns([1.35, 1, 1, 1])
+            with controls[0]:
+                selected_symbol = st.selectbox(
+                    "INSTRUMENT", chart_symbols,
+                    index=chart_symbols.index(preferred), key="chart_symbol",
+                )
+            with controls[1]:
+                tf_label = st.selectbox("TIMEFRAME", ["5 MIN", "15 MIN", "DAILY", "MONTHLY"], index=2, key="chart_tf")
+            period, interval = {
+                "5 MIN": ("5d", "5m"),
+                "15 MIN": ("1mo", "15m"),
+                "DAILY": ("1y", "1d"),
+                "MONTHLY": ("5y", "1mo"),
+            }[tf_label]
+            with controls[2]:
+                st.metric("LAST QUOTE", f"₹{quotes.get(selected_symbol, {}).get('ltp', 0):,.2f}" if quotes.get(selected_symbol) else "—")
+            with controls[3]:
+                if st.button("↻ RELOAD CHART", use_container_width=True):
+                    get_chart_history.clear()
+                    st.rerun()
+
+            selected_trade = trade_by_symbol.get(selected_symbol)
+            selected_item = item_by_symbol.get(selected_symbol, {})
+            selected_quote = quotes.get(selected_symbol, {})
+            levels = {
+                "LTP": selected_quote.get("ltp"),
+                "TRIGGER": selected_item.get("trigger") or (selected_trade.get("trigger_price") if selected_trade else None),
+                "ATH LEVEL": selected_item.get("level"),
+                "MONTHLY SMA20": selected_item.get("sma20") or (selected_trade.get("monthly_sma20") if selected_trade else None),
+                "MONTHLY SMA10": selected_item.get("sma10") or (selected_trade.get("monthly_sma10") if selected_trade else None),
+            }
+            if selected_trade:
+                levels.update({
+                    "ENTRY": selected_trade.get("entry"),
+                    "INITIAL SL": selected_trade.get("initial_sl"),
+                    "ACTIVE SL": selected_trade.get("active_sl"),
+                    "T1": selected_trade.get("t1"),
+                    "T2": selected_trade.get("t2"),
+                    "T3": selected_trade.get("t3"),
+                    "T4": selected_trade.get("t4"),
+                })
+
+            chart_frame = get_chart_history(selected_symbol, period, interval)
+            if not chart_frame.empty:
+                chart_top = st.columns(4)
+                last_close = float(chart_frame["Close"].iloc[-1])
+                first_close = float(chart_frame["Close"].iloc[0])
+                chart_top[0].metric("CHART CLOSE", f"₹{last_close:,.2f}")
+                chart_top[1].metric("PERIOD MOVE", f"{(last_close/first_close-1)*100:+.2f}%" if first_close else "—")
+                chart_top[2].metric("PERIOD HIGH", f"₹{chart_frame['High'].max():,.2f}")
+                chart_top[3].metric("PERIOD LOW", f"₹{chart_frame['Low'].min():,.2f}")
+                st.plotly_chart(
+                    build_price_chart(chart_frame, selected_symbol, levels, tf_label),
+                    use_container_width=True, config={"displaylogo": False, "scrollZoom": True},
+                )
+                st.caption(
+                    f"Chart source: Yahoo Finance · {interval} candles · "
+                    f"{chart_frame.index[-1].strftime('%d %b %Y %H:%M')} last bar. "
+                    "Intraday history is subject to Yahoo Finance availability and may be delayed."
+                )
+                with st.expander("LEVELS / POSITION DETAILS", expanded=False):
+                    level_rows = [{"LEVEL": name, "PRICE ₹": value} for name, value in levels.items() if value is not None]
+                    if level_rows:
+                        st.dataframe(pd.DataFrame(level_rows), use_container_width=True, hide_index=True)
+                    if selected_trade:
+                        st.write(
+                            f"Paper position: **{selected_trade['remaining_qty']} shares remaining** "
+                            f"· Entry ₹{selected_trade['entry']:,.2f} · "
+                            f"Stage: {'T4 TRAIL' if selected_trade.get('trailing') else 'T3' if selected_trade.get('t3_done') else 'T2' if selected_trade.get('t2_done') else 'T1' if selected_trade.get('t1_done') else 'INITIAL'}"
+                        )
+            else:
+                st.warning("No chart candles returned for this symbol/timeframe. Try another timeframe or refresh.")
+        else:
+            st.info("No scanner symbols or paper positions are available yet. Run the scanner to populate Chart Lab.")
+
+    with tabs[4]:
         st.markdown('<div class="panel-tag">CAPITAL ALLOCATION // PORTFOLIO EXPOSURE</div>', unsafe_allow_html=True)
         risk_cols = st.columns(4)
         risk_cols[0].metric("Equity", f"₹{equity:,.0f}")
@@ -659,7 +843,7 @@ def dashboard():
                     st.success("Portfolio settings saved.")
                     st.rerun()
 
-    with tabs[4]:
+    with tabs[5]:
         st.markdown('<div class="panel-tag">EVENT TAPE // LAST 200 SYSTEM EVENTS</div>', unsafe_allow_html=True)
         with db() as con:
             logs = con.execute("""SELECT e.event_time,t.symbol,e.event,e.qty,e.price,e.pnl
