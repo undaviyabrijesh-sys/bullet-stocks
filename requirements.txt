@@ -1,3 +1,4 @@
 yfinance
 pandas
 requests
+streamlit>=1.37.0
