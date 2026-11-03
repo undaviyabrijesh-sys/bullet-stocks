@@ -80,7 +80,7 @@ def get_watchlist():
         return []
 
 
-def market_snapshot(symbol):
+def market_snapshot(symbol, include_monthly=True):
     ticker = symbol if symbol.endswith(".NS") else symbol + ".NS"
     price, source = None, "Unavailable"
     try:
@@ -108,7 +108,8 @@ def market_snapshot(symbol):
             pass
 
     sma20 = sma10 = None
-    try:
+    if include_monthly:
+      try:
         monthly = yf.download(ticker, period="5y", interval="1mo", progress=False, auto_adjust=False, threads=False)
         if monthly is not None and not monthly.empty:
             close = monthly["Close"]
@@ -124,7 +125,7 @@ def market_snapshot(symbol):
                     sma20 = float(completed.rolling(20).mean().iloc[-1])
                 if len(completed) >= 10:
                     sma10 = float(completed.rolling(10).mean().iloc[-1])
-    except Exception:
+      except Exception:
         pass
     return price, source, sma20, sma10
 
@@ -251,6 +252,7 @@ with st.sidebar:
             save_settings(new_capital, new_allocation)
             st.success("Settings saved.")
             st.rerun()
+    auto_paper = st.checkbox("Auto paper-trade signals (every 5 minutes)", value=True)
     st.divider()
     st.write("**Default setup**")
     st.write("Portfolio: ₹10,00,000")
@@ -259,7 +261,7 @@ with st.sidebar:
 
 st.info("The app reads watchlist.json from the scanner. Run monthly_ath.py first to refresh the eligible-stock watchlist.")
 
-@st.fragment(run_every=60)
+@st.fragment(run_every=300)
 def dashboard():
     cap, ticket = get_settings()
     watchlist = get_watchlist()
@@ -273,7 +275,7 @@ def dashboard():
     c4.metric("Realised P&L", f"₹{realised:,.0f}", delta=f"{realised/cap*100:.2f}%")
     c5.metric("Unrealised P&L", f"₹{unrealised:,.0f}", delta=f"{unrealised/cap*100:.2f}%")
 
-    if st.button("🔄 Refresh prices & process entries / targets", type="primary"):
+    if st.button("🔄 Process now", type="primary") or auto_paper:
         messages = []
         current = load_trades("OPEN")
         live_by_symbol = {}
@@ -284,8 +286,9 @@ def dashboard():
                 live_by_symbol[trade["symbol"]] = (px, src)
         current_open = {t["symbol"] for t in load_trades("OPEN")}
         already_traded = {t["symbol"] for t in load_trades()}
-        used_capital = sum(t["invested"] for t in load_trades())
-        available = cap - used_capital
+        all_trades = load_trades()
+        open_cost = sum(t["entry"] * t["remaining_qty"] for t in load_trades("OPEN"))
+        available = cap - open_cost + sum(t["realised_pnl"] for t in all_trades)
         candidates = sorted(watchlist, key=lambda x: float(x.get("static_score", 0)), reverse=True)
         for item in candidates:
             symbol = item.get("symbol")
@@ -293,10 +296,11 @@ def dashboard():
                 continue
             if available < ticket:
                 break
-            px, src, sma20, sma10 = market_snapshot(symbol)
+            px, src, _, _ = market_snapshot(symbol, include_monthly=False)
             trigger = float(item.get("trigger", float("inf")))
-            if px is None or px < trigger or px / trigger - 1 > 0.06:
+            if px is None or src != "1-minute Yahoo Finance" or px < trigger or px / trigger - 1 > 0.06:
                 continue
+            _, _, sma20, sma10 = market_snapshot(symbol, include_monthly=True)
             ok, msg = open_trade(item, px, min(ticket, available), sma20, sma10)
             if ok:
                 messages.append(f"🟢 {msg} ({src})")
@@ -306,9 +310,11 @@ def dashboard():
                 messages.append(f"⚠️ {symbol}: {msg}")
         for message in messages:
             st.success(message)
-        if not messages:
+        if messages:
+            for message in messages:
+                st.success(message)
+        elif not auto_paper:
             st.info("No new trigger crossed. Existing open positions were checked.")
-        st.rerun()
 
     st.subheader("Open paper positions")
     trades = load_trades()
