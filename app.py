@@ -7,6 +7,8 @@ No broker connection and no real orders are placed.
 import json
 import math
 import sqlite3
+import os
+import hmac
 from datetime import datetime
 from pathlib import Path
 
@@ -19,6 +21,37 @@ import yfinance as yf
 DB_PATH = Path("paper_portfolio.db")
 WATCH_FILE = Path("watchlist.json")
 IST = "Asia/Kolkata"
+
+def configured_admin_password():
+    """Owner password is supplied through Streamlit secrets or an environment variable."""
+    try:
+        value = st.secrets.get("SALTY_TRADES_ADMIN_PASSWORD", "")
+    except Exception:
+        value = ""
+    return str(value or os.environ.get("SALTY_TRADES_ADMIN_PASSWORD", "")).strip()
+
+
+def owner_mode_enabled():
+    password = configured_admin_password()
+    if not password:
+        return False
+    with st.sidebar:
+        st.divider()
+        st.markdown("### ◈ ACCESS CONTROL")
+        if st.session_state.get("salty_owner_mode"):
+            st.success("OWNER MODE · EDIT ACCESS")
+            if st.button("LOCK OWNER MODE", use_container_width=True):
+                st.session_state["salty_owner_mode"] = False
+                st.rerun()
+        else:
+            entered = st.text_input("OWNER ACCESS KEY", type="password", key="salty_owner_key")
+            if st.button("UNLOCK OWNER MODE", use_container_width=True):
+                if hmac.compare_digest(entered, password):
+                    st.session_state["salty_owner_mode"] = True
+                    st.rerun()
+                else:
+                    st.error("Incorrect access key.")
+    return bool(st.session_state.get("salty_owner_mode", False))
 
 st.set_page_config(page_title="SALTY TRADES // CYBER TRADING DESK", page_icon="🛰️", layout="wide", initial_sidebar_state="expanded")
 
@@ -569,19 +602,25 @@ init_db()
 st.title("🛰️ Salty Trades — Paper Portfolio")
 st.caption("Monthly ATH breakout strategy · Simulation only · No broker orders or real money transactions")
 
+admin_mode = owner_mode_enabled()
 capital, allocation = get_settings()
 with st.sidebar:
     st.subheader("Portfolio settings")
-    new_capital = st.number_input("Starting capital (₹)", min_value=10000.0, value=float(capital), step=50000.0)
-    new_allocation = st.number_input("Investment per entry (₹)", min_value=1000.0, value=float(allocation), step=5000.0)
-    if st.button("Save portfolio settings", use_container_width=True):
-        if new_allocation > new_capital:
-            st.error("Per-entry investment cannot exceed starting capital.")
-        else:
-            save_settings(new_capital, new_allocation)
-            st.success("Settings saved.")
-            st.rerun()
-    auto_paper = st.checkbox("Auto paper-trade signals (every 5 minutes)", value=True)
+    if admin_mode:
+        new_capital = st.number_input("Starting capital (₹)", min_value=10000.0, value=float(capital), step=50000.0)
+        new_allocation = st.number_input("Investment per entry (₹)", min_value=1000.0, value=float(allocation), step=5000.0)
+        if st.button("Save portfolio settings", use_container_width=True):
+            if new_allocation > new_capital:
+                st.error("Per-entry investment cannot exceed starting capital.")
+            else:
+                save_settings(new_capital, new_allocation)
+                st.success("Settings saved.")
+                st.rerun()
+        auto_paper = st.checkbox("Auto paper-trade signals (every 5 minutes)", value=True)
+    else:
+        st.info("PUBLIC VIEWER MODE · Read-only access")
+        st.caption("Portfolio settings and paper execution are locked.")
+        auto_paper = False
     st.divider()
     st.write("**Default setup**")
     st.write("Portfolio: ₹10,00,000")
@@ -668,14 +707,22 @@ def dashboard():
                 st.write(f"**Ticket size:** ₹{ticket:,.0f}")
                 st.write(f"**Available exposure:** ₹{max(0, cash):,.0f}")
                 st.write(f"**Paper positions:** {len(open_trades)}")
-                auto_paper = st.toggle("AUTO PAPER EXECUTION", value=True, key="auto_paper_exec")
-                run_now = st.button("⚡ RUN SCAN / PROCESS NOW", type="primary", use_container_width=True)
-                if st.button("↻ REFRESH QUOTES", use_container_width=True):
-                    get_live_quotes.clear()
-                    st.rerun()
+                if admin_mode:
+                    auto_paper = st.toggle("AUTO PAPER EXECUTION", value=True, key="auto_paper_exec")
+                    run_now = st.button("⚡ RUN SCAN / PROCESS NOW", type="primary", use_container_width=True)
+                    if st.button("↻ REFRESH QUOTES", use_container_width=True):
+                        get_live_quotes.clear()
+                        st.rerun()
+                else:
+                    auto_paper = False
+                    run_now = False
+                    st.caption("🔒 VIEW ONLY · Execution controls are disabled for public viewers.")
+                    if st.button("↻ REFRESH QUOTES", use_container_width=True):
+                        get_live_quotes.clear()
+                        st.rerun()
                 st.caption("Simulation only · No broker connection")
         last_auto = float(st.session_state.get("last_auto_process", 0))
-        auto_due = auto_paper and (datetime.now().timestamp() - last_auto >= 300)
+        auto_due = admin_mode and auto_paper and (datetime.now().timestamp() - last_auto >= 300)
         if run_now or auto_due:
             st.session_state["last_auto_process"] = datetime.now().timestamp()
             messages = []
@@ -924,17 +971,20 @@ def dashboard():
         else:
             st.info("No live position exposure to calculate.")
         st.markdown('<div class="panel-tag">PORTFOLIO SETTINGS</div>', unsafe_allow_html=True)
-        with st.form("portfolio_settings_form"):
-            new_capital = st.number_input("Starting capital ₹", min_value=10000.0, value=float(cap), step=50000.0)
-            new_allocation = st.number_input("Per-entry allocation ₹", min_value=1000.0, value=float(ticket), step=5000.0)
-            submitted = st.form_submit_button("SAVE CAPITAL SETTINGS")
-            if submitted:
-                if new_allocation > new_capital:
-                    st.error("Per-entry allocation cannot exceed starting capital.")
-                else:
-                    save_settings(new_capital, new_allocation)
-                    st.success("Portfolio settings saved.")
-                    st.rerun()
+        if admin_mode:
+            with st.form("portfolio_settings_form"):
+                new_capital = st.number_input("Starting capital ₹", min_value=10000.0, value=float(cap), step=50000.0)
+                new_allocation = st.number_input("Per-entry allocation ₹", min_value=1000.0, value=float(ticket), step=5000.0)
+                submitted = st.form_submit_button("SAVE CAPITAL SETTINGS")
+                if submitted:
+                    if new_allocation > new_capital:
+                        st.error("Per-entry allocation cannot exceed starting capital.")
+                    else:
+                        save_settings(new_capital, new_allocation)
+                        st.success("Portfolio settings saved.")
+                        st.rerun()
+        else:
+            st.caption("Read-only view. Portfolio configuration is available to the owner only.")
 
     with tabs[5]:
         st.markdown('<div class="panel-tag">EVENT TAPE // LAST 200 SYSTEM EVENTS</div>', unsafe_allow_html=True)
