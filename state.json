@@ -43,7 +43,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-03T10:45:00+05:30"
+   "last_processed_bar": "2026-11-03T10:46:00+05:30"
   },
   "KINGFA": {
    "entry": 6733.02,
@@ -65,7 +65,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-03T10:42:00+05:30"
+   "last_processed_bar": "2026-11-03T10:46:00+05:30"
   },
   "SONACOMS": {
    "entry": 853.74,
@@ -109,7 +109,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-03T10:45:00+05:30"
+   "last_processed_bar": "2026-11-03T10:46:00+05:30"
   },
   "SHREEPUSHK": {
    "entry": 635.7999877929688,
@@ -153,7 +153,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-03T10:45:00+05:30"
+   "last_processed_bar": "2026-11-03T10:46:00+05:30"
   }
  },
  "closed": [
