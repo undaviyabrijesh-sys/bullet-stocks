@@ -685,7 +685,7 @@ def main():
 
     # ---- 1. watchlist: full scan on the first run of the day ----
     mode = "Live check"
-    if FULL or wl.get("date") != day_key:
+    if FULL or wl.get("date") != day_key or wl.get("strategy_version") != 2:
         symbols = load_symbols()
         if not symbols:
             discord("⚠️ ATH scan: could not load the stock list.")
@@ -694,7 +694,7 @@ def main():
         if scanned == 0:
             discord("⚠️ ATH scan: no price data returned, skipping this run.")
             return
-        wl = {"date": day_key, "scanned": scanned, "items": items}
+        wl = {"date": day_key, "strategy_version": 2, "scanned": scanned, "items": items}
         save_json(WATCH_FILE, wl)
         mode = "Full scan"
     scanned = wl.get("scanned", 0)
@@ -724,7 +724,7 @@ def main():
             positions[sym] = migrate_position(old, smas.get("sma20"), smas.get("sma10"))
         evs, ev = evaluate_position(positions[sym], df, today, smas.get("sma10"))
         for item in evs:
-            milestone_alerts.append((sym, item))
+            milestone_alerts.append((sym, item, float(positions[sym]["entry"]), float(positions[sym].get("remaining_fraction", 1.0))))
         if ev is not None:
             newly_closed.append(close_position(sym, positions.pop(sym), ev))
     closed_hist = (closed_hist + newly_closed)[-KEEP_CLOSED:]
@@ -774,12 +774,11 @@ def main():
                  "T4": "T4 +100%: monthly SMA10 trailing activated",
                  "TRAIL": "Monthly SMA10 trailing stop raised",
                  "SL": "Active stop-loss hit"}
-        for sym, ev in milestone_alerts:
+        for sym, ev, event_entry, event_remaining in milestone_alerts:
             discord_post({"content": (
-                f"📣 **{sym} — {names.get(ev['type'], ev['type'])}**\n"
-                f"Entry {fmt(positions.get(sym, {}).get('entry', 0) or 0)} · "
-                f"Event price/SL {fmt(ev['price'])} · "
-                f"Remaining {positions.get(sym, {}).get('remaining_fraction', 0) * 100:.0f}%"
+                f"📣 **{sym} — {names.get(ev['type'], ev['type'])}**\\n"
+                f"Entry {fmt(event_entry)} · Event price/SL {fmt(ev['price'])} · "
+                f"Remaining {event_remaining * 100:.0f}%"
             )})
     if newly_closed:
         discord_post({
