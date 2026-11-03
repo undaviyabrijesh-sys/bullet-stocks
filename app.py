@@ -310,10 +310,7 @@ def dashboard():
                 messages.append(f"⚠️ {symbol}: {msg}")
         for message in messages:
             st.success(message)
-        if messages:
-            for message in messages:
-                st.success(message)
-        elif not auto_paper:
+        if not messages and not auto_paper:
             st.info("No new trigger crossed. Existing open positions were checked.")
 
     st.subheader("Open paper positions")
