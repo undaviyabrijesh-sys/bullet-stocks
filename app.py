@@ -48,6 +48,47 @@ hr { border-color:#1b3549; }
 .panel-tag { color:#00f5d4; font:600 11px 'IBM Plex Mono',monospace; letter-spacing:.13em; text-transform:uppercase; margin-bottom:8px; }
 .status-live { color:#00f5d4; font:600 11px 'IBM Plex Mono',monospace; }
 .small-muted { color:#8297aa; font:11px 'IBM Plex Mono',monospace; }
+
+/* Lightweight cyber-terminal motion: CSS-only, no extra dependencies. */
+@keyframes bullet-pulse {
+  0%,100% { opacity:1; text-shadow:0 0 5px rgba(0,245,212,.28); }
+  50% { opacity:.72; text-shadow:0 0 13px rgba(0,245,212,.8); }
+}
+@keyframes bullet-scan {
+  0% { transform:translateX(-110%); opacity:0; }
+  12% { opacity:.75; }
+  88% { opacity:.75; }
+  100% { transform:translateX(110%); opacity:0; }
+}
+@keyframes bullet-card-breathe {
+  0%,100% { box-shadow:0 0 14px rgba(0,245,212,.035), inset 0 0 12px rgba(0,245,212,.012); }
+  50% { box-shadow:0 0 21px rgba(0,245,212,.085), inset 0 0 16px rgba(0,245,212,.025); }
+}
+@keyframes bullet-rise {
+  from { opacity:0; transform:translateY(7px); }
+  to { opacity:1; transform:translateY(0); }
+}
+.cyber-banner { position:relative; overflow:hidden; animation:bullet-card-breathe 5s ease-in-out infinite; }
+.cyber-banner:after {
+  content:""; position:absolute; top:0; bottom:0; left:0; width:24%;
+  background:linear-gradient(90deg,transparent,rgba(0,245,212,.09),transparent);
+  transform:translateX(-110%); animation:bullet-scan 8s ease-in-out infinite;
+  pointer-events:none;
+}
+.status-live { animation:bullet-pulse 2.2s ease-in-out infinite; }
+[data-testid="stMetric"] { transition:transform .2s ease,border-color .2s ease,box-shadow .2s ease; animation:bullet-card-breathe 7s ease-in-out infinite; }
+[data-testid="stMetric"]:hover { transform:translateY(-2px); border-color:#28758a; box-shadow:0 0 20px rgba(0,245,212,.13); }
+.stButton>button { transition:transform .16s ease,box-shadow .2s ease,border-color .2s ease; }
+.stButton>button:hover { transform:translateY(-1px); }
+.panel-tag { position:relative; overflow:hidden; }
+.panel-tag:after {
+  content:""; display:inline-block; width:34px; height:1px; margin:0 0 3px 9px;
+  background:linear-gradient(90deg,#00f5d4,transparent); animation:bullet-pulse 2.8s ease-in-out infinite;
+}
+[data-testid="stDataFrame"] { animation:bullet-rise .35s ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  *, *:before, *:after { animation-duration:.01ms !important; animation-iteration-count:1 !important; scroll-behavior:auto !important; transition-duration:.01ms !important; }
+}
 </style>
 <div class="cyber-banner">
  <div class="cyber-kicker">BULLET SYSTEMS // NSE EQUITY INTELLIGENCE</div>
