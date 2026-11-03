@@ -349,7 +349,7 @@ def dashboard():
     st.subheader("Eligible watchlist")
     if watchlist:
         wl_rows = [{"Stock": x.get("symbol"), "Breakout trigger": x.get("trigger"),
-                    "Previous monthly high": x.get("level"), "Score": x.get("static_score"),
+                    "Scanner breakout level": x.get("level"), "Score": x.get("static_score"),
                     "Setup month": x.get("setup_month")} for x in watchlist]
         st.dataframe(pd.DataFrame(wl_rows), use_container_width=True, hide_index=True)
     else:
