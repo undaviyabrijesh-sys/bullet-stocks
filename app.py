@@ -34,7 +34,7 @@ st.markdown("""
     repeating-linear-gradient(90deg, rgba(57,160,255,.035) 0px, rgba(57,160,255,.035) 1px, transparent 1px, transparent 54px),
     linear-gradient(135deg,#070b12,#0b1724 48%,#060a12);
   background-size: auto, auto, 54px 54px, 54px 54px, 220% 220%;
-  animation: circuit-drift 24s linear infinite, ambient-shift 12s ease-in-out infinite;
+  animation: circuit-drift 24s linear infinite; /* Keep filters off the chart canvas for crisp rendering. */
   color:#d9e8f5;
 }
 header[data-testid="stHeader"] { background:rgba(5,9,15,.86); }
@@ -361,32 +361,35 @@ def get_chart_history(symbol, period, interval):
 
 
 def build_price_chart(frame, symbol, levels, interval_label):
-    """Build a terminal-style candlestick + volume chart with strategy levels."""
+    """Build a crisp, TradingView-inspired interactive candlestick workspace."""
     rows = 2 if "Volume" in frame.columns else 1
-    heights = [0.76, 0.24] if rows == 2 else [1.0]
+    heights = [0.82, 0.18] if rows == 2 else [1.0]
     fig = make_subplots(
-        rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.035,
+        rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.025,
         row_heights=heights,
     )
     fig.add_trace(go.Candlestick(
         x=frame.index, open=frame["Open"], high=frame["High"],
         low=frame["Low"], close=frame["Close"], name=symbol,
-        increasing_line_color="#00e5a8", decreasing_line_color="#ff5577",
-        increasing_fillcolor="#00b889", decreasing_fillcolor="#d94365",
+        increasing_line_color="#26a69a", decreasing_line_color="#ef5350",
+        increasing_fillcolor="#26a69a", decreasing_fillcolor="#ef5350",
+        whiskerwidth=0.7,
+        hovertemplate="<b>%{x|%d %b %Y %H:%M}</b><br>O %{open:.2f}  H %{high:.2f}<br>L %{low:.2f}  C %{close:.2f}<extra></extra>",
     ), row=1, col=1)
     if rows == 2:
         volume_colors = [
-            "rgba(0,229,168,.48)" if c >= o else "rgba(255,85,119,.48)"
+            "rgba(38,166,154,.72)" if c >= o else "rgba(239,83,80,.72)"
             for o, c in zip(frame["Open"], frame["Close"])
         ]
         fig.add_trace(go.Bar(
             x=frame.index, y=frame["Volume"], name="Volume",
-            marker_color=volume_colors, hovertemplate="Volume: %{y:,.0f}<extra></extra>",
+            marker_color=volume_colors, marker_line_width=0,
+            hovertemplate="Volume: %{y:,.0f}<extra></extra>",
         ), row=2, col=1)
 
     palette = {
-        "LTP": "#f5f7ff", "TRIGGER": "#00f5d4", "ENTRY": "#39a0ff",
-        "INITIAL SL": "#ff5577", "ACTIVE SL": "#ff9f43",
+        "LTP": "#f5f7ff", "TRIGGER": "#00d7c0", "ENTRY": "#42a5f5",
+        "INITIAL SL": "#ef5350", "ACTIVE SL": "#ff9800",
         "T1": "#b7f34a", "T2": "#c4a7ff", "T3": "#f5c451",
         "T4": "#ff80bf", "MONTHLY SMA20": "#7aa2ff",
         "MONTHLY SMA10": "#a78bfa", "ATH LEVEL": "#8ca4b8",
@@ -403,33 +406,57 @@ def build_price_chart(frame, symbol, levels, interval_label):
         color = palette.get(label, "#8ca4b8")
         dash = "solid" if label in ("LTP", "ACTIVE SL") else "dot" if "SMA" in label else "dash"
         fig.add_hline(
-            y=value, line_color=color, line_width=1.25, line_dash=dash,
+            y=value, line_color=color, line_width=1.15, line_dash=dash,
             annotation_text=f"{label}  ₹{value:,.2f}",
             annotation_position="right", annotation_font_color=color,
             annotation_font_size=10, row=1, col=1,
         )
 
     fig.update_layout(
-        template="plotly_dark", height=660 if rows == 2 else 540,
-        paper_bgcolor="rgba(5,10,18,0)", plot_bgcolor="rgba(7,14,24,.92)",
-        margin=dict(l=12, r=115, t=38, b=12),
-        title=dict(text=f"{symbol}  //  {interval_label} PRICE MATRIX", x=0.015,
-                   font=dict(family="Orbitron, monospace", size=14, color="#dffaff")),
-        font=dict(family="IBM Plex Mono, monospace", color="#9db3c5", size=10),
-        xaxis_rangeslider_visible=False, hovermode="x unified",
-        legend=dict(orientation="h", y=1.02, x=0.01),
+        template="plotly_dark", height=760 if rows == 2 else 650,
+        autosize=True,
+        paper_bgcolor="#0b1018", plot_bgcolor="#0b1018",
+        margin=dict(l=12, r=125, t=48, b=12),
+        title=dict(text=f"{symbol}  ·  {interval_label}  ·  NSE",
+                   x=0.012, y=0.985,
+                   font=dict(family="IBM Plex Mono, monospace", size=14, color="#dce6f1")),
+        font=dict(family="Arial, sans-serif", color="#aab7c4", size=12),
+        hovermode="x unified",
+        hoverlabel=dict(bgcolor="#111b28", bordercolor="#2b465d",
+                        font=dict(family="Arial, sans-serif", size=12, color="#e7f1fa")),
+        dragmode="pan",
         showlegend=False,
+        uirevision=f"{symbol}-{interval_label}",
     )
     fig.update_xaxes(
-        showgrid=True, gridcolor="rgba(67,103,128,.16)",
+        showgrid=True, gridcolor="rgba(120,140,160,.13)",
         zeroline=False, showspikes=True, spikemode="across",
-        spikesnap="cursor", spikethickness=1, spikecolor="#00f5d4",
+        spikesnap="cursor", spikethickness=1, spikecolor="#75899d",
+        tickfont=dict(size=11, color="#9aaaba"),
+        rangeslider=dict(visible=True, thickness=0.075, bgcolor="#111a25",
+                         bordercolor="#263746", borderwidth=1),
+        rangeselector=dict(
+            buttons=[
+                dict(count=1, label="1D", step="day", stepmode="backward"),
+                dict(count=5, label="5D", step="day", stepmode="backward"),
+                dict(count=1, label="1M", step="month", stepmode="backward"),
+                dict(count=3, label="3M", step="month", stepmode="backward"),
+                dict(count=6, label="6M", step="month", stepmode="backward"),
+                dict(count=1, label="1Y", step="year", stepmode="backward"),
+                dict(step="all", label="ALL"),
+            ],
+            x=0, y=1.12, bgcolor="#172433", activecolor="#087f8c",
+            bordercolor="#263746", font=dict(color="#d5e1eb", size=10),
+        ),
     )
-    fig.update_yaxes(showgrid=True, gridcolor="rgba(67,103,128,.16)", zeroline=False, side="right", row=1, col=1)
+    fig.update_yaxes(
+        showgrid=True, gridcolor="rgba(120,140,160,.13)",
+        zeroline=False, side="right", tickfont=dict(size=11, color="#9aaaba"),
+        fixedrange=False, row=1, col=1,
+    )
     if rows == 2:
         fig.update_yaxes(showgrid=False, row=2, col=1, side="right")
     return fig
-
 
 def event(con, trade_id, name, qty, price, pnl):
     con.execute(
@@ -846,7 +873,14 @@ def dashboard():
                 chart_top[3].metric("PERIOD LOW", f"₹{chart_frame['Low'].min():,.2f}")
                 st.plotly_chart(
                     build_price_chart(chart_frame, selected_symbol, levels, tf_label),
-                    use_container_width=True, config={"displaylogo": False, "scrollZoom": True},
+                    use_container_width=True,
+                    config={
+                        "displaylogo": False, "scrollZoom": True, "doubleClick": "reset",
+                        "responsive": True, "displayModeBar": True,
+                        "modeBarButtonsToAdd": ["drawline", "drawrect", "drawcircle", "eraseshape"],
+                        "toImageButtonOptions": {"format": "png", "filename": f"salty-trades-{selected_symbol}", "scale": 2},
+                    },
+                    theme=None,
                 )
                 st.caption(
                     f"Chart source: Yahoo Finance · {interval} candles · "
