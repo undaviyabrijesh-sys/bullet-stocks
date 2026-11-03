@@ -1,6 +1,11 @@
 name: ATH Monthly Alert 
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - monthly_ath.py
+      - .github/workflows/ath-alert.yml
   schedule:
     # NSE hours 9:15-15:30 IST = 03:45-10:00 UTC, Mon-Fri, every 30 min
     - cron: '45 3 * * 1-5'
