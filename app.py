@@ -18,7 +18,43 @@ DB_PATH = Path("paper_portfolio.db")
 WATCH_FILE = Path("watchlist.json")
 IST = "Asia/Kolkata"
 
-st.set_page_config(page_title="Bullet Stocks | Paper Portfolio", page_icon="📈", layout="wide")
+st.set_page_config(page_title="BULLET // CYBER TRADING DESK", page_icon="🛰️", layout="wide", initial_sidebar_state="expanded")
+
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Orbitron:wght@500;600;700;800&display=swap');
+:root { --neon:#00f5d4; --blue:#39a0ff; --violet:#a78bfa; --bg:#070b12; --panel:#0c1420; --muted:#8193a8; }
+.stApp { background: radial-gradient(ellipse at 12% 0%, #102333 0%, #080d16 42%, #05080e 100%); color:#d9e8f5; }
+header[data-testid="stHeader"] { background:rgba(5,9,15,.86); }
+[data-testid="stSidebar"] { background:linear-gradient(180deg,#0b1724,#080d15); border-right:1px solid #17354a; }
+[data-testid="stSidebar"] * { font-family:'IBM Plex Mono',monospace; }
+h1,h2,h3 { font-family:'Orbitron',sans-serif !important; letter-spacing:.08em; }
+p, label, span, div { }
+[data-testid="stMetric"] { background:linear-gradient(145deg,rgba(13,28,42,.96),rgba(7,15,25,.96)); border:1px solid #1a3b50; border-radius:10px; padding:14px 16px; box-shadow:0 0 18px rgba(0,245,212,.045); }
+[data-testid="stMetricLabel"] { color:#8da5b9 !important; font-family:'IBM Plex Mono',monospace; font-size:.72rem; letter-spacing:.09em; text-transform:uppercase; }
+[data-testid="stMetricValue"] { color:#e8fbff !important; font-family:'Orbitron',sans-serif; font-size:1.45rem; }
+[data-testid="stMetricDelta"] { font-family:'IBM Plex Mono',monospace; }
+.stButton>button { border:1px solid #00bfa8; background:linear-gradient(100deg,#063c42,#0b2635); color:#dffffa; font-family:'IBM Plex Mono',monospace; letter-spacing:.04em; border-radius:7px; }
+.stButton>button:hover { border-color:#00f5d4; color:#fff; box-shadow:0 0 16px rgba(0,245,212,.22); }
+button[data-baseweb="tab"] { font-family:'IBM Plex Mono',monospace; color:#8ca4b8; }
+button[data-baseweb="tab"][aria-selected="true"] { color:#00f5d4; }
+.stTabs [data-baseweb="tab-highlight"] { background:#00f5d4; }
+[data-testid="stDataFrame"] { border:1px solid #1a3b50; border-radius:9px; }
+hr { border-color:#1b3549; }
+.cyber-banner { border:1px solid #1c5664; border-left:4px solid #00f5d4; border-radius:9px; padding:16px 20px; background:linear-gradient(100deg,rgba(0,245,212,.09),rgba(15,30,49,.88) 42%,rgba(11,17,29,.94)); box-shadow:0 0 24px rgba(0,245,212,.06); margin:4px 0 18px 0; }
+.cyber-kicker { color:#00f5d4; font:600 10px 'IBM Plex Mono',monospace; letter-spacing:.2em; }
+.cyber-title { color:#e8fbff; font:800 25px 'Orbitron',sans-serif; letter-spacing:.1em; margin:4px 0; }
+.cyber-sub { color:#89a5b8; font:12px 'IBM Plex Mono',monospace; }
+.panel-tag { color:#00f5d4; font:600 11px 'IBM Plex Mono',monospace; letter-spacing:.13em; text-transform:uppercase; margin-bottom:8px; }
+.status-live { color:#00f5d4; font:600 11px 'IBM Plex Mono',monospace; }
+.small-muted { color:#8297aa; font:11px 'IBM Plex Mono',monospace; }
+</style>
+<div class="cyber-banner">
+ <div class="cyber-kicker">BULLET SYSTEMS // NSE EQUITY INTELLIGENCE</div>
+ <div class="cyber-title">CYBER TRADING DESK <span style="color:#00f5d4">◈</span></div>
+ <div class="cyber-sub">MONTHLY ATH ENGINE · LIVE QUOTES · PAPER EXECUTION SIMULATOR · IST</div>
+</div>
+""", unsafe_allow_html=True)
 
 
 def db():
@@ -48,6 +84,10 @@ def init_db():
             event_time TEXT NOT NULL, event TEXT NOT NULL, qty INTEGER DEFAULT 0,
             price REAL DEFAULT 0, pnl REAL DEFAULT 0
         )""")
+        # Safe schema migration for databases created by earlier app versions.
+        trade_columns = {row[1] for row in con.execute("PRAGMA table_info(trades)").fetchall()}
+        if "t4_done" not in trade_columns:
+            con.execute("ALTER TABLE trades ADD COLUMN t4_done INTEGER DEFAULT 0")
 
 
 def get_settings():
@@ -130,6 +170,66 @@ def market_snapshot(symbol, include_monthly=True):
     return price, source, sma20, sma10
 
 
+@st.cache_data(ttl=45, show_spinner=False)
+def get_live_quotes(symbols):
+    """Batch-fetch 1-minute LTP and session stats for the whole desk."""
+    symbols = sorted({str(s).replace(".NS", "") for s in symbols if s})
+    if not symbols:
+        return {}
+    tickers = [s + ".NS" for s in symbols]
+    try:
+        raw = yf.download(
+            tickers, period="5d", interval="1m", group_by="ticker",
+            auto_adjust=False, prepost=False, threads=True, progress=False,
+        )
+    except Exception:
+        return {}
+
+    quotes = {}
+    today = pd.Timestamp.now(tz=IST).date()
+    for symbol, ticker in zip(symbols, tickers):
+        try:
+            if isinstance(raw.columns, pd.MultiIndex):
+                if ticker in raw.columns.get_level_values(0):
+                    frame = raw[ticker].copy()
+                elif ticker in raw.columns.get_level_values(1):
+                    frame = raw.xs(ticker, axis=1, level=1).copy()
+                else:
+                    continue
+            else:
+                if len(symbols) != 1:
+                    continue
+                frame = raw.copy()
+            frame = frame.dropna(subset=["Close"])
+            if frame.empty:
+                continue
+            idx = frame.index
+            if idx.tz is None:
+                idx = idx.tz_localize("UTC").tz_convert(IST)
+            else:
+                idx = idx.tz_convert(IST)
+            frame.index = idx
+            current = frame[frame.index.date == today]
+            if current.empty:
+                current = frame
+            ltp = float(current["Close"].dropna().iloc[-1])
+            previous_days = frame[frame.index.date < today]
+            previous_close = float(previous_days["Close"].dropna().iloc[-1]) if not previous_days.empty else None
+            day_high = float(current["High"].max()) if "High" in current else ltp
+            day_low = float(current["Low"].min()) if "Low" in current else ltp
+            volume = int(current["Volume"].fillna(0).sum()) if "Volume" in current else 0
+            change = ((ltp / previous_close) - 1) * 100 if previous_close else None
+            quotes[symbol] = {
+                "ltp": ltp, "previous_close": previous_close, "change_pct": change,
+                "day_high": day_high, "day_low": day_low, "volume": volume,
+                "time": frame.index[-1].strftime("%H:%M:%S"),
+                "source": "Yahoo Finance · 1m",
+            }
+        except Exception:
+            continue
+    return quotes
+
+
 def event(con, trade_id, name, qty, price, pnl):
     con.execute(
         "INSERT INTO events(trade_id,event_time,event,qty,price,pnl) VALUES(?,?,?,?,?,?)",
@@ -179,8 +279,9 @@ def update_trade(trade, price, sma10):
             updates["t3_done"] = 1
 
         trailing = int(t["trailing"])
-        if price >= t["t4"]:
+        if price >= t["t4"] and not t.get("t4_done", 0):
             trailing = 1
+            updates["t4_done"] = 1
             event(con, t["id"], "T4 +100%: monthly SMA10 trailing activated", 0, t["t4"], 0)
         if trailing and sma10 is not None and sma10 > active_sl:
             active_sl = float(sma10)
@@ -188,10 +289,10 @@ def update_trade(trade, price, sma10):
 
         status = "CLOSED" if qty <= 0 else "OPEN"
         con.execute("""UPDATE trades SET remaining_qty=?, realised_pnl=?, active_sl=?,
-            t1_done=?, t2_done=?, t3_done=?, trailing=?, last_price=?, status=? WHERE id=?""",
+            t1_done=?, t2_done=?, t3_done=?, t4_done=?, trailing=?, last_price=?, status=? WHERE id=?""",
             (qty, realised, active_sl, updates.get("t1_done", t["t1_done"]),
              updates.get("t2_done", t["t2_done"]), updates.get("t3_done", t["t3_done"]),
-             trailing, price, status, t["id"]))
+             updates.get("t4_done", t.get("t4_done", 0)), trailing, price, status, t["id"]))
         if status == "CLOSED":
             event(con, t["id"], "POSITION FULLY BOOKED", 0, price, 0)
 
@@ -261,107 +362,254 @@ with st.sidebar:
 
 st.info("The app reads watchlist.json from the scanner. Run monthly_ath.py first to refresh the eligible-stock watchlist.")
 
-@st.fragment(run_every=300)
+@st.fragment(run_every=60)
 def dashboard():
     cap, ticket = get_settings()
     watchlist = get_watchlist()
     trades = load_trades()
-    open_trades, closed_trades, cash, equity, realised, unrealised = portfolio_metrics(cap, trades)
-
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Portfolio equity", f"₹{equity:,.0f}")
-    c2.metric("Available cash", f"₹{cash:,.0f}")
-    c3.metric("Invested in open shares", f"₹{sum(t['entry']*t['remaining_qty'] for t in open_trades):,.0f}")
-    c4.metric("Realised P&L", f"₹{realised:,.0f}", delta=f"{realised/cap*100:.2f}%")
-    c5.metric("Unrealised P&L", f"₹{unrealised:,.0f}", delta=f"{unrealised/cap*100:.2f}%")
-
-    if st.button("🔄 Process now", type="primary") or auto_paper:
-        messages = []
-        current = load_trades("OPEN")
-        live_by_symbol = {}
-        for trade in current:
-            px, src, _, sma10 = market_snapshot(trade["symbol"])
-            if px is not None:
-                update_trade(trade, px, sma10)
-                live_by_symbol[trade["symbol"]] = (px, src)
-        current_open = {t["symbol"] for t in load_trades("OPEN")}
-        already_traded = {t["symbol"] for t in load_trades()}
-        all_trades = load_trades()
-        open_cost = sum(t["entry"] * t["remaining_qty"] for t in load_trades("OPEN"))
-        available = cap - open_cost + sum(t["realised_pnl"] for t in all_trades)
-        candidates = sorted(watchlist, key=lambda x: float(x.get("static_score", 0)), reverse=True)
-        for item in candidates:
-            symbol = item.get("symbol")
-            if not symbol or symbol in current_open or symbol in already_traded:
-                continue
-            if available < ticket:
-                break
-            px, src, _, _ = market_snapshot(symbol, include_monthly=False)
-            trigger = float(item.get("trigger", float("inf")))
-            if px is None or src != "1-minute Yahoo Finance" or px < trigger or px / trigger - 1 > 0.06:
-                continue
-            _, _, sma20, sma10 = market_snapshot(symbol, include_monthly=True)
-            ok, msg = open_trade(item, px, min(ticket, available), sma20, sma10)
-            if ok:
-                messages.append(f"🟢 {msg} ({src})")
-                available -= math.floor(min(ticket, available) / px) * px
-                already_traded.add(symbol)
-            elif "Monthly SMA20" in msg:
-                messages.append(f"⚠️ {symbol}: {msg}")
-        for message in messages:
-            st.success(message)
-        if not messages and not auto_paper:
-            st.info("No new trigger crossed. Existing open positions were checked.")
-
-    st.subheader("Open paper positions")
-    trades = load_trades()
     open_trades = [t for t in trades if t["status"] == "OPEN"]
-    if open_trades:
+    symbols = [x.get("symbol") for x in watchlist] + [t["symbol"] for t in open_trades]
+    quotes = get_live_quotes(symbols)
+
+    # Use fresh quotes for displayed equity even when paper processing is paused.
+    display_trades = [dict(t) for t in trades]
+    for trade in display_trades:
+        q = quotes.get(trade["symbol"])
+        if q:
+            trade["last_price"] = q["ltp"]
+    open_trades, closed_trades, cash, equity, realised, unrealised = portfolio_metrics(cap, display_trades)
+    open_cost = sum(t["entry"] * t["remaining_qty"] for t in open_trades)
+    exposure_pct = (open_cost / equity * 100) if equity else 0.0
+    day_moves = [q["change_pct"] for q in quotes.values() if q.get("change_pct") is not None]
+    advancers = sum(1 for x in day_moves if x > 0)
+    decliners = sum(1 for x in day_moves if x < 0)
+
+    top = st.columns([1.2, 1, 1, 1, 1, 1])
+    top[0].markdown('<div class="status-live">● FEED STATUS<br><b>QUOTE STREAM</b></div>', unsafe_allow_html=True)
+    top[1].metric("NSE symbols", f"{len(quotes)} / {len(set(symbols))}")
+    top[2].metric("Advancers", advancers)
+    top[3].metric("Decliners", decliners)
+    top[4].metric("Open positions", len(open_trades))
+    top[5].metric("Watchlist", len(watchlist))
+    st.caption(f"Quote source: Yahoo Finance 1-minute candles · Last available bar: {max((q['time'] for q in quotes.values()), default='—')} IST · Cached for 45 seconds")
+
+    tabs = st.tabs(["◈ COMMAND CENTER", "⌁ MARKET SCANNER", "▣ POSITIONS", "◉ PORTFOLIO RISK", "≋ ACTIVITY LOG"])
+
+    with tabs[0]:
+        k = st.columns(5)
+        k[0].metric("Portfolio equity", f"₹{equity:,.0f}", f"{(equity/cap-1)*100:+.2f}%" if cap else None)
+        k[1].metric("Available cash", f"₹{cash:,.0f}")
+        k[2].metric("Open exposure", f"₹{open_cost:,.0f}", f"{exposure_pct:.1f}% of equity")
+        k[3].metric("Realised P&L", f"₹{realised:,.0f}", f"{realised/cap*100:+.2f}%" if cap else None)
+        k[4].metric("Unrealised P&L", f"₹{unrealised:,.0f}", f"{unrealised/cap*100:+.2f}%" if cap else None)
+
+        left, right = st.columns([1.55, 1])
+        with left:
+            with st.container(border=True):
+                st.markdown('<div class="panel-tag">01 // OPEN POSITION MONITOR</div>', unsafe_allow_html=True)
+                if open_trades:
+                    rows = []
+                    for t in open_trades:
+                        q = quotes.get(t["symbol"], {})
+                        last = q.get("ltp", t.get("last_price") or t["entry"])
+                        pnl = (last - t["entry"]) * t["remaining_qty"]
+                        rows.append({
+                            "SYMBOL": t["symbol"], "LTP": last,
+                            "CHG %": q.get("change_pct"), "ENTRY": t["entry"],
+                            "QTY LEFT": t["remaining_qty"], "MTM ₹": pnl,
+                            "ACTIVE SL": t["active_sl"],
+                            "STAGE": "T4 TRAIL" if t["trailing"] else "T3" if t["t3_done"] else "T2" if t["t2_done"] else "T1" if t["t1_done"] else "INITIAL",
+                        })
+                    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+                else:
+                    st.info("No active paper positions. New entries appear when a watchlist trigger is crossed.")
+        with right:
+            with st.container(border=True):
+                st.markdown('<div class="panel-tag">02 // EXECUTION CONTROL</div>', unsafe_allow_html=True)
+                st.write(f"**Capital:** ₹{cap:,.0f}")
+                st.write(f"**Ticket size:** ₹{ticket:,.0f}")
+                st.write(f"**Available exposure:** ₹{max(0, cash):,.0f}")
+                st.write(f"**Paper positions:** {len(open_trades)}")
+                auto_paper = st.toggle("AUTO PAPER EXECUTION", value=True, key="auto_paper_exec")
+                run_now = st.button("⚡ RUN SCAN / PROCESS NOW", type="primary", use_container_width=True)
+                if st.button("↻ REFRESH QUOTES", use_container_width=True):
+                    get_live_quotes.clear()
+                    st.rerun()
+                st.caption("Simulation only · No broker connection")
+        if run_now or auto_paper:
+            messages = []
+            current = load_trades("OPEN")
+            for trade in current:
+                q = quotes.get(trade["symbol"])
+                if q:
+                    _, _, _, sma10 = market_snapshot(trade["symbol"], include_monthly=True)
+                    update_trade(trade, q["ltp"], sma10)
+            current_open = {t["symbol"] for t in load_trades("OPEN")}
+            already_traded = {t["symbol"] for t in load_trades()}
+            all_trades = load_trades()
+            invested_now = sum(t["entry"] * t["remaining_qty"] for t in load_trades("OPEN"))
+            available = cap - invested_now + sum(t["realised_pnl"] for t in all_trades)
+            candidates = sorted(watchlist, key=lambda x: float(x.get("static_score", 0)), reverse=True)
+            for item in candidates:
+                symbol = item.get("symbol")
+                if not symbol or symbol in current_open or symbol in already_traded or available < ticket:
+                    continue
+                q = quotes.get(symbol)
+                if not q:
+                    continue
+                px = q["ltp"]
+                trigger = float(item.get("trigger", float("inf")))
+                if px < trigger or px / trigger - 1 > 0.06:
+                    continue
+                _, _, sma20, sma10 = market_snapshot(symbol, include_monthly=True)
+                ok, msg = open_trade(item, px, min(ticket, available), sma20, sma10)
+                if ok:
+                    messages.append(f"🟢 {msg}")
+                    available -= math.floor(min(ticket, available) / px) * px
+                    already_traded.add(symbol)
+                    current_open.add(symbol)
+                elif "Monthly SMA20" in msg:
+                    messages.append(f"⚠️ {symbol}: {msg}")
+            for msg in messages:
+                st.success(msg)
+            if run_now and not messages:
+                st.info("No new trigger crossed. Open positions were checked.")
+
+        with st.container(border=True):
+            st.markdown('<div class="panel-tag">03 // TOP SIGNALS NEAR TRIGGER</div>', unsafe_allow_html=True)
+            near = []
+            for item in sorted(watchlist, key=lambda x: float(x.get("static_score", 0)), reverse=True):
+                symbol = item.get("symbol")
+                q = quotes.get(symbol, {})
+                if not q:
+                    continue
+                trigger = float(item.get("trigger", 0) or 0)
+                ltp = q["ltp"]
+                gap = ((trigger / ltp) - 1) * 100 if ltp else None
+                near.append({"SYMBOL": symbol, "LTP": ltp, "TRIGGER": trigger,
+                             "TO TRIGGER %": gap, "SCORE": item.get("static_score"),
+                             "DAY %": q.get("change_pct")})
+            if near:
+                st.dataframe(pd.DataFrame(near).head(8), use_container_width=True, hide_index=True)
+            else:
+                st.caption("Waiting for market quotes or scanner watchlist.")
+
+    with tabs[1]:
+        st.markdown('<div class="panel-tag">LIVE MARKET RADAR // ALL ELIGIBLE MONTHLY ATH SETUPS</div>', unsafe_allow_html=True)
+        st.caption("LTP and intraday statistics refresh automatically. Trigger and setup levels come from the latest scanner watchlist.")
+        search = st.text_input("⌕ FILTER SYMBOL", placeholder="Type a stock symbol...", key="scanner_filter").strip().upper()
+        status_filter = st.selectbox("SIGNAL FILTER", ["ALL", "TRIGGER CROSSED", "WITHIN 2%", "WITHIN 5%"], index=0)
         rows = []
-        for t in open_trades:
-            last = t["last_price"] or t["entry"]
+        for item in watchlist:
+            symbol = str(item.get("symbol", ""))
+            if search and search not in symbol:
+                continue
+            q = quotes.get(symbol, {})
+            ltp = q.get("ltp")
+            trigger = float(item.get("trigger", 0) or 0)
+            distance = ((trigger / ltp) - 1) * 100 if ltp and trigger else None
+            if distance is None:
+                signal = "NO QUOTE"
+            elif distance <= 0:
+                signal = "TRIGGER CROSSED"
+            elif distance <= 2:
+                signal = "WITHIN 2%"
+            elif distance <= 5:
+                signal = "WITHIN 5%"
+            else:
+                signal = "WATCH"
+            if status_filter == "TRIGGER CROSSED" and signal != status_filter:
+                continue
+            if status_filter == "WITHIN 2%" and signal not in ("TRIGGER CROSSED", "WITHIN 2%"):
+                continue
+            if status_filter == "WITHIN 5%" and signal not in ("TRIGGER CROSSED", "WITHIN 2%", "WITHIN 5%"):
+                continue
             rows.append({
-                "Stock": t["symbol"], "Entry date": t["opened_at"][:10],
-                "Entry": t["entry"], "Last price": last, "Remaining qty": t["remaining_qty"],
-                "Invested": t["entry"]*t["remaining_qty"],
-                "Unrealised P&L": (last-t["entry"])*t["remaining_qty"],
-                "Initial SL": t["initial_sl"], "Active SL": t["active_sl"],
-                "T1 (+25%)": "Done" if t["t1_done"] else t["t1"],
-                "T2 (+40%)": "Done" if t["t2_done"] else t["t2"],
-                "T3 (+50%)": "Done" if t["t3_done"] else t["t3"],
-                "T4 (+100%)": "Trailing" if t["trailing"] else t["t4"],
+                "SYMBOL": symbol, "SIGNAL": signal, "LTP ₹": ltp,
+                "DAY %": q.get("change_pct"), "DAY HIGH": q.get("day_high"),
+                "DAY LOW": q.get("day_low"), "TRIGGER ₹": trigger,
+                "TO TRIGGER %": distance, "ATH LEVEL ₹": item.get("level"),
+                "SCORE": item.get("static_score"), "SETUP MONTH": item.get("setup_month"),
             })
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-    else:
-        st.info("No open paper positions yet.")
+        if rows:
+            st.dataframe(pd.DataFrame(rows).sort_values("SCORE", ascending=False, na_position="last"),
+                         use_container_width=True, hide_index=True, height=520)
+        else:
+            st.warning("No matching symbols. Check scanner watchlist or quote availability.")
+        st.caption("LTP is the last available Yahoo Finance 1-minute candle, not a guaranteed exchange tick.")
 
-    st.subheader("Closed positions")
-    closed = [t for t in trades if t["status"] == "CLOSED"]
-    if closed:
-        st.dataframe(pd.DataFrame([{
-            "Stock": t["symbol"], "Entry date": t["opened_at"][:10], "Entry": t["entry"],
-            "Initial qty": t["qty"], "Realised P&L": t["realised_pnl"],
-            "Exit status": "Closed"
-        } for t in closed]), use_container_width=True, hide_index=True)
-    else:
-        st.caption("No closed positions.")
+    with tabs[2]:
+        st.markdown('<div class="panel-tag">POSITION MATRIX // ENTRY · MTM · RISK · EXIT LADDER</div>', unsafe_allow_html=True)
+        if open_trades:
+            rows = []
+            for t in open_trades:
+                q = quotes.get(t["symbol"], {})
+                last = q.get("ltp", t.get("last_price") or t["entry"])
+                rows.append({
+                    "SYMBOL": t["symbol"], "LTP": last, "DAY %": q.get("change_pct"),
+                    "ENTRY": t["entry"], "QTY": t["qty"], "LEFT": t["remaining_qty"],
+                    "MTM ₹": (last-t["entry"])*t["remaining_qty"],
+                    "INITIAL SL": t["initial_sl"], "ACTIVE SL": t["active_sl"],
+                    "T1": "DONE" if t["t1_done"] else t["t1"],
+                    "T2": "DONE" if t["t2_done"] else t["t2"],
+                    "T3": "DONE" if t["t3_done"] else t["t3"],
+                    "T4": "TRAILING" if t.get("t4_done") else t["t4"],
+                })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("No open paper positions.")
+        st.markdown('<div class="panel-tag">CLOSED POSITIONS</div>', unsafe_allow_html=True)
+        if closed_trades:
+            st.dataframe(pd.DataFrame([{
+                "SYMBOL": t["symbol"], "ENTRY DATE": t["opened_at"][:10],
+                "ENTRY": t["entry"], "INITIAL QTY": t["qty"],
+                "REALISED P&L ₹": t["realised_pnl"], "STATUS": t["status"],
+            } for t in closed_trades]), use_container_width=True, hide_index=True)
+        else:
+            st.caption("No closed paper trades yet.")
 
-    st.subheader("Eligible watchlist")
-    if watchlist:
-        wl_rows = [{"Stock": x.get("symbol"), "Breakout trigger": x.get("trigger"),
-                    "Scanner breakout level": x.get("level"), "Score": x.get("static_score"),
-                    "Setup month": x.get("setup_month")} for x in watchlist]
-        st.dataframe(pd.DataFrame(wl_rows), use_container_width=True, hide_index=True)
-    else:
-        st.warning("watchlist.json not found or empty. Run the scanner first.")
+    with tabs[3]:
+        st.markdown('<div class="panel-tag">CAPITAL ALLOCATION // PORTFOLIO EXPOSURE</div>', unsafe_allow_html=True)
+        risk_cols = st.columns(4)
+        risk_cols[0].metric("Equity", f"₹{equity:,.0f}")
+        risk_cols[1].metric("Capital deployed", f"₹{open_cost:,.0f}")
+        risk_cols[2].metric("Exposure", f"{exposure_pct:.1f}%")
+        risk_cols[3].metric("Remaining cash", f"₹{cash:,.0f}")
+        if open_trades:
+            risk_rows = []
+            for t in open_trades:
+                q = quotes.get(t["symbol"], {})
+                ltp = q.get("ltp", t["entry"])
+                risk_rows.append({
+                    "SYMBOL": t["symbol"], "POSITION VALUE": ltp*t["remaining_qty"],
+                    "RISK TO SL ₹": max(0, ltp-t["active_sl"])*t["remaining_qty"],
+                    "RISK % OF EQUITY": (max(0, ltp-t["active_sl"])*t["remaining_qty"]/equity*100) if equity else 0,
+                    "ACTIVE SL": t["active_sl"],
+                })
+            st.dataframe(pd.DataFrame(risk_rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("No live position exposure to calculate.")
+        st.markdown('<div class="panel-tag">PORTFOLIO SETTINGS</div>', unsafe_allow_html=True)
+        with st.form("portfolio_settings_form"):
+            new_capital = st.number_input("Starting capital ₹", min_value=10000.0, value=float(cap), step=50000.0)
+            new_allocation = st.number_input("Per-entry allocation ₹", min_value=1000.0, value=float(ticket), step=5000.0)
+            submitted = st.form_submit_button("SAVE CAPITAL SETTINGS")
+            if submitted:
+                if new_allocation > new_capital:
+                    st.error("Per-entry allocation cannot exceed starting capital.")
+                else:
+                    save_settings(new_capital, new_allocation)
+                    st.success("Portfolio settings saved.")
+                    st.rerun()
 
-    with st.expander("Trade activity log"):
+    with tabs[4]:
+        st.markdown('<div class="panel-tag">EVENT TAPE // LAST 200 SYSTEM EVENTS</div>', unsafe_allow_html=True)
         with db() as con:
             logs = con.execute("""SELECT e.event_time,t.symbol,e.event,e.qty,e.price,e.pnl
                 FROM events e JOIN trades t ON t.id=e.trade_id ORDER BY e.id DESC LIMIT 200""").fetchall()
         if logs:
-            st.dataframe(pd.DataFrame([dict(x) for x in logs]), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame([dict(x) for x in logs]), use_container_width=True, hide_index=True, height=540)
         else:
-            st.caption("No paper trades recorded.")
+            st.caption("No paper-trading events recorded.")
 
 dashboard()
