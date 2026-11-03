@@ -1,14 +1,16 @@
 {
  "triggered": {
   "2026-11": [
-   "KRISHANA"
+   "KRISHANA",
+   "NITINSPIN",
+   "SHREEPUSHK"
   ]
  },
  "potential": {
-  "2026-11-02": [
+  "2026-11-03": [
+   "ALIVUS",
    "COFORGE",
    "DIVISLAB",
-   "KOTAKBANK",
    "WELSPUNLIV"
   ]
  },
@@ -43,6 +45,22 @@
    "target": 252.99999999999997,
    "level": 230.0,
    "opened": "2026-11-02",
+   "setup_month": "Oct'26"
+  },
+  "SHREEPUSHK": {
+   "entry": 635.7999877929688,
+   "sl": 599.9560119628907,
+   "target": 707.4879394531249,
+   "level": 612.2000122070312,
+   "opened": "2026-11-03",
+   "setup_month": "Oct'26"
+  },
+  "NITINSPIN": {
+   "entry": 690.25,
+   "sl": 653.66,
+   "target": 763.4300000000001,
+   "level": 667.0,
+   "opened": "2026-11-03",
    "setup_month": "Oct'26"
   }
  },
