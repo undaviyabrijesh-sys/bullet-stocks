@@ -54,7 +54,18 @@ jobs:
 
       - name: Commit state (only if changed)
         run: |
+          set -e
           git config user.name  "ath-bot"
           git config user.email "ath-bot@users.noreply.github.com"
+
+          # Generated state JSON can conflict if a previous scheduled run committed first.
+          # Rebase this snapshot onto the latest main without replaying a stale state commit.
+          git fetch origin main
+          git reset --soft origin/main
           git add state.json watchlist.json
-          git diff --cached --quiet || (git commit -m "scan $(date -u +%F\ %H:%M) UTC" && git pull --rebase && git push)
+          if git diff --cached --quiet; then
+            echo "No state changes to commit."
+            exit 0
+          fi
+          git commit -m "scan $(date -u +%F\\ %H:%M) UTC"
+          git push origin HEAD:main
