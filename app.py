@@ -727,7 +727,7 @@ def dashboard():
     top[1].metric("NSE symbols", f"{len(quotes)} / {len(set(symbols))}")
     top[2].metric("Advancers", advancers)
     top[3].metric("Decliners", decliners)
-    top[4].metric("Open positions", len(open_trades))
+    top[4].metric("Scanner positions", len(scanner_positions) if scanner_positions else len(open_trades))
     top[5].metric("Watchlist", len(watchlist))
     st.caption(f"Quote source: Yahoo Finance 1-minute candles · Last available bar: {max((q['time'] for q in quotes.values()), default='—')} IST · Cached for 45 seconds")
 
@@ -771,7 +771,7 @@ def dashboard():
                 st.write(f"**Capital:** ₹{cap:,.0f}")
                 st.write(f"**Ticket size:** ₹{ticket:,.0f}")
                 st.write(f"**Available exposure:** ₹{max(0, cash):,.0f}")
-                st.write(f"**Paper positions:** {len(open_trades)}")
+                st.write(f"**Scanner positions:** {len(scanner_positions)} · **Local paper positions:** {len(open_trades)}")
                 if admin_mode:
                     auto_paper = st.toggle("AUTO PAPER EXECUTION", value=True, key="auto_paper_exec")
                     run_now = st.button("⚡ RUN SCAN / PROCESS NOW", type="primary", use_container_width=True)
@@ -972,7 +972,7 @@ def dashboard():
                 levels.update({
                     "ENTRY": selected_trade.get("entry"),
                     "INITIAL SL": selected_trade.get("initial_sl"),
-                    "ACTIVE SL": selected_trade.get("active_sl"),
+                    "ACTIVE SL": selected_trade.get("active_sl") or selected_trade.get("sl"),
                     "T1": selected_trade.get("t1"),
                     "T2": selected_trade.get("t2"),
                     "T3": selected_trade.get("t3"),
