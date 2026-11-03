@@ -281,17 +281,21 @@ def get_scanner_state():
     return {}
 
 
-def scanner_position_rows(positions, quotes):
-    """Create display-only rows from scanner state; never writes to the local paper DB."""
+def scanner_position_rows(positions, quotes, allocation):
+    """Build a quantity-aware virtual portfolio view from authoritative scanner state."""
     rows = []
     for symbol, pos in sorted(positions.items()):
         entry = float(pos.get("entry", 0) or 0)
         if entry <= 0:
             continue
         quote = quotes.get(symbol, {})
-        ltp = quote.get("ltp")
-        remaining = float(pos.get("remaining_fraction", 1.0) or 0)
+        ltp = float(quote.get("ltp") or entry)
+        qty = math.floor(float(allocation) / entry)
+        remaining = max(0.0, min(1.0, float(pos.get("remaining_fraction", 1.0) or 0)))
         booked = float(pos.get("realised_pnl_fraction", 0) or 0)
+        remaining_qty = qty * remaining
+        booked_pnl = qty * entry * booked
+        open_pnl = remaining_qty * (ltp - entry)
         stage = (
             "T4 TRAIL" if pos.get("trailing") else
             "T3 BOOKED" if pos.get("t3_done") else
@@ -299,18 +303,40 @@ def scanner_position_rows(positions, quotes):
             "T1 BOOKED" if pos.get("t1_done") else "INITIAL"
         )
         rows.append({
-            "SYMBOL": symbol,
-            "ENTRY ₹": entry,
-            "LTP ₹": ltp,
-            "MOVE %": ((float(ltp) / entry - 1) * 100) if ltp else None,
+            "SYMBOL": symbol, "QTY INIT": qty, "QTY LEFT": round(remaining_qty, 2),
+            "ENTRY ₹": entry, "LTP ₹": ltp, "MOVE %": (ltp / entry - 1) * 100,
+            "MTM ₹": open_pnl, "BOOKED P&L ₹": booked_pnl,
+            "TOTAL P&L ₹": booked_pnl + open_pnl,
             "ACTIVE SL ₹": float(pos.get("sl", pos.get("initial_sl", 0)) or 0),
-            "REMAINING %": remaining * 100,
-            "BOOKED RETURN %": booked * 100,
-            "STAGE": stage,
+            "REMAINING %": remaining * 100, "STAGE": stage,
             "OPENED": str(pos.get("opened", ""))[:19],
             "LAST PROCESSED BAR": str(pos.get("last_processed_bar", ""))[:19],
         })
     return rows
+
+
+def scanner_portfolio_metrics(capital, allocation, positions, closed_history, quotes):
+    """Calculate simulated portfolio values from scanner lifecycle and configured ticket size."""
+    open_basis = realised = unrealised = 0.0
+    for symbol, pos in positions.items():
+        entry = float(pos.get("entry", 0) or 0)
+        if entry <= 0:
+            continue
+        qty = math.floor(float(allocation) / entry)
+        remaining = max(0.0, min(1.0, float(pos.get("remaining_fraction", 1.0) or 0)))
+        ltp = float((quotes.get(symbol) or {}).get("ltp") or entry)
+        open_basis += entry * qty * remaining
+        realised += entry * qty * float(pos.get("realised_pnl_fraction", 0) or 0)
+        unrealised += (ltp - entry) * qty * remaining
+    for item in closed_history:
+        entry = float(item.get("entry", 0) or 0)
+        if entry <= 0:
+            continue
+        qty = math.floor(float(allocation) / entry)
+        realised += entry * qty * float(item.get("pnl", 0) or 0)
+    cash = float(capital) - open_basis + realised
+    equity = float(capital) + realised + unrealised
+    return cash, equity, realised, unrealised, open_basis
 
 
 def market_snapshot(symbol, include_monthly=True):
@@ -707,7 +733,8 @@ def dashboard():
     open_trades = [t for t in trades if t["status"] == "OPEN"]
     symbols = [x.get("symbol") for x in watchlist] + [t["symbol"] for t in open_trades] + list(scanner_positions)
     quotes = get_live_quotes(sorted(set(symbols)))
-    scanner_rows = scanner_position_rows(scanner_positions, quotes)
+    scanner_closed = scanner_state.get("closed", []) if isinstance(scanner_state.get("closed", []), list) else []
+    scanner_rows = scanner_position_rows(scanner_positions, quotes, ticket)
 
     # Use fresh quotes for displayed equity even when paper processing is paused.
     display_trades = [dict(t) for t in trades]
@@ -715,8 +742,17 @@ def dashboard():
         q = quotes.get(trade["symbol"])
         if q:
             trade["last_price"] = q["ltp"]
-    open_trades, closed_trades, cash, equity, realised, unrealised = portfolio_metrics(cap, display_trades)
-    open_cost = sum(t["entry"] * t["remaining_qty"] for t in open_trades)
+    open_trades, closed_trades, local_cash, local_equity, local_realised, local_unrealised = portfolio_metrics(cap, display_trades)
+    # Scanner lifecycle is canonical; do not double-count legacy SQLite paper trades.
+    if scanner_positions or scanner_closed:
+        cash, equity, realised, unrealised, open_cost = scanner_portfolio_metrics(
+            cap, ticket, scanner_positions, scanner_closed, quotes
+        )
+        portfolio_source = "SCANNER · VIRTUAL SHARES"
+    else:
+        cash, equity, realised, unrealised = local_cash, local_equity, local_realised, local_unrealised
+        open_cost = sum(t["entry"] * t["remaining_qty"] for t in open_trades)
+        portfolio_source = "LOCAL PAPER DB"
     exposure_pct = (open_cost / equity * 100) if equity else 0.0
     day_moves = [q["change_pct"] for q in quotes.values() if q.get("change_pct") is not None]
     advancers = sum(1 for x in day_moves if x > 0)
@@ -727,9 +763,9 @@ def dashboard():
     top[1].metric("NSE symbols", f"{len(quotes)} / {len(set(symbols))}")
     top[2].metric("Advancers", advancers)
     top[3].metric("Decliners", decliners)
-    top[4].metric("Scanner positions", len(scanner_positions) if scanner_positions else len(open_trades))
+    top[4].metric("Open positions", len(scanner_positions) if scanner_positions else len(open_trades))
     top[5].metric("Watchlist", len(watchlist))
-    st.caption(f"Quote source: Yahoo Finance 1-minute candles · Last available bar: {max((q['time'] for q in quotes.values()), default='—')} IST · Cached for 45 seconds")
+    st.caption(f"Portfolio source: {portfolio_source} · Share quantity = floor(ticket allocation ÷ entry). Quote source: Yahoo Finance 1-minute candles · Last available bar: {max((q['time'] for q in quotes.values()), default='—')} IST · Cached for 45 seconds")
 
     tabs = st.tabs(["◈ COMMAND CENTER", "⌁ MARKET SCANNER", "▣ POSITIONS", "⌗ CHART LAB", "◉ PORTFOLIO RISK", "≋ ACTIVITY LOG"])
 
@@ -771,7 +807,8 @@ def dashboard():
                 st.write(f"**Capital:** ₹{cap:,.0f}")
                 st.write(f"**Ticket size:** ₹{ticket:,.0f}")
                 st.write(f"**Available exposure:** ₹{max(0, cash):,.0f}")
-                st.write(f"**Scanner positions:** {len(scanner_positions)} · **Local paper positions:** {len(open_trades)}")
+                st.write(f"**Active strategy positions:** {len(scanner_positions) if scanner_positions else len(open_trades)}")
+                st.caption(f"Portfolio accounting: {portfolio_source}")
                 if admin_mode:
                     auto_paper = st.toggle("AUTO PAPER EXECUTION", value=True, key="auto_paper_exec")
                     run_now = st.button("⚡ RUN SCAN / PROCESS NOW", type="primary", use_container_width=True)
@@ -925,14 +962,27 @@ def dashboard():
         else:
             st.info("No open scanner or local paper positions.")
         st.markdown('<div class="panel-tag">CLOSED POSITIONS</div>', unsafe_allow_html=True)
-        if closed_trades:
+        if scanner_closed:
+            closed_rows = []
+            for item in scanner_closed:
+                entry = float(item.get("entry", 0) or 0)
+                qty = math.floor(ticket / entry) if entry > 0 else 0
+                closed_rows.append({
+                    "SYMBOL": item.get("symbol"), "ENTRY DATE": str(item.get("opened", ""))[:10],
+                    "CLOSED": item.get("closed"), "ENTRY ₹": entry, "QTY": qty,
+                    "EXIT ₹": item.get("exit"),
+                    "P&L ₹": entry*qty*float(item.get("pnl", 0) or 0),
+                    "RETURN %": float(item.get("pnl", 0) or 0)*100, "RESULT": item.get("result"),
+                })
+            st.dataframe(pd.DataFrame(closed_rows), use_container_width=True, hide_index=True)
+        elif closed_trades:
             st.dataframe(pd.DataFrame([{
                 "SYMBOL": t["symbol"], "ENTRY DATE": t["opened_at"][:10],
                 "ENTRY": t["entry"], "INITIAL QTY": t["qty"],
                 "REALISED P&L ₹": t["realised_pnl"], "STATUS": t["status"],
             } for t in closed_trades]), use_container_width=True, hide_index=True)
         else:
-            st.caption("No closed paper trades yet.")
+            st.caption("No closed positions yet.")
 
     with tabs[3]:
         st.markdown('<div class="panel-tag">CHART LAB // MULTI-TIMEFRAME PRICE ACTION</div>', unsafe_allow_html=True)
@@ -1047,17 +1097,20 @@ def dashboard():
                 ltp = float(q.get("ltp") or entry)
                 if entry <= 0:
                     continue
+                qty = math.floor(ticket / entry) if entry > 0 else 0
+                remaining = max(0.0, min(1.0, float(pos.get("remaining_fraction", 1) or 0)))
                 scanner_risk_rows.append({
-                    "SYMBOL": symbol, "ENTRY ₹": entry, "LTP ₹": ltp,
-                    "ACTIVE SL ₹": sl, "RISK / SHARE ₹": max(0, entry-sl),
-                    "RISK FROM ENTRY %": (max(0, entry-sl)/entry*100),
+                    "SYMBOL": symbol, "QTY INIT": qty, "QTY LEFT": round(qty*remaining, 2),
+                    "ENTRY ₹": entry, "LTP ₹": ltp, "ACTIVE SL ₹": sl,
+                    "POSITION VALUE ₹": ltp*qty*remaining,
+                    "RISK TO SL ₹": max(0, ltp-sl)*qty*remaining,
+                    "RISK % OF EQUITY": (max(0, ltp-sl)*qty*remaining/equity*100) if equity else 0,
                     "DISTANCE TO SL %": ((ltp-sl)/ltp*100) if ltp else None,
-                    "REMAINING %": float(pos.get("remaining_fraction", 1) or 0)*100,
                     "STAGE": "T4 TRAIL" if pos.get("trailing") else "T3" if pos.get("t3_done") else "T2" if pos.get("t2_done") else "T1" if pos.get("t1_done") else "INITIAL",
                 })
             st.markdown("#### SCANNER POSITION RISK · PER-SHARE VIEW")
             st.dataframe(pd.DataFrame(scanner_risk_rows), use_container_width=True, hide_index=True)
-            st.caption("Scanner state does not store allocated share quantity, so rupee portfolio exposure is not inferred here.")
+            st.caption(f"Quantities are simulated from the configured ₹{ticket:,.0f} allocation per entry; fractional remaining quantities reflect staged exits.")
         elif open_trades:
             risk_rows = []
             for t in open_trades:
