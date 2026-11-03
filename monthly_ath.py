@@ -62,7 +62,7 @@ MAX_OPEN_SHOWN = 15
 # ---------- Output ----------
 MAX_TRIGGERED = 4
 MAX_POTENTIAL = 4
-DEDUPE_POTENTIAL_SAME_DAY = True    # One potential-entry alert per stock per trading day
+DEDUPE_POTENTIAL_SAME_DAY = True    # Legacy setting; notifications are now deduped permanently per stock
 BATCH = 50
 ALLOWED_SERIES = {"EQ"}
 
@@ -915,7 +915,10 @@ def main():
     scanned = wl.get("scanned", 0)
 
     trig_done = set(state.get("triggered", {}).get(month_key, []))
-    pot_done = set(state.get("potential", {}).get(day_key, [])) if DEDUPE_POTENTIAL_SAME_DAY else set()
+    # Remember potential/watchlist notifications permanently so the same stock does not ping again every day.
+    legacy_potential = state.get("potential", {})
+    legacy_seen = {sym for values in legacy_potential.values() for sym in values} if isinstance(legacy_potential, dict) else set()
+    pot_done = set(state.get("potential_notified", [])) | legacy_seen
     positions = state.get("positions", {})
     closed_hist = state.get("closed", [])
 
@@ -1008,19 +1011,16 @@ def main():
             "embeds": [closed_embed(c) for c in newly_closed[:10]],
         })
 
-    if trig or pot or mode == "Full scan":
+    # Send only genuine new events. No empty scan reports and no routine portfolio snapshots.
+    if trig or pot:
         send_alert(trig, pot, scanned, now, len(trig_all), len(pot_all), mode)
-
-    # A portfolio digest is sent only when there is something material to report.
-    if positions and (mode == "Full scan" or milestone_alerts or newly_closed or trig):
-        discord_post({"embeds": [open_embed(positions, prices, closed_hist, today)]})
 
     # ---- 7. save state ----
     trig_done.update(r["symbol"] for r in trig)
     pot_done.update(r["symbol"] for r in pot)
     save_json(STATE_FILE, {
         "triggered": {month_key: sorted(trig_done)},
-        "potential": {day_key: sorted(pot_done)},
+        "potential_notified": sorted(pot_done),
         "positions": positions,
         "closed": closed_hist,
     })
