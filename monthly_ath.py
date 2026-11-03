@@ -512,8 +512,8 @@ def fetch_daily(symbols, period="6mo", chunk=100):
     return out
 
 
-def fetch_intraday(symbols, period="5d", chunk=20):
-    """Fetch 1-minute candles for open positions; Yahoo intraday history is short-lived."""
+def fetch_intraday(symbols, period="5d", chunk=20, now=None):
+    """Fetch completed 1-minute candles for open positions; ignore the newest two minutes."""
     out = {}
     for i in range(0, len(symbols), chunk):
         part = symbols[i:i + chunk]
@@ -538,7 +538,15 @@ def fetch_intraday(symbols, period="5d", chunk=20):
                     frame.index = frame.index.tz_localize(IST)
                 else:
                     frame.index = frame.index.tz_convert(IST)
-                out[symbol] = frame.sort_index()
+                asof = pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz=IST)
+                if asof.tzinfo is None:
+                    asof = asof.tz_localize(IST)
+                else:
+                    asof = asof.tz_convert(IST)
+                cutoff = asof.floor("min") - pd.Timedelta(minutes=2)
+                frame = frame[frame.index <= cutoff]
+                if not frame.empty:
+                    out[symbol] = frame.sort_index()
             except Exception as e:
                 print(f"Could not prepare 1-minute data for {symbol}:", e)
     return out
@@ -712,6 +720,7 @@ def evaluate_intraday_position(pos, df, today, monthly_sma10=None):
             break
 
         # When several ascending targets are crossed in one candle, process them in rule order.
+        newly_active_stop = None
         if "t1" in target_hits:
             sold = min(remaining, 0.50)
             realised += sold * (float(pos["t1"]) / entry - 1)
@@ -724,6 +733,7 @@ def evaluate_intraday_position(pos, df, today, monthly_sma10=None):
             })
         if "t2" in target_hits:
             sl = max(sl, entry)
+            newly_active_stop = sl
             pos["t2_done"] = True
             events.append({
                 "type": "T2", "price": float(pos["t2"]), "new_sl": sl, "active_sl": sl,
@@ -743,10 +753,26 @@ def evaluate_intraday_position(pos, df, today, monthly_sma10=None):
             pos["trailing"] = True
             if monthly_sma10 is not None:
                 sl = max(sl, float(monthly_sma10))
+            newly_active_stop = sl
             events.append({
                 "type": "T4", "price": float(pos["t4"]), "new_sl": sl, "active_sl": sl,
                 "remaining_fraction": remaining, "date": ts,
             })
+
+        if newly_active_stop is not None and remaining > 0 and lo <= newly_active_stop:
+            exit_p = newly_active_stop
+            realised += remaining * (exit_p / entry - 1)
+            events.append({
+                "type": "SL", "price": exit_p, "date": ts, "remaining": remaining,
+                "remaining_fraction": 0.0, "active_sl": newly_active_stop, "ambiguous": True,
+            })
+            remaining = 0.0
+            closed = {
+                "result": "SL", "exit": exit_p, "date": ts, "pnl": realised,
+                "note": "A target raised the stop inside this 1-minute candle and the candle also crossed that new stop. The exact sequence is unknown; conservative stop handling was used.",
+            }
+            pos["last_processed_bar"] = ts.isoformat()
+            break
 
         pos["last_processed_bar"] = ts.isoformat()
         if remaining <= 0:
@@ -902,7 +928,7 @@ def main():
     newly_closed = []
     milestone_alerts = []
     monthly_values = fetch_monthly_indicators(list(positions), today)
-    intraday_values = fetch_intraday(list(positions), period="5d")
+    intraday_values = fetch_intraday(list(positions), period="5d", now=now)
 
     for sym in list(positions):
         daily_df = data.get(sym)
