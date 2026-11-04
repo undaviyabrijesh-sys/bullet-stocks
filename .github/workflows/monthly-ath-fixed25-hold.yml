@@ -1,0 +1,37 @@
+name: Monthly ATH Fixed 25 Percent Stop Hold
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backtest_monthly_ath_fixed25_hold.py"
+      - ".github/workflows/monthly-ath-fixed25-hold.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas yfinance requests
+      - name: Run fixed stop hold backtest
+        run: python -u backtest_monthly_ath_fixed25_hold.py
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monthly-ath-fixed25-hold-results
+          path: |
+            monthly_ath_fixed25_hold_trades.csv
+            monthly_ath_fixed25_hold_summary.json
+          if-no-files-found: warn
+          retention-days: 30
