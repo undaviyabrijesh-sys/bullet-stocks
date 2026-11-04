@@ -16,8 +16,11 @@ jobs:
           import os
           import requests
 
-          token = os.environ["TELEGRAM_BOT_TOKEN"]
-          chat_id = os.environ["TELEGRAM_CHAT_ID"]
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+          chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+          if not token or not chat_id:
+              raise SystemExit("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID GitHub Actions secret.")
+
           response = requests.post(
               f"https://api.telegram.org/bot{token}/sendMessage",
               json={
@@ -26,9 +29,16 @@ jobs:
               },
               timeout=20,
           )
-          response.raise_for_status()
-          result = response.json()
-          if not result.get("ok"):
-              raise SystemExit(f"Telegram API rejected the message: {result}")
+          try:
+              result = response.json()
+          except ValueError:
+              raise SystemExit(f"Telegram returned HTTP {response.status_code} with a non-JSON response.")
+
+          if not response.ok or not result.get("ok"):
+              # Telegram's description is safe to print; never print the token.
+              raise SystemExit(
+                  f"Telegram API error (HTTP {response.status_code}): "
+                  f"{result.get('description', 'Unknown error')}"
+              )
           print("Telegram test message sent successfully.")
           PY
