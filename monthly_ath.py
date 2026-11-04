@@ -47,7 +47,10 @@ STOP_FRACTION = 0.25
 T1_RETURN = 0.25
 T2_RETURN = 0.40
 T3_RETURN = 0.50
-T4_RETURN = 1.00
+T4_RETURN = 1.00  # retained only for legacy positions
+EXIT_STRATEGY_VERSION = 3
+T1_BOOK_FRACTION = 0.25
+T3_BOOK_REMAINING_FRACTION = 0.25
 
 # Watchlist is wider than the alert bands so live runs can catch moves during the day
 WATCH_UP = 0.10
@@ -127,7 +130,7 @@ def telegram_send(text):
 
 
 def telegram_entry_alert(r, pos, now):
-    """Telegram entry card; concise price-first format, without chart links."""
+    """Telegram entry card for the capital-recycling exit plan."""
     if not pos:
         return
     symbol = r["symbol"]
@@ -138,18 +141,13 @@ def telegram_entry_alert(r, pos, now):
         f"TARGET LEVELS\\n"
         f"🎯 T1: {fmt(pos['t1'])} (+25%)\\n"
         f"🎯 T2: {fmt(pos['t2'])} (+40%)\\n"
-        f"🎯 T3: {fmt(pos['t3'])} (+50%)\\n"
-        f"🚀 T4: {fmt(pos['t4'])} (+100%)\\n\\n"
+        f"🎯 T3: {fmt(pos['t3'])} (+50%)\\n\\n"
         f"EXIT PLAN\\n"
-        f"• T1: Sell 50%\\n"
-        f"• T2: Move SL to cost ({fmt(pos['entry'])})\\n"
-        f"• T3: Sell 50% of remaining\\n"
-        f"• T4: Activate monthly SMA10 trailing SL\\n\\n"
-        f"Breakout trigger: {fmt(r['trigger'])}\\n\\n"
-        f"CONFIDENCE & MOMENTUM\\n"
-        f"Confidence score: {r['score']:.0f}/100\\n"
-        f"Volume: {r.get('vol_ratio', 0):.1f}x average\\n"
-        f"Relative Strength vs Nifty: {r.get('rs', 0) * 100:+.0f}%"
+        f"• T1: Book 25% of original quantity\\n"
+        f"• T2: Move SL to cost and activate monthly SMA10 trailing SL\\n"
+        f"• T3: Book 25% of remaining quantity\\n"
+        f"• Hold the balance until trailing SL or 90-day time exit\\n\\n"
+        f"Breakout trigger: {fmt(r['trigger'])}"
     )
     telegram_send(message)
 
@@ -158,10 +156,10 @@ def telegram_position_update(symbol, ev, entry):
     kind = ev.get("type")
     labels = {
         "T1": "🎯 TARGET 1 HIT",
-        "T2": "🛡️ TARGET 2 HIT",
+        "T2": "🛡️ TARGET 2 HIT · SMA10 TRAIL ACTIVE",
         "T3": "🎯 TARGET 3 HIT",
-        "T4": "🚀 TARGET 4 HIT",
-        "TRAIL": "🔒 TRAILING STOP UPDATED",
+        "T4": "🚀 LEGACY TARGET 4 HIT",
+        "TRAIL": "🔒 MONTHLY SMA10 TRAILING STOP UPDATED",
     }
     if kind not in labels:
         return
@@ -176,7 +174,9 @@ def telegram_position_update(symbol, ev, entry):
         f"Entry: {fmt(entry)}\\n"
     )
     if kind == "T2":
-        message += f"\\nSTOP LOSS UPDATED\\nPrevious SL: {fmt(entry * (1 - STOP_FRACTION))}\\nNew SL: {fmt(active_sl)}\\n"
+        message += f"\\nSTOP LOSS UPDATED\\nNew SL: {fmt(active_sl)}\\n"
+        if ev.get("trail_active"):
+            message += "Monthly SMA10 trailing: ACTIVE\\n"
     elif kind in ("T4", "TRAIL"):
         message += f"\\nTrailing SL active\\nActive SL: {fmt(active_sl)}\\n"
     else:
@@ -205,7 +205,7 @@ def telegram_closed_update(c):
         f"Entry: {fmt(c['entry'])}\\n"
         f"Exit: {fmt(c['exit'])}\\n"
         f"Final Stop Loss: {fmt(c['sl'])}\\n"
-        f"Final target reference: {fmt(c['target'])}\\n"
+        f"T3 reference: {fmt(c['target'])}\\n"
         f"Realised return: {c['pnl'] * 100:+.2f}% of original position ({c['r']:+.2f}R)\\n"
         f"Status: CLOSED · Held {c['days']} day(s)"
     )
@@ -255,10 +255,10 @@ def stock_entry_field(r):
         f"**Planned entry:** {fmt(r['entry'])}  ·  **Initial SL:** {fmt(r['sl'])} ({risk_pct:.1f}% risk)\n"
         f"**Monthly ATH high:** {fmt(r['level'])} ({r['setup_month']})\n"
         f"**Score:** {r['score']:.0f}/100  ·  **Volume:** {r['vol_ratio']:.1f}x  ·  **RS vs Nifty:** {r['rs'] * 100:+.0f}%\n"
-        f"**Exit plan:** T1 {fmt(r['entry'] * 1.25)} (+25%, sell 50%) · "
-        f"T2 {fmt(r['entry'] * 1.40)} (+40%, SL → entry {fmt(r['entry'])}) · "
-        f"T3 {fmt(r['entry'] * 1.50)} (+50%, sell half remaining) · "
-        f"T4 {fmt(r['entry'] * 2.00)} (+100%, monthly SMA10 trail)\\n"
+        f"**Exit plan:** T1 {fmt(r['entry'] * 1.25)} (+25%, book 25% original) · "
+        f"T2 {fmt(r['entry'] * 1.40)} (+40%, SL → entry + SMA10 trail) · "
+        f"T3 {fmt(r['entry'] * 1.50)} (+50%, book 25% remaining) · "
+        f"Hold balance to trail SL / 90-day exit\\n"
         f"[Open chart]({link})"
     )
     return {"name": f"{r['symbol']}  |  Score {r['score']:.0f}/100", "value": value, "inline": False}
@@ -328,14 +328,14 @@ def closed_embed(c):
         "fields": [
             {"name": "Entry → Exit", "value": f"{fmt(c['entry'])} → **{fmt(c['exit'])}**", "inline": True},
             {"name": "Realized return", "value": f"**{c['pnl'] * 100:+.2f}%** of original position · **{c['r']:+.2f}R**", "inline": True},
-            {"name": "Final stop / T4", "value": f"{fmt(c['sl'])} / {fmt(c['target'])}", "inline": True},
+            {"name": "Final stop / T3 reference", "value": f"{fmt(c['sl'])} / {fmt(c['target'])}", "inline": True},
         ],
     }
 
 
 EVENT_STYLE = {
     "T1": ("💰", "T1 REACHED · +25%", GREEN),
-    "T2": ("🛡️", "T2 REACHED · STOP TO COST", GREEN),
+    "T2": ("🛡️", "T2 REACHED · STOP TO COST + SMA10 TRAIL", GREEN),
     "T3": ("💵", "T3 REACHED · +50%", GREEN),
     "T4": ("🚀", "T4 REACHED · TRAILING ACTIVATED", BLUE),
     "TRAIL": ("🔒", "TRAILING STOP RAISED", BLUE),
@@ -384,7 +384,9 @@ def open_embed(positions, prices, closed_hist, today):
         remaining = float(pos.get("remaining_fraction", 1.0))
         booked = float(pos.get("realised_pnl_fraction", 0.0))
         days = max((today - pd.Timestamp(pos["opened"]).tz_localize(None).normalize()).days, 0) if pd.Timestamp(pos["opened"]).tzinfo is not None else max((today - pd.Timestamp(pos["opened"]).normalize()).days, 0)
+        is_new_exit_plan = int(pos.get("strategy_version", 2)) >= EXIT_STRATEGY_VERSION
         stage = (
+            "SMA10 trailing" if pos.get("trailing") and is_new_exit_plan else
             "T4 trailing" if pos.get("trailing") else
             "T3 booked" if pos.get("t3_done") else
             "T2 · stop at cost" if pos.get("t2_done") else
@@ -711,7 +713,8 @@ def make_position(entry, level, opened, setup_month, monthly_sma20, monthly_sma1
         "t1": float(entry * (1 + T1_RETURN)),
         "t2": float(entry * (1 + T2_RETURN)),
         "t3": float(entry * (1 + T3_RETURN)),
-        "t4": float(entry * (1 + T4_RETURN)),
+        "t4": float(entry * (1 + T4_RETURN)),  # legacy compatibility; ignored by strategy v3
+        "strategy_version": EXIT_STRATEGY_VERSION,
         "t1_done": False,
         "t2_done": False,
         "t3_done": False,
@@ -725,6 +728,8 @@ def make_position(entry, level, opened, setup_month, monthly_sma20, monthly_sma1
 def migrate_position(pos, monthly_sma20, monthly_sma10):
     """Upgrade legacy single-target state records without losing their entry/history."""
     if "t1" in pos and "remaining_fraction" in pos:
+        # Existing positions retain their original exit rules; only fresh entries use v3.
+        pos.setdefault("strategy_version", 2)
         if "last_processed_bar" not in pos:
             pos["last_processed_bar"] = None
         if monthly_sma10 is not None:
@@ -738,7 +743,8 @@ def migrate_position(pos, monthly_sma20, monthly_sma10):
     )
     if upgraded is None:
         return pos
-    upgraded["migration_note"] = "Migrated from legacy single-target state; staged targets start from original entry."
+    upgraded["strategy_version"] = 2
+    upgraded["migration_note"] = "Migrated from legacy single-target state; legacy staged exit rules retained."
     return upgraded
 
 
@@ -780,6 +786,8 @@ def evaluate_intraday_position(pos, df, today, monthly_sma10=None):
     sl = float(pos["sl"])
     remaining = float(pos.get("remaining_fraction", 1.0))
     realised = float(pos.get("realised_pnl_fraction", 0.0))
+    strategy_version = int(pos.get("strategy_version", 2))
+    is_new_exit_plan = strategy_version >= EXIT_STRATEGY_VERSION
     events = []
     closed = None
 
@@ -824,7 +832,10 @@ def evaluate_intraday_position(pos, df, today, monthly_sma10=None):
         o = float(row["Open"]) if pd.notna(row.get("Open")) else None
         hi, lo = float(row["High"]), float(row["Low"])
         target_hits = []
-        for key, done_key in (("t1", "t1_done"), ("t2", "t2_done"), ("t3", "t3_done"), ("t4", "trailing")):
+        target_rules = [("t1", "t1_done"), ("t2", "t2_done"), ("t3", "t3_done")]
+        if not is_new_exit_plan:
+            target_rules.append(("t4", "trailing"))
+        for key, done_key in target_rules:
             if not pos.get(done_key) and hi >= float(pos[key]):
                 target_hits.append(key)
 
@@ -864,7 +875,8 @@ def evaluate_intraday_position(pos, df, today, monthly_sma10=None):
         # When several ascending targets are crossed in one candle, process them in rule order.
         newly_active_stop = None
         if "t1" in target_hits:
-            sold = min(remaining, 0.50)
+            book_fraction = T1_BOOK_FRACTION if is_new_exit_plan else 0.50
+            sold = min(remaining, book_fraction)
             realised += sold * (float(pos["t1"]) / entry - 1)
             remaining -= sold
             pos["t1_done"] = True
@@ -875,14 +887,21 @@ def evaluate_intraday_position(pos, df, today, monthly_sma10=None):
             })
         if "t2" in target_hits:
             sl = max(sl, entry)
+            if is_new_exit_plan:
+                # T2 both protects the trade at breakeven and starts the completed-month SMA10 trail.
+                if monthly_sma10 is not None:
+                    sl = max(sl, float(monthly_sma10))
+                pos["trailing"] = True
             newly_active_stop = sl
             pos["t2_done"] = True
             events.append({
                 "type": "T2", "price": float(pos["t2"]), "new_sl": sl, "active_sl": sl,
+                "trail_active": is_new_exit_plan,
                 "remaining_fraction": remaining, "realised_pnl_fraction": realised, "date": ts,
             })
         if "t3" in target_hits and remaining > 0:
-            sold = min(remaining, remaining * 0.50)
+            book_remaining_fraction = T3_BOOK_REMAINING_FRACTION if is_new_exit_plan else 0.50
+            sold = min(remaining, remaining * book_remaining_fraction)
             realised += sold * (float(pos["t3"]) / entry - 1)
             remaining -= sold
             pos["t3_done"] = True
@@ -962,7 +981,7 @@ def close_position(sym, pos, ev):
         "entry": entry,
         "exit": float(ev["exit"]),
         "sl": float(pos["sl"]),
-        "target": float(pos["t4"]),
+        "target": float(pos.get("t3", pos.get("t4", entry * (1 + T3_RETURN)))),
         "pnl": float(ev.get("pnl", pos.get("realised_pnl_fraction", 0.0))),
         "r": float(ev.get("pnl", 0.0) * entry / risk) if risk > 0 else 0.0,
         "opened": pos["opened"],
