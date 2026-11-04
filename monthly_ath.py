@@ -111,56 +111,60 @@ def telegram_send(text):
 
 
 def telegram_entry_alert(r, pos, now):
-    """Telegram entry card: only sent for a newly triggered and tracked entry."""
+    """Telegram entry card; concise price-first format, without chart links."""
     if not pos:
         return
     symbol = r["symbol"]
     message = (
-        f"🟢 ENTRY TRIGGERED · {symbol}\\n"
-        f"Time: {now:%d %b %Y · %I:%M %p} IST\\n"
+        f"🟢 {symbol} — ENTRY TRIGGERED\\n\\n"
         f"Entry: {fmt(pos['entry'])}\\n"
-        f"Stop Loss: {fmt(pos['initial_sl'])}\\n"
-        f"Target 1: {fmt(pos['t1'])} (+25%)\\n"
-        f"Target 2: {fmt(pos['t2'])} (+40%)\\n"
-        f"Target 3: {fmt(pos['t3'])} (+50%)\\n"
-        f"Target 4: {fmt(pos['t4'])} (+100%)\\n"
+        f"Initial SL: {fmt(pos['initial_sl'])}\\n\\n"
+        f"TARGET LEVELS\\n"
+        f"🎯 T1: {fmt(pos['t1'])} (+25%)\\n"
+        f"🎯 T2: {fmt(pos['t2'])} (+40%)\\n"
+        f"🎯 T3: {fmt(pos['t3'])} (+50%)\\n"
+        f"🚀 T4: {fmt(pos['t4'])} (+100%)\\n\\n"
         f"EXIT PLAN\\n"
-        f"T1: book 50% at {fmt(pos['t1'])} (+25%)\\n"
-        f"T2: move SL to entry {fmt(pos['entry'])} at {fmt(pos['t2'])} (+40%)\\n"
-        f"T3: book half of remaining at {fmt(pos['t3'])} (+50%)\\n"
-        f"T4: activate monthly SMA10 trailing SL at {fmt(pos['t4'])} (+100%)\\n"
+        f"• T1: Sell 50%\\n"
+        f"• T2: Move SL to cost ({fmt(pos['entry'])})\\n"
+        f"• T3: Sell 50% of remaining\\n"
+        f"• T4: Activate monthly SMA10 trailing SL\\n\\n"
         f"Breakout trigger: {fmt(r['trigger'])}\\n"
-        f"Setup: Monthly ATH breakout · Score {r['score']:.0f}/100\\n"
-        f"Chart: {tv_link(symbol)}"
+        f"Score: {r['score']:.0f}/100"
     )
     telegram_send(message)
 
-
 def telegram_position_update(symbol, ev, entry):
-    """Send target/stop/trailing milestones, never routine position snapshots."""
+    """Send clear price-first target and stop-management updates."""
+    kind = ev.get("type")
     labels = {
         "T1": "🎯 TARGET 1 HIT",
-        "T2": "🎯 TARGET 2 HIT · STOP MOVED TO COST",
+        "T2": "🛡️ TARGET 2 HIT",
         "T3": "🎯 TARGET 3 HIT",
-        "T4": "🚀 TARGET 4 HIT · TRAILING STOP ACTIVE",
+        "T4": "🚀 TARGET 4 HIT",
         "TRAIL": "🔒 TRAILING STOP UPDATED",
     }
-    kind = ev.get("type")
     if kind not in labels:
         return
     active_sl = float(ev.get("active_sl", ev.get("new_sl", entry * (1 - STOP_FRACTION))))
     price = float(ev.get("price", active_sl))
     remaining = float(ev.get("remaining_fraction", 1.0))
     sold = float(ev.get("sold_fraction", 0.0))
+    pct = (price / entry - 1) * 100 if entry else 0.0
     message = (
-        f"{labels[kind]} · {symbol}\\n"
+        f"{labels[kind]} · {symbol}\\n\\n"
+        f"Target / event price: {fmt(price)} ({pct:+.1f}%)\\n"
         f"Entry: {fmt(entry)}\\n"
-        f"Target / event price: {fmt(price)}\\n"
-        f"Active Stop Loss: {fmt(active_sl)}\\n"
-        f"Quantity booked: {sold * 100:.0f}% of original" if sold > 0 else
-        f"{labels[kind]} · {symbol}\\nEntry: {fmt(entry)}\\nTarget / event price: {fmt(price)}\\nActive Stop Loss: {fmt(active_sl)}"
     )
-    message += f"\\nQuantity remaining: {remaining * 100:.0f}%"
+    if kind == "T2":
+        message += f"\\nSTOP LOSS UPDATED\\nPrevious SL: {fmt(entry * (1 - STOP_FRACTION))}\\nNew SL: {fmt(active_sl)}\\n"
+    elif kind in ("T4", "TRAIL"):
+        message += f"\\nTrailing SL active\\nActive SL: {fmt(active_sl)}\\n"
+    else:
+        message += f"\\nActive SL: {fmt(active_sl)}\\n"
+    if sold > 0:
+        message += f"Quantity booked: {sold * 100:.0f}% of original\\n"
+    message += f"Quantity remaining: {remaining * 100:.0f}%\\nStatus: OPEN"
     event_date = pd.Timestamp(ev.get("date", datetime.now(IST)))
     if event_date.tzinfo is None:
         event_date = event_date.tz_localize(IST)
@@ -168,7 +172,6 @@ def telegram_position_update(symbol, ev, entry):
         event_date = event_date.tz_convert(IST)
     message += f"\\nTime: {event_date:%d %b %Y · %I:%M %p} IST"
     telegram_send(message)
-
 
 def telegram_closed_update(c):
     """Send terminal status when a tracked position exits."""
