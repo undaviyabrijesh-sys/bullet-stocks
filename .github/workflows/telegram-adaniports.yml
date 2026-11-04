@@ -2,59 +2,54 @@ name: Send Adani Ports Telegram Alert
 
 on:
   push:
+    branches: [main]
     paths:
       - ".github/workflows/telegram-adaniports.yml"
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
   send-alert:
     runs-on: ubuntu-latest
     steps:
-      - name: Send Adani Ports entry alert to Salty Trades
+      - name: Send Adani Ports entry alert
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python - <<'PY'
           import os, json, urllib.request
-          token = os.environ["TELEGRAM_BOT_TOKEN"]
-          chat_id = os.environ["TELEGRAM_CHAT_ID"]
-          text = """🟢 ADANIPORTS — TRIGGER CROSSED
-Entry observed at current scan price
-
-CMP: ₹1,915.00
-Trigger: ₹1,909.44
-Planned entry: ₹1,915.00
-Initial SL: ₹1,513.67 (21.0% risk)
-Monthly ATH high: ₹1,872.00 (Oct'26)
-Score: 69/100
-Volume: 1.6x
-RS vs Nifty: +11%
-
-EXIT PLAN
-T1 +25% — sell 50%
-T2 +40% — SL to cost
-T3 +50% — sell half remaining
-T4 +100% — monthly SMA10 trail
-
-Chart: https://www.tradingview.com/chart/?symbol=NSE:ADANIPORTS
-
-⚠️ Educational purposes only. Not investment advice. Verify prices and manage risk independently."""
-          data = urllib.parse.urlencode({
-              "chat_id": chat_id,
-              "text": text,
-              "disable_web_page_preview": "false"
-          }).encode()
+          token = os.environ["TELEGRAM_BOT_TOKEN"].strip()
+          chat_id = os.environ["TELEGRAM_CHAT_ID"].strip()
+          lines = [
+            "🟢 ADANIPORTS — TRIGGER CROSSED",
+            "Entry observed at current scan price",
+            "",
+            "CMP: ₹1,915.00",
+            "Trigger: ₹1,909.44",
+            "Planned entry: ₹1,915.00",
+            "Initial SL: ₹1,513.67 (21.0% risk)",
+            "Monthly ATH high: ₹1,872.00 (Oct'26)",
+            "Score: 69/100 · Volume: 1.6x · RS vs Nifty: +11%",
+            "",
+            "EXIT PLAN",
+            "T1 +25% — sell 50%",
+            "T2 +40% — SL to cost",
+            "T3 +50% — sell half remaining",
+            "T4 +100% — monthly SMA10 trail",
+            "",
+            "Chart: https://www.tradingview.com/chart/?symbol=NSE:ADANIPORTS",
+            "",
+            "⚠️ Educational purposes only. Not investment advice. Verify prices and manage risk independently."
+          ]
+          payload = json.dumps({"chat_id": chat_id, "text": "\n".join(lines)}).encode()
           req = urllib.request.Request(
-              f"https://api.telegram.org/bot{token}/sendMessage",
-              data=data,
-              headers={"Content-Type": "application/x-www-form-urlencoded"}
+            "https://api.telegram.org/bot" + token + "/sendMessage",
+            data=payload,
+            headers={"Content-Type": "application/json"}
           )
           with urllib.request.urlopen(req, timeout=20) as response:
-              result = json.loads(response.read().decode())
+            result = json.loads(response.read().decode())
           if not result.get("ok"):
-              raise SystemExit(f"Telegram API rejected message: {result}")
-          print("Adani Ports alert delivered. Telegram message_id:", result["result"]["message_id"])
+            raise SystemExit("Telegram API rejected the message: " + str(result.get("description")))
+          print("Telegram delivered message_id=" + str(result["result"]["message_id"]))
           PY
