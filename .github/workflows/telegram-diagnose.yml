@@ -1,0 +1,49 @@
+name: Diagnose Salty Trades Telegram Group
+
+on:
+  workflow_dispatch:
+
+jobs:
+  inspect-updates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read recent Telegram updates safely
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os
+          import requests
+
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+          if not token:
+              raise SystemExit("Missing TELEGRAM_BOT_TOKEN secret.")
+
+          response = requests.get(
+              f"https://api.telegram.org/bot{token}/getUpdates",
+              params={"limit": 20, "timeout": 0},
+              timeout=20,
+          )
+          data = response.json()
+          if not response.ok or not data.get("ok"):
+              raise SystemExit(
+                  f"Telegram getUpdates error (HTTP {response.status_code}): "
+                  f"{data.get('description', 'Unknown error')}"
+              )
+
+          updates = data.get("result", [])
+          print(f"Updates received: {len(updates)}")
+          for update in updates:
+              message = update.get("message") or update.get("edited_message") or {}
+              chat = message.get("chat", {})
+              if chat:
+                  print(
+                      "CHAT:",
+                      "id=" + str(chat.get("id")),
+                      "type=" + str(chat.get("type")),
+                      "title=" + str(chat.get("title", "")),
+                      "message_text=" + str(message.get("text", ""))[:100],
+                  )
+          if not updates:
+              print("No pending updates. Send a fresh message in the group, then run this workflow again.")
+          PY
