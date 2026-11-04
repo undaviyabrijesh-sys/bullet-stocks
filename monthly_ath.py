@@ -74,17 +74,59 @@ GREY = 0x95A5A6
 
 
 # ---------- Discord ----------
+def telegram_post(payload):
+    """Mirror stock-event alerts to the configured Telegram group."""
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    if not token or not chat_id:
+        print("Telegram not configured; set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID")
+        return
+
+    lines = []
+    content = payload.get("content")
+    if content:
+        lines.append(str(content))
+    for embed in payload.get("embeds", []):
+        if embed.get("title"):
+            lines.append(str(embed["title"]))
+        if embed.get("description"):
+            lines.append(str(embed["description"]))
+        for field in embed.get("fields", []):
+            name, value = field.get("name"), field.get("value")
+            if name or value:
+                lines.append(f"{name or ''}: {value or ''}")
+        footer = embed.get("footer", {}).get("text")
+        if footer:
+            lines.append(str(footer))
+    message = "\n".join(lines).strip() or "Bullet Stocks event"
+    # Telegram Bot API text limit is 4096 characters; leave room for chunking.
+    chunks = [message[i:i + 3900] for i in range(0, len(message), 3900)]
+    for chunk in chunks:
+        try:
+            response = requests.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": chunk, "disable_web_page_preview": True},
+                timeout=20,
+            )
+            if response.status_code >= 300:
+                print("Telegram error:", response.status_code, response.text[:300])
+        except Exception as exc:
+            print("Telegram failed:", exc)
+
+
 def discord_post(payload):
     if not WEBHOOK:
         print("No DISCORD_WEBHOOK_URL set")
         print(json.dumps(payload, indent=1, ensure_ascii=False))
-        return
-    try:
-        r = requests.post(WEBHOOK, json=payload, timeout=30)
-        if r.status_code >= 300:
-            print("Discord error:", r.status_code, r.text[:300])
-    except Exception as e:
-        print("Discord failed:", e)
+    else:
+        try:
+            r = requests.post(WEBHOOK, json=payload, timeout=30)
+            if r.status_code >= 300:
+                print("Discord error:", r.status_code, r.text[:300])
+        except Exception as e:
+            print("Discord failed:", e)
+    # Keep Telegram independent: a missing Discord webhook must not block it.
+    telegram_post(payload)
 
 
 def discord(msg):
