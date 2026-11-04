@@ -12,6 +12,7 @@ Flags:
 import os
 import sys
 import json
+import html
 import time
 from io import StringIO
 from datetime import datetime, timezone, time as dtime
@@ -96,11 +97,26 @@ def telegram_send(text):
         print("Telegram not configured; skipping Telegram trade alert.")
         return
     disclaimer = "Educational purposes only. Not investment advice. Verify prices and manage risk independently."
-    message = f"{text.strip()}\\n\\n⚠️ {disclaimer}"
+    # Telegram supports bold/italic formatting, but not custom font families.
+    # Preserve the clean desk layout with bold title, section headings, labels and values.
+    lines = text.strip().splitlines()
+    formatted = []
+    section_heads = {"TARGET LEVELS", "EXIT PLAN", "STOP LOSS UPDATED"}
+    for index, line in enumerate(lines):
+        safe = html.escape(line)
+        if index == 0:
+            safe = f"<b>{safe}</b>"
+        elif line.strip() in section_heads:
+            safe = f"<b>{safe}</b>"
+        elif ": " in line:
+            label, value = safe.split(": ", 1)
+            safe = f"<b>{label}:</b> <b>{value}</b>"
+        formatted.append(safe)
+    message = "\\n".join(formatted) + f"\\n\\n<i>⚠️ {html.escape(disclaimer)}</i>"
     try:
         response = requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": message, "disable_web_page_preview": True},
+            json={"chat_id": chat_id, "text": message, "parse_mode": "HTML", "disable_web_page_preview": True},
             timeout=20,
         )
         result = response.json()
