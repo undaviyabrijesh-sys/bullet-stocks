@@ -117,18 +117,40 @@ def main():
         print("NO TRADES GENERATED")
         df.to_csv("monthly_ath_fixed25_hold_trades.csv", index=False)
         return
-    df.to_csv("monthly_ath_backtest_trades.csv", index=False)
+    df.to_csv("monthly_ath_fixed25_hold_trades.csv", index=False)
+    # Apply the same one-open-position-per-stock rule used by the capital allocator.
+    df["entry_dt"] = pd.to_datetime(df["entry_date"])
+    df["exit_dt"] = pd.to_datetime(df["exit_date"])
+    kept = []
+    for sym, group in df.sort_values(["symbol", "entry_dt"]).groupby("symbol"):
+        last_exit = pd.Timestamp.min
+        for _, row in group.iterrows():
+            if row["entry_dt"] > last_exit:
+                kept.append(row)
+                last_exit = row["exit_dt"]
+    df = pd.DataFrame(kept).drop(columns=["entry_dt", "exit_dt"])
+    stake = 10000.0
+    df["pnl_inr"] = df["return_pct"] / 100.0 * stake
+    events = []
+    for _, row in df.iterrows():
+        events.append((pd.Timestamp(row["entry_date"]), 1))
+        events.append((pd.Timestamp(row["exit_date"]), -1))
+    concurrent = 0
+    peak = 0
+    for _, delta in sorted(events, key=lambda x: (x[0], x[1])):
+        concurrent += delta
+        peak = max(peak, concurrent)
     wins = int((df.return_pct > 0).sum())
     summary = {
         "period": f"{START} to latest available daily bar",
         "universe": "Current NSE EQ constituents (survivorship bias applies)",
         "symbols_attempted": len(symbols), "symbols_with_data": len(symbols)-len(failed),
-        "trades": len(df), "wins": wins, "losses": int((df.return_pct <= 0).sum()),
+        "trades": len(df), "wins": wins, "losses": int((df.return_pct <= 0).sum()),\n        "fixed_stake_inr_per_trade": stake, "total_fixed_stake_pnl_inr": round(float(df.pnl_inr.sum()),2),\n        "peak_concurrent_positions": int(peak), "minimum_capital_at_10000_each_inr": int(peak*stake),
         "win_rate_pct": round(wins/len(df)*100,2),
         "average_return_pct": round(float(df.return_pct.mean()),2),
         "median_return_pct": round(float(df.return_pct.median()),2),
         "total_compounded_return_pct": round(float(((1+df.return_pct/100).prod()-1)*100),2),
-        "best_trade_pct": round(float(df.return_pct.max()),2),
+        "profit_factor": round(float(df.loc[df.pnl_inr>0,"pnl_inr"].sum()/abs(df.loc[df.pnl_inr<0,"pnl_inr"].sum()),3),3),\n        "best_trade_pct": round(float(df.return_pct.max()),2),
         "worst_trade_pct": round(float(df.return_pct.min()),2),
         "failed_symbols": len(failed),
         "assumptions": [
