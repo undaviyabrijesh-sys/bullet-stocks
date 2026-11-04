@@ -154,6 +154,9 @@ def telegram_entry_alert(r, pos, now):
 def telegram_position_update(symbol, ev, entry):
     """Send clear price-first target and stop-management updates."""
     kind = ev.get("type")
+    # Telegram is execution-only: suppress informational trailing-stop adjustments.
+    if kind == "TRAIL":
+        return
     labels = {
         "T1": "🎯 TARGET 1 HIT",
         "T2": "🛡️ TARGET 2 HIT · SMA10 TRAIL ARMED",
