@@ -28,6 +28,10 @@ WATCH_FILE = "watchlist.json"
 NSE_ALL_URL = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
 IST = ZoneInfo("Asia/Kolkata")
 
+# Telegram launch baseline: Adani Ports entry was the first Telegram alert.
+# Existing positions opened before this timestamp remain Discord-only.
+TELEGRAM_START = pd.Timestamp("2026-11-04T10:02:52+05:30")
+
 FORCE = "--force" in sys.argv
 FULL = "--full" in sys.argv
 
@@ -74,6 +78,16 @@ GREY = 0x95A5A6
 
 
 # ---------- Discord / Telegram ----------
+def telegram_position_in_scope(position_or_closed):
+    """Only send Telegram lifecycle updates for positions opened at/after the Adani launch entry."""
+    opened = pd.Timestamp(position_or_closed.get("opened"))
+    if opened.tzinfo is None:
+        opened = opened.tz_localize(IST)
+    else:
+        opened = opened.tz_convert(IST)
+    return opened >= TELEGRAM_START
+
+
 def telegram_send(text):
     """Send only explicitly selected trade-entry and position-status messages to Telegram."""
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
@@ -1057,7 +1071,7 @@ def main():
         evs, ev = evaluate_intraday_position(positions[sym], minute_df, today, smas.get("sma10"))
         for item in evs:
             if item["type"] != "SL":
-                milestone_alerts.append((sym, item, float(positions[sym]["entry"])))
+                milestone_alerts.append((sym, item, float(positions[sym]["entry"]), telegram_position_in_scope(positions[sym])))
         if ev is not None:
             newly_closed.append(close_position(sym, positions.pop(sym), ev))
 
@@ -1104,9 +1118,10 @@ def main():
         prices[r["symbol"]] = r["price"]
 
     # ---- 6. Discord ----
-    for sym, ev, event_entry in milestone_alerts:
+    for sym, ev, event_entry, telegram_allowed in milestone_alerts:
         discord_post({"embeds": [position_event_embed(sym, ev, event_entry)]})
-        telegram_position_update(sym, ev, event_entry)
+        if telegram_allowed:
+            telegram_position_update(sym, ev, event_entry)
 
     if newly_closed:
         discord_post({
@@ -1114,7 +1129,8 @@ def main():
             "embeds": [closed_embed(c) for c in newly_closed[:10]],
         })
         for closed_position in newly_closed:
-            telegram_closed_update(closed_position)
+            if telegram_position_in_scope(closed_position):
+                telegram_closed_update(closed_position)
 
     # Send only genuine new events. No empty scan reports and no routine portfolio snapshots.
     if trig or pot:
