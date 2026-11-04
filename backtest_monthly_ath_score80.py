@@ -59,7 +59,7 @@ def score_at_entry(d, setup_month_end, entry_date, trigger, nifty):
     price = float(close.iloc[-1])
     dma50 = close.rolling(50).mean().iloc[-1]
     dma200 = close.rolling(200).mean().iloc[-1]
-    if pd.isna(dma50) or pd.isna(dma200) or dma200 <= 0:
+    if pd.isna(dma50) or pd.isna(dma200) or dma200 <= 0 or price <= dma200 or dma50 <= dma200:
         return None
     ret6 = price / float(close.iloc[-126]) - 1 if len(close) >= 126 else 0.0
     n = nifty.loc[:entry_date].dropna()
