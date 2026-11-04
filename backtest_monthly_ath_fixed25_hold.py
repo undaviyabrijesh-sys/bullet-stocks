@@ -88,7 +88,7 @@ def simulate(sym, d):
             exit_date = bars.index[-1]
             exit_price = float(bars["Close"].iloc[-1])
             result = "90D/TIME_END"
-        realised = (float(exit_price)/entry - 1) * 100
+        realised = float(exit_price)/entry - 1
         trades.append({
             "symbol":sym, "setup_month":m.index[i].strftime("%Y-%m"),
             "entry_date":entry_date.strftime("%Y-%m-%d"), "entry":round(entry,2),
