@@ -83,6 +83,19 @@ class CapitalRecyclingExitPlanTests(unittest.TestCase):
         self.assertNotIn("T4", [event["type"] for event in events])
         self.assertTrue(pos["trailing"])
 
+    def test_telegram_entry_alert_uses_real_line_breaks_and_new_plan(self):
+        pos = self.make_position()
+        signal = {"symbol": "TEST", "trigger": 102.0}
+        from unittest.mock import patch
+        with patch.object(ath, "telegram_send") as send:
+            ath.telegram_entry_alert(signal, pos, self.opened)
+        message = send.call_args.args[0]
+        self.assertIn("\\n", message)
+        self.assertNotIn("\\\\n", message)
+        self.assertIn("Book 25% of original quantity", message)
+        self.assertIn("activate monthly SMA10 trailing SL", message)
+        self.assertNotIn("T4", message)
+
     def test_legacy_positions_keep_their_original_t1_booking_rule(self):
         pos = self.make_position(strategy_version=2)
         events, closed = ath.evaluate_intraday_position(
