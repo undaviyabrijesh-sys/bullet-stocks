@@ -719,6 +719,7 @@ def make_position(entry, level, opened, setup_month, monthly_sma20, monthly_sma1
         "t2_done": False,
         "t3_done": False,
         "trailing": False,
+        "trail_activation_date": None,
         "remaining_fraction": 1.0,
         "realised_pnl_fraction": 0.0,
         "last_processed_bar": opened if "T" in str(opened) else None,
@@ -780,7 +781,7 @@ def fetch_monthly_indicators(symbols, today, chunk=50):
     return out
 
 
-def evaluate_intraday_position(pos, df, today, monthly_sma10=None):
+def evaluate_intraday_position(pos, df, today, monthly_sma10=None, trading_days_held=None):
     """Process only new 1-minute bars; never replay candles already evaluated."""
     entry = float(pos["entry"])
     sl = float(pos["sl"])
@@ -814,8 +815,8 @@ def evaluate_intraday_position(pos, df, today, monthly_sma10=None):
         pos["last_processed_bar"] = df.index[-1].isoformat()
         return events, None
 
-    # A completed-month SMA10 step-up is effective before processing new bars.
-    if pos.get("trailing") and monthly_sma10 is not None:
+    # Legacy positions retain their prior immediate trail handling.
+    if not is_new_exit_plan and pos.get("trailing") and monthly_sma10 is not None:
         new_sl = max(sl, float(monthly_sma10))
         if new_sl > sl:
             sl = new_sl
@@ -828,6 +829,19 @@ def evaluate_intraday_position(pos, df, today, monthly_sma10=None):
         if ts <= opened:
             pos["last_processed_bar"] = ts.isoformat()
             continue
+
+        # In the selected backtest, T2 breakeven and the completed-month SMA10
+        # trail become effective from the next trading session, not the T2 candle.
+        if is_new_exit_plan and pos.get("trailing") and monthly_sma10 is not None:
+            activated_on = pos.get("trail_activation_date")
+            if not activated_on or ts.date() > pd.Timestamp(activated_on).date():
+                new_sl = max(sl, entry, float(monthly_sma10))
+                if new_sl > sl:
+                    sl = new_sl
+                    events.append({
+                        "type": "TRAIL", "price": sl, "new_sl": sl, "active_sl": sl,
+                        "remaining_fraction": remaining, "date": ts,
+                    })
 
         o = float(row["Open"]) if pd.notna(row.get("Open")) else None
         hi, lo = float(row["High"]), float(row["Low"])
@@ -888,15 +902,17 @@ def evaluate_intraday_position(pos, df, today, monthly_sma10=None):
         if "t2" in target_hits:
             sl = max(sl, entry)
             if is_new_exit_plan:
-                # T2 both protects the trade at breakeven and starts the completed-month SMA10 trail.
-                if monthly_sma10 is not None:
-                    sl = max(sl, float(monthly_sma10))
+                # T2 activates breakeven protection and the monthly SMA10 trail from the next session.
                 pos["trailing"] = True
-            newly_active_stop = sl
+                pos["trail_activation_date"] = ts.date().isoformat()
+                newly_active_stop = None
+            else:
+                newly_active_stop = sl
             pos["t2_done"] = True
             events.append({
                 "type": "T2", "price": float(pos["t2"]), "new_sl": sl, "active_sl": sl,
                 "trail_active": is_new_exit_plan,
+                "trail_effective": "next trading session" if is_new_exit_plan else "at T4",
                 "remaining_fraction": remaining, "realised_pnl_fraction": realised, "date": ts,
             })
         if "t3" in target_hits and remaining > 0:
@@ -947,15 +963,20 @@ def evaluate_intraday_position(pos, df, today, monthly_sma10=None):
     pos["remaining_fraction"] = max(0.0, remaining)
     pos["realised_pnl_fraction"] = float(realised)
 
-    if closed is None and remaining > 0 and (today.date() - opened.date()).days >= MAX_HOLD_DAYS:
-        last = float(df["Close"].iloc[-1])
-        last_date = df.index[-1]
-        realised += remaining * (last / entry - 1)
-        closed = {
-            "result": "EXPIRED", "exit": last, "date": last_date,
-            "pnl": realised, "note": f"Position exceeded the {MAX_HOLD_DAYS}-day holding window.",
-        }
-        remaining = 0.0
+    if closed is None and remaining > 0:
+        if is_new_exit_plan and trading_days_held is not None:
+            time_exit_due = trading_days_held >= MAX_HOLD_DAYS
+        else:
+            time_exit_due = (today.date() - opened.date()).days >= MAX_HOLD_DAYS
+        if time_exit_due:
+            last = float(df["Close"].iloc[-1])
+            last_date = df.index[-1]
+            realised += remaining * (last / entry - 1)
+            closed = {
+                "result": "EXPIRED", "exit": last, "date": last_date,
+                "pnl": realised, "note": f"Position exceeded the {MAX_HOLD_DAYS}-trading-day holding window.",
+            }
+            remaining = 0.0
 
     pos["remaining_fraction"] = max(0.0, remaining)
     pos["realised_pnl_fraction"] = float(realised)
@@ -1116,7 +1137,15 @@ def main():
             print(f"{sym}: initialized 1-minute checkpoint at {minute_df.index[-1]}")
             continue
 
-        evs, ev = evaluate_intraday_position(positions[sym], minute_df, today, smas.get("sma10"))
+        trading_days_held = None
+        if daily_df is not None and not daily_df.empty:
+            opened_date = pd.Timestamp(positions[sym]["opened"])
+            if opened_date.tzinfo is not None:
+                opened_date = opened_date.tz_convert(IST).tz_localize(None)
+            trading_days_held = int((daily_df.index.normalize() >= opened_date.normalize()).sum())
+        evs, ev = evaluate_intraday_position(
+            positions[sym], minute_df, today, smas.get("sma10"), trading_days_held
+        )
         for item in evs:
             if item["type"] != "SL":
                 milestone_alerts.append((sym, item, float(positions[sym]["entry"]), telegram_position_in_scope(positions[sym])))
