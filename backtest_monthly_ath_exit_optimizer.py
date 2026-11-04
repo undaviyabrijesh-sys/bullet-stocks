@@ -165,6 +165,9 @@ def portfolio_stats(df):
         active += delta
         peak = max(peak, active)
     pnl = x["return_pct"] * STAKE / 100
+    holding_days = (x["exit_date"] - x["entry_date"]).dt.days.clip(lower=1)
+    capital_days = float((holding_days * STAKE).sum())
+    avg_holding_days = float(holding_days.mean())
     exits = pd.DataFrame({"date": x["exit_date"], "pnl": pnl}).groupby("date", as_index=False)["pnl"].sum().sort_values("date")
     exits["equity"] = exits["pnl"].cumsum()
     exits["peak"] = exits["equity"].cummax().clip(lower=0)
@@ -181,6 +184,10 @@ def portfolio_stats(df):
             "total_pnl_fixed_10000_per_trade_inr": round(float(pnl.sum()), 2),
             "peak_concurrent_positions": int(peak),
             "minimum_capital_at_10000_each_inr": int(peak*STAKE),
+            "average_holding_days": round(avg_holding_days, 1),
+            "total_capital_days_inr_days": round(capital_days, 2),
+            "pnl_per_1_lakh_capital_day_inr": round(float(pnl.sum())/capital_days*100000, 2) if capital_days else None,
+            "pnl_on_peak_capital_pct": round(float(pnl.sum())/(peak*STAKE)*100, 2) if peak else None,
             "realised_equity_max_drawdown_inr": round(float(exits["drawdown"].min()), 2),
             "best_trade_pct": round(float(x["return_pct"].max()), 2),
             "worst_trade_pct": round(float(x["return_pct"].min()), 2)}
@@ -212,8 +219,11 @@ def main():
         if (a,b,c,s) == (0.50,0.50,"T4",10):
             df.to_csv("monthly_ath_exit_optimizer_baseline_trades.csv", index=False)
         if n % 12 == 0: print(f"Completed {n}/{len(configs)} configurations")
-    out = pd.DataFrame(summaries).sort_values(
-        ["total_pnl_fixed_10000_per_trade_inr", "profit_factor"], ascending=False)
+    out = pd.DataFrame(summaries)
+    # Rank by capital productivity first, then absolute P&L and profit factor.
+    out = out.sort_values(
+        ["pnl_per_1_lakh_capital_day_inr", "total_pnl_fixed_10000_per_trade_inr", "profit_factor"],
+        ascending=False)
     out.to_csv("monthly_ath_exit_optimizer_results.csv", index=False)
     with open("monthly_ath_exit_optimizer_summary.json","w") as f:
         json.dump({"period": f"{START} to latest available daily bar",
