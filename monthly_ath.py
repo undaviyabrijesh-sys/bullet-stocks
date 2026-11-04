@@ -145,8 +145,11 @@ def telegram_entry_alert(r, pos, now):
         f"• T2: Move SL to cost ({fmt(pos['entry'])})\\n"
         f"• T3: Sell 50% of remaining\\n"
         f"• T4: Activate monthly SMA10 trailing SL\\n\\n"
-        f"Breakout trigger: {fmt(r['trigger'])}\\n"
-        f"Score: {r['score']:.0f}/100"
+        f"Breakout trigger: {fmt(r['trigger'])}\\n\\n"
+        f"CONFIDENCE & MOMENTUM\\n"
+        f"Confidence score: {r['score']:.0f}/100\\n"
+        f"Volume: {r.get('vol_ratio', 0):.1f}x average\\n"
+        f"Relative Strength vs Nifty: {r.get('rs', 0) * 100:+.0f}%"
     )
     telegram_send(message)
 
