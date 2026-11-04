@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - monthly_ath.py
+      - tests/**
       - .github/workflows/ath-alert.yml
   schedule:
     # NSE hours 9:15-15:30 IST = 03:45-10:00 UTC, Mon-Fri, every 5 min
@@ -41,6 +42,11 @@ jobs:
           cache: 'pip'
 
       - run: pip install -r requirements.txt
+
+      - name: Validate scanner and exit-plan rules
+        run: |
+          python -m py_compile monthly_ath.py
+          python -m unittest discover -s tests -v
 
       - name: Run scanner
         env:
