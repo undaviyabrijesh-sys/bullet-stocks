@@ -146,7 +146,7 @@ def telegram_entry_alert(r, pos, now):
         f"• T1: Book 25% of original quantity\n"
         f"• T2: Move SL to cost and activate monthly SMA10 trailing SL\n"
         f"• T3: Book 25% of remaining quantity\n"
-        f"• Hold the balance until trailing SL or 90-day time exit\n\n"
+        f"• Hold the balance until trailing SL or 90-trading-session time exit\n\n"
         f"Breakout trigger: {fmt(r['trigger'])}"
     )
     telegram_send(message)
@@ -156,11 +156,13 @@ def telegram_position_update(symbol, ev, entry):
     kind = ev.get("type")
     labels = {
         "T1": "🎯 TARGET 1 HIT",
-        "T2": "🛡️ TARGET 2 HIT · SMA10 TRAIL ACTIVE",
+        "T2": "🛡️ TARGET 2 HIT · SMA10 TRAIL ARMED",
         "T3": "🎯 TARGET 3 HIT",
         "T4": "🚀 LEGACY TARGET 4 HIT",
         "TRAIL": "🔒 MONTHLY SMA10 TRAILING STOP UPDATED",
     }
+    if kind == "T2" and not ev.get("trail_active"):
+        labels["T2"] = "🛡️ TARGET 2 HIT · STOP TO COST"
     if kind not in labels:
         return
     active_sl = float(ev.get("active_sl", ev.get("new_sl", entry * (1 - STOP_FRACTION))))
@@ -176,7 +178,7 @@ def telegram_position_update(symbol, ev, entry):
     if kind == "T2":
         message += f"\nSTOP LOSS UPDATED\nNew SL: {fmt(active_sl)}\n"
         if ev.get("trail_active"):
-            message += "Monthly SMA10 trailing: ACTIVE\n"
+            message += f"Monthly SMA10 trailing: ARMED ({ev.get('trail_effective', 'next session')})\n"
     elif kind in ("T4", "TRAIL"):
         message += f"\nTrailing SL active\nActive SL: {fmt(active_sl)}\n"
     else:
@@ -205,7 +207,7 @@ def telegram_closed_update(c):
         f"Entry: {fmt(c['entry'])}\n"
         f"Exit: {fmt(c['exit'])}\n"
         f"Final Stop Loss: {fmt(c['sl'])}\n"
-        f"T3 reference: {fmt(c['target'])}\n"
+        f"{c.get('target_label', 'T3')} reference: {fmt(c['target'])}\n"
         f"Realised return: {c['pnl'] * 100:+.2f}% of original position ({c['r']:+.2f}R)\n"
         f"Status: CLOSED · Held {c['days']} day(s)"
     )
@@ -258,7 +260,7 @@ def stock_entry_field(r):
         f"**Exit plan:** T1 {fmt(r['entry'] * 1.25)} (+25%, book 25% original) · "
         f"T2 {fmt(r['entry'] * 1.40)} (+40%, SL → entry + SMA10 trail) · "
         f"T3 {fmt(r['entry'] * 1.50)} (+50%, book 25% remaining) · "
-        f"Hold balance to trail SL / 90-day exit\n"
+        f"Hold balance to trail SL / 90-session exit\n"
         f"[Open chart]({link})"
     )
     return {"name": f"{r['symbol']}  |  Score {r['score']:.0f}/100", "value": value, "inline": False}
@@ -306,7 +308,7 @@ def send_alert(trig, pot, scanned, now, n_trig_all, n_pot_all, mode):
 # ---------- Position alerts ----------
 RESULT_STYLE = {
     "SL": ("🛑", "STOP-LOSS EXIT", RED),
-    "EXPIRED": ("⏰", f"TIME EXIT · {MAX_HOLD_DAYS} DAYS", GREY),
+    "EXPIRED": ("⏰", "TIME EXIT", GREY),
     "COMPLETED": ("🏁", "POSITION COMPLETED", GREEN),
 }
 
@@ -328,14 +330,14 @@ def closed_embed(c):
         "fields": [
             {"name": "Entry → Exit", "value": f"{fmt(c['entry'])} → **{fmt(c['exit'])}**", "inline": True},
             {"name": "Realized return", "value": f"**{c['pnl'] * 100:+.2f}%** of original position · **{c['r']:+.2f}R**", "inline": True},
-            {"name": "Final stop / T3 reference", "value": f"{fmt(c['sl'])} / {fmt(c['target'])}", "inline": True},
+            {"name": f"Final stop / {c.get('target_label', 'T3')} reference", "value": f"{fmt(c['sl'])} / {fmt(c['target'])}", "inline": True},
         ],
     }
 
 
 EVENT_STYLE = {
     "T1": ("💰", "T1 REACHED · +25%", GREEN),
-    "T2": ("🛡️", "T2 REACHED · STOP TO COST + SMA10 TRAIL", GREEN),
+    "T2": ("🛡️", "T2 REACHED · STOP TO COST + SMA10 TRAIL ARMED", GREEN),
     "T3": ("💵", "T3 REACHED · +50%", GREEN),
     "T4": ("🚀", "T4 REACHED · TRAILING ACTIVATED", BLUE),
     "TRAIL": ("🔒", "TRAILING STOP RAISED", BLUE),
@@ -344,6 +346,8 @@ EVENT_STYLE = {
 
 def position_event_embed(symbol, ev, entry):
     icon, label, color = EVENT_STYLE.get(ev["type"], ("📌", ev["type"], GREY))
+    if ev["type"] == "T2" and not ev.get("trail_active"):
+        icon, label, color = ("🛡️", "T2 REACHED · STOP TO COST", GREEN)
     event_date = pd.Timestamp(ev["date"])
     if event_date.tzinfo is None:
         event_date = event_date.tz_localize(IST)
@@ -1002,7 +1006,12 @@ def close_position(sym, pos, ev):
         "entry": entry,
         "exit": float(ev["exit"]),
         "sl": float(pos["sl"]),
-        "target": float(pos.get("t3", pos.get("t4", entry * (1 + T3_RETURN)))),
+        "target": float(
+            pos.get("t3", entry * (1 + T3_RETURN))
+            if int(pos.get("strategy_version", 2)) >= EXIT_STRATEGY_VERSION
+            else pos.get("t4", entry * (1 + T4_RETURN))
+        ),
+        "target_label": "T3" if int(pos.get("strategy_version", 2)) >= EXIT_STRATEGY_VERSION else "T4",
         "pnl": float(ev.get("pnl", pos.get("realised_pnl_fraction", 0.0))),
         "r": float(ev.get("pnl", 0.0) * entry / risk) if risk > 0 else 0.0,
         "opened": pos["opened"],
