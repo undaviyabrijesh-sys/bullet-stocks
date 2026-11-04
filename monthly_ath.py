@@ -115,7 +115,7 @@ def telegram_send(text):
             label, value = safe.split(": ", 1)
             safe = f"<b>{label}:</b> <b>{value}</b>"
         formatted.append(safe)
-    message = "\\n".join(formatted) + f"\\n\\n<i>⚠️ {html.escape(disclaimer)}</i>"
+    message = "\n".join(formatted) + f"\n\n<i>⚠️ {html.escape(disclaimer)}</i>"
     try:
         response = requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
@@ -135,18 +135,18 @@ def telegram_entry_alert(r, pos, now):
         return
     symbol = r["symbol"]
     message = (
-        f"🟢 {symbol} — ENTRY TRIGGERED\\n\\n"
-        f"Entry: {fmt(pos['entry'])}\\n"
-        f"Initial SL: {fmt(pos['initial_sl'])}\\n\\n"
-        f"TARGET LEVELS\\n"
-        f"🎯 T1: {fmt(pos['t1'])} (+25%)\\n"
-        f"🎯 T2: {fmt(pos['t2'])} (+40%)\\n"
-        f"🎯 T3: {fmt(pos['t3'])} (+50%)\\n\\n"
-        f"EXIT PLAN\\n"
-        f"• T1: Book 25% of original quantity\\n"
-        f"• T2: Move SL to cost and activate monthly SMA10 trailing SL\\n"
-        f"• T3: Book 25% of remaining quantity\\n"
-        f"• Hold the balance until trailing SL or 90-day time exit\\n\\n"
+        f"🟢 {symbol} — ENTRY TRIGGERED\n\n"
+        f"Entry: {fmt(pos['entry'])}\n"
+        f"Initial SL: {fmt(pos['initial_sl'])}\n\n"
+        f"TARGET LEVELS\n"
+        f"🎯 T1: {fmt(pos['t1'])} (+25%)\n"
+        f"🎯 T2: {fmt(pos['t2'])} (+40%)\n"
+        f"🎯 T3: {fmt(pos['t3'])} (+50%)\n\n"
+        f"EXIT PLAN\n"
+        f"• T1: Book 25% of original quantity\n"
+        f"• T2: Move SL to cost and activate monthly SMA10 trailing SL\n"
+        f"• T3: Book 25% of remaining quantity\n"
+        f"• Hold the balance until trailing SL or 90-day time exit\n\n"
         f"Breakout trigger: {fmt(r['trigger'])}"
     )
     telegram_send(message)
@@ -169,27 +169,27 @@ def telegram_position_update(symbol, ev, entry):
     sold = float(ev.get("sold_fraction", 0.0))
     pct = (price / entry - 1) * 100 if entry else 0.0
     message = (
-        f"{labels[kind]} · {symbol}\\n\\n"
-        f"Target / event price: {fmt(price)} ({pct:+.1f}%)\\n"
-        f"Entry: {fmt(entry)}\\n"
+        f"{labels[kind]} · {symbol}\n\n"
+        f"Target / event price: {fmt(price)} ({pct:+.1f}%)\n"
+        f"Entry: {fmt(entry)}\n"
     )
     if kind == "T2":
-        message += f"\\nSTOP LOSS UPDATED\\nNew SL: {fmt(active_sl)}\\n"
+        message += f"\nSTOP LOSS UPDATED\nNew SL: {fmt(active_sl)}\n"
         if ev.get("trail_active"):
-            message += "Monthly SMA10 trailing: ACTIVE\\n"
+            message += "Monthly SMA10 trailing: ACTIVE\n"
     elif kind in ("T4", "TRAIL"):
-        message += f"\\nTrailing SL active\\nActive SL: {fmt(active_sl)}\\n"
+        message += f"\nTrailing SL active\nActive SL: {fmt(active_sl)}\n"
     else:
-        message += f"\\nActive SL: {fmt(active_sl)}\\n"
+        message += f"\nActive SL: {fmt(active_sl)}\n"
     if sold > 0:
-        message += f"Quantity booked: {sold * 100:.0f}% of original\\n"
-    message += f"Quantity remaining: {remaining * 100:.0f}%\\nStatus: OPEN"
+        message += f"Quantity booked: {sold * 100:.0f}% of original\n"
+    message += f"Quantity remaining: {remaining * 100:.0f}%\nStatus: OPEN"
     event_date = pd.Timestamp(ev.get("date", datetime.now(IST)))
     if event_date.tzinfo is None:
         event_date = event_date.tz_localize(IST)
     else:
         event_date = event_date.tz_convert(IST)
-    message += f"\\nTime: {event_date:%d %b %Y · %I:%M %p} IST"
+    message += f"\nTime: {event_date:%d %b %Y · %I:%M %p} IST"
     telegram_send(message)
 
 def telegram_closed_update(c):
@@ -201,16 +201,16 @@ def telegram_closed_update(c):
         "COMPLETED": "🏁 POSITION COMPLETED",
     }.get(result, f"📌 POSITION CLOSED · {result}")
     message = (
-        f"{title} · {c['symbol']}\\n"
-        f"Entry: {fmt(c['entry'])}\\n"
-        f"Exit: {fmt(c['exit'])}\\n"
-        f"Final Stop Loss: {fmt(c['sl'])}\\n"
-        f"T3 reference: {fmt(c['target'])}\\n"
-        f"Realised return: {c['pnl'] * 100:+.2f}% of original position ({c['r']:+.2f}R)\\n"
+        f"{title} · {c['symbol']}\n"
+        f"Entry: {fmt(c['entry'])}\n"
+        f"Exit: {fmt(c['exit'])}\n"
+        f"Final Stop Loss: {fmt(c['sl'])}\n"
+        f"T3 reference: {fmt(c['target'])}\n"
+        f"Realised return: {c['pnl'] * 100:+.2f}% of original position ({c['r']:+.2f}R)\n"
         f"Status: CLOSED · Held {c['days']} day(s)"
     )
     if c.get("note"):
-        message += f"\\nNote: {c['note']}"
+        message += f"\nNote: {c['note']}"
     telegram_send(message)
 
 
@@ -258,7 +258,7 @@ def stock_entry_field(r):
         f"**Exit plan:** T1 {fmt(r['entry'] * 1.25)} (+25%, book 25% original) · "
         f"T2 {fmt(r['entry'] * 1.40)} (+40%, SL → entry + SMA10 trail) · "
         f"T3 {fmt(r['entry'] * 1.50)} (+50%, book 25% remaining) · "
-        f"Hold balance to trail SL / 90-day exit\\n"
+        f"Hold balance to trail SL / 90-day exit\n"
         f"[Open chart]({link})"
     )
     return {"name": f"{r['symbol']}  |  Score {r['score']:.0f}/100", "value": value, "inline": False}
