@@ -73,45 +73,104 @@ BLUE = 0x3498DB
 GREY = 0x95A5A6
 
 
-# ---------- Discord ----------
-def telegram_post(payload):
-    """Mirror stock-event alerts to the configured Telegram group."""
+# ---------- Discord / Telegram ----------
+def telegram_send(text):
+    """Send only explicitly selected trade-entry and position-status messages to Telegram."""
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
     if not token or not chat_id:
-        print("Telegram not configured; set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID")
+        print("Telegram not configured; skipping Telegram trade alert.")
         return
+    disclaimer = "Educational purposes only. Not investment advice. Verify prices and manage risk independently."
+    message = f"{text.strip()}\\n\\n⚠️ {disclaimer}"
+    try:
+        response = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": message, "disable_web_page_preview": True},
+            timeout=20,
+        )
+        result = response.json()
+        if not response.ok or not result.get("ok"):
+            print("Telegram error:", response.status_code, result.get("description", "Unknown error"))
+    except Exception as exc:
+        print("Telegram failed:", exc)
 
-    lines = []
-    content = payload.get("content")
-    if content:
-        lines.append(str(content))
-    for embed in payload.get("embeds", []):
-        if embed.get("title"):
-            lines.append(str(embed["title"]))
-        if embed.get("description"):
-            lines.append(str(embed["description"]))
-        for field in embed.get("fields", []):
-            name, value = field.get("name"), field.get("value")
-            if name or value:
-                lines.append(f"{name or ''}: {value or ''}")
-        footer = embed.get("footer", {}).get("text")
-        if footer:
-            lines.append(str(footer))
-    message = "\n".join(lines).strip() or "Bullet Stocks event"
-    # Telegram Bot API text limit is 4096 characters; leave room for chunking.
-    chunks = [message[i:i + 3900] for i in range(0, len(message), 3900)]
-    for chunk in chunks:
-        try:
-            response = requests.post(
-                f"https://api.telegram.org/bot{token}/sendMessage",
-                json={"chat_id": chat_id, "text": chunk, "disable_web_page_preview": True},
-                timeout=20,
-            )
-            if response.status_code >= 300:
-                print("Telegram error:", response.status_code, response.text[:300])
-        except Exception as exc:
-            print("Telegram failed:", exc)
+
+def telegram_entry_alert(r, pos, now):
+    """Telegram entry card: only sent for a newly triggered and tracked entry."""
+    if not pos:
+        return
+    symbol = r["symbol"]
+    message = (
+        f"🟢 ENTRY TRIGGERED · {symbol}\\n"
+        f"Time: {now:%d %b %Y · %I:%M %p} IST\\n"
+        f"Entry: {fmt(pos['entry'])}\\n"
+        f"Stop Loss: {fmt(pos['initial_sl'])}\\n"
+        f"Target 1: {fmt(pos['t1'])} (+25%)\\n"
+        f"Target 2: {fmt(pos['t2'])} (+40%)\\n"
+        f"Target 3: {fmt(pos['t3'])} (+50%)\\n"
+        f"Target 4: {fmt(pos['t4'])} (+100%)\\n"
+        f"Breakout trigger: {fmt(r['trigger'])}\\n"
+        f"Setup: Monthly ATH breakout · Score {r['score']:.0f}/100\\n"
+        f"Chart: {tv_link(symbol)}"
+    )
+    telegram_send(message)
+
+
+def telegram_position_update(symbol, ev, entry):
+    """Send target/stop/trailing milestones, never routine position snapshots."""
+    labels = {
+        "T1": "🎯 TARGET 1 HIT",
+        "T2": "🎯 TARGET 2 HIT · STOP MOVED TO COST",
+        "T3": "🎯 TARGET 3 HIT",
+        "T4": "🚀 TARGET 4 HIT · TRAILING STOP ACTIVE",
+        "TRAIL": "🔒 TRAILING STOP UPDATED",
+    }
+    kind = ev.get("type")
+    if kind not in labels:
+        return
+    active_sl = float(ev.get("active_sl", ev.get("new_sl", entry * (1 - STOP_FRACTION))))
+    price = float(ev.get("price", active_sl))
+    remaining = float(ev.get("remaining_fraction", 1.0))
+    sold = float(ev.get("sold_fraction", 0.0))
+    message = (
+        f"{labels[kind]} · {symbol}\\n"
+        f"Entry: {fmt(entry)}\\n"
+        f"Target / event price: {fmt(price)}\\n"
+        f"Active Stop Loss: {fmt(active_sl)}\\n"
+        f"Quantity booked: {sold * 100:.0f}% of original" if sold > 0 else
+        f"{labels[kind]} · {symbol}\\nEntry: {fmt(entry)}\\nTarget / event price: {fmt(price)}\\nActive Stop Loss: {fmt(active_sl)}"
+    )
+    message += f"\\nQuantity remaining: {remaining * 100:.0f}%"
+    event_date = pd.Timestamp(ev.get("date", datetime.now(IST)))
+    if event_date.tzinfo is None:
+        event_date = event_date.tz_localize(IST)
+    else:
+        event_date = event_date.tz_convert(IST)
+    message += f"\\nTime: {event_date:%d %b %Y · %I:%M %p} IST"
+    telegram_send(message)
+
+
+def telegram_closed_update(c):
+    """Send terminal status when a tracked position exits."""
+    result = c.get("result", "CLOSED")
+    title = {
+        "SL": "🛑 STOP LOSS HIT · POSITION CLOSED",
+        "EXPIRED": "⏰ TIME EXIT · POSITION CLOSED",
+        "COMPLETED": "🏁 POSITION COMPLETED",
+    }.get(result, f"📌 POSITION CLOSED · {result}")
+    message = (
+        f"{title} · {c['symbol']}\\n"
+        f"Entry: {fmt(c['entry'])}\\n"
+        f"Exit: {fmt(c['exit'])}\\n"
+        f"Final Stop Loss: {fmt(c['sl'])}\\n"
+        f"Final target reference: {fmt(c['target'])}\\n"
+        f"Realised return: {c['pnl'] * 100:+.2f}% of original position ({c['r']:+.2f}R)\\n"
+        f"Status: CLOSED · Held {c['days']} day(s)"
+    )
+    if c.get("note"):
+        message += f"\\nNote: {c['note']}"
+    telegram_send(message)
 
 
 def discord_post(payload):
@@ -125,8 +184,6 @@ def discord_post(payload):
                 print("Discord error:", r.status_code, r.text[:300])
         except Exception as e:
             print("Discord failed:", e)
-    # Keep Telegram independent: a missing Discord webhook must not block it.
-    telegram_post(payload)
 
 
 def discord(msg):
@@ -1037,21 +1094,27 @@ def main():
 
     # ---- 5. open a tracked position for every new triggered entry ----
     for r in trig:
-        positions[r["symbol"]] = make_position(
+        pos = make_position(
             r["entry"], r["level"], now.isoformat(timespec="seconds"), r["setup_month"],
             r["monthly_sma20"], r.get("monthly_sma10"),
         )
+        if pos is not None:
+            positions[r["symbol"]] = pos
+            telegram_entry_alert(r, pos, now)
         prices[r["symbol"]] = r["price"]
 
     # ---- 6. Discord ----
     for sym, ev, event_entry in milestone_alerts:
         discord_post({"embeds": [position_event_embed(sym, ev, event_entry)]})
+        telegram_position_update(sym, ev, event_entry)
 
     if newly_closed:
         discord_post({
             "content": f"📣 **POSITION EXIT UPDATE** · {now:%d %b %Y · %I:%M %p} IST",
             "embeds": [closed_embed(c) for c in newly_closed[:10]],
         })
+        for closed_position in newly_closed:
+            telegram_closed_update(closed_position)
 
     # Send only genuine new events. No empty scan reports and no routine portfolio snapshots.
     if trig or pot:
