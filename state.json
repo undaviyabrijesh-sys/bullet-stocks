@@ -46,7 +46,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-04T10:09:00+05:30"
+   "last_processed_bar": "2026-11-04T10:13:00+05:30"
   },
   "KINGFA": {
    "entry": 6733.02,
@@ -68,7 +68,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-04T10:02:00+05:30"
+   "last_processed_bar": "2026-11-04T10:11:00+05:30"
   },
   "SONACOMS": {
    "entry": 853.74,
@@ -90,7 +90,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-04T10:09:00+05:30"
+   "last_processed_bar": "2026-11-04T10:13:00+05:30"
   },
   "KRISHANA": {
    "entry": 234.6,
@@ -112,7 +112,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-04T10:09:00+05:30"
+   "last_processed_bar": "2026-11-04T10:13:00+05:30"
   },
   "SHREEPUSHK": {
    "entry": 635.7999877929688,
@@ -134,7 +134,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-04T10:09:00+05:30"
+   "last_processed_bar": "2026-11-04T10:13:00+05:30"
   },
   "NITINSPIN": {
    "entry": 690.25,
@@ -156,7 +156,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-04T10:09:00+05:30"
+   "last_processed_bar": "2026-11-04T10:13:00+05:30"
   },
   "PHOENIXLTD": {
    "entry": 2044.0,
@@ -177,7 +177,7 @@
    "trailing": false,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-04T10:09:00+05:30"
+   "last_processed_bar": "2026-11-04T10:13:00+05:30"
   },
   "ADANIPORTS": {
    "entry": 1915.0,
@@ -198,7 +198,7 @@
    "trailing": false,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-04T10:09:00+05:30"
+   "last_processed_bar": "2026-11-04T10:13:00+05:30"
   }
  },
  "closed": [
