@@ -1,0 +1,41 @@
+name: Monthly ATH Exit Optimisation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backtest_monthly_ath_exit_optimizer.py"
+      - ".github/workflows/monthly-ath-exit-optimizer.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  optimise:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas yfinance requests
+      - name: Run exit optimisation
+        run: python -u backtest_monthly_ath_exit_optimizer.py
+      - name: Upload optimisation results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monthly-ath-exit-optimisation-results
+          path: |
+            monthly_ath_exit_optimizer_results.csv
+            monthly_ath_exit_optimizer_summary.json
+            monthly_ath_exit_optimizer_baseline_trades.csv
+          if-no-files-found: warn
+          retention-days: 30
