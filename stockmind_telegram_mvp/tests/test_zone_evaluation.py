@@ -1,0 +1,97 @@
+import unittest
+
+from stockmind_telegram_mvp.app.zone_evaluation import evaluate_zone_predictions
+
+
+def zone(zone_type="demand", **overrides):
+    value = {
+        "zone_type": zone_type,
+        "x_start": 0.2,
+        "x_end": 0.6,
+        "y_top": 0.4,
+        "y_bottom": 0.6,
+    }
+    value.update(overrides)
+    return value
+
+
+def prediction(zone_type="demand", **overrides):
+    value = zone(zone_type, **overrides)
+    value.setdefault("draw_overlay", True)
+    return value
+
+
+class ZoneEvaluationTests(unittest.TestCase):
+    def test_exact_match_has_perfect_scores(self):
+        result = evaluate_zone_predictions([prediction()], [zone()])
+        self.assertEqual(result["overall"]["true_positive"], 1)
+        self.assertEqual(result["overall"]["precision"], 1.0)
+        self.assertEqual(result["overall"]["recall"], 1.0)
+        self.assertEqual(result["overall"]["f1"], 1.0)
+        self.assertEqual(result["overall"]["mean_iou"], 1.0)
+
+    def test_supply_does_not_match_demand_at_same_coordinates(self):
+        result = evaluate_zone_predictions([prediction("supply")], [zone("demand")])
+        self.assertEqual(result["overall"]["true_positive"], 0)
+        self.assertEqual(result["overall"]["false_positive"], 1)
+        self.assertEqual(result["overall"]["false_negative"], 1)
+
+    def test_duplicate_predictions_only_match_one_reference(self):
+        result = evaluate_zone_predictions([prediction(), prediction()], [zone()])
+        self.assertEqual(result["overall"]["true_positive"], 1)
+        self.assertEqual(result["overall"]["false_positive"], 1)
+        self.assertEqual(result["overall"]["false_negative"], 0)
+
+    def test_iou_threshold_rejects_weak_overlap(self):
+        result = evaluate_zone_predictions(
+            [prediction(x_start=0.5, x_end=0.9)], [zone()], iou_threshold=0.5
+        )
+        self.assertEqual(result["overall"]["true_positive"], 0)
+
+    def test_invalid_or_non_drawable_predictions_are_reported_as_ignored(self):
+        result = evaluate_zone_predictions(
+            [
+                prediction(draw_overlay=False),
+                prediction(x_start=float("nan")),
+                prediction(x_start=0.8, x_end=0.2),
+            ],
+            [zone()],
+        )
+        self.assertEqual(result["ignored_prediction_count"], 3)
+        self.assertEqual(result["overall"]["predicted"], 0)
+        self.assertEqual(result["overall"]["false_negative"], 1)
+
+    def test_predictions_beyond_renderer_eight_zone_cap_are_ignored(self):
+        result = evaluate_zone_predictions(
+            [prediction() for _ in range(9)], [zone()]
+        )
+        self.assertEqual(result["overall"]["predicted"], 8)
+        self.assertEqual(result["ignored_prediction_count"], 1)
+
+    def test_malformed_zone_type_is_ignored_for_prediction_and_rejected_for_reference(self):
+        malformed = prediction(zone_type=["demand"])
+        result = evaluate_zone_predictions([malformed], [zone()])
+        self.assertEqual(result["ignored_prediction_count"], 1)
+        with self.assertRaisesRegex(ValueError, "Invalid manual reference zone"):
+            evaluate_zone_predictions([prediction()], [zone(zone_type=["demand"])])
+
+    def test_invalid_manual_annotation_fails_loudly(self):
+        with self.assertRaisesRegex(ValueError, "Invalid manual reference zone"):
+            evaluate_zone_predictions([prediction()], [zone(x_start=0.8, x_end=0.2)])
+
+    def test_empty_comparison_uses_undefined_metrics_not_fake_perfect_score(self):
+        result = evaluate_zone_predictions([], [])
+        self.assertIsNone(result["overall"]["precision"])
+        self.assertIsNone(result["overall"]["recall"])
+        self.assertIsNone(result["overall"]["f1"])
+        self.assertIsNone(result["overall"]["mean_iou"])
+
+    def test_invalid_threshold_is_rejected(self):
+        for threshold in (0, 1.1, float("nan"), True):
+            with self.subTest(threshold=threshold):
+                with self.assertRaises(ValueError):
+                    evaluate_zone_predictions([], [], iou_threshold=threshold)
+
+
+if __name__ == "__main__":
+    unittest.main()
