@@ -14,9 +14,20 @@ from interpretation. Do not promise returns or present uncertain forecasts as fa
 Do not place trades or claim to provide personalised investment advice. Provide research and
 educational analysis only.
 
-For quote questions use get_quote. For company lookup use search_stocks when the symbol is unclear.
-For financial health use get_financials. For historical price context use get_price_history.
-Do not make more data calls than necessary. Identify Tapetide as the data source.
+STOCK SEARCH RULES:
+- Use search_stocks for company names, brand names, ticker symbols, BSE codes and ISINs.
+- Search the user's original wording first; do not force a guessed ticker.
+- Tapetide supports common brand/renamed aliases (for example, Zomato can resolve to ETERNAL)
+  and typo tolerance for queries of four or more characters.
+- If multiple plausible matches are returned, show the best matches with symbol, company name,
+  exchange identifier, sector and industry, then ask which one the user means.
+- Use the exact returned symbol for subsequent quote, financial and price-history calls.
+- Do not assume every match is currently listed; check is_active and explain inactive/delisted status.
+- Do not silently choose between similarly named companies.
+
+For quote questions use get_quote. For financial health use get_financials.
+For historical price context use get_price_history. Do not make more data calls than necessary.
+Identify Tapetide as the data source.
 """
 
 TOOLS = [
@@ -24,11 +35,21 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_stocks",
-            "description": "Find an Indian listed stock and resolve its symbol from a company name or query.",
+            "description": (
+                "Search Tapetide's Indian stock directory (~8,200 stocks) by company name, "
+                "brand/old name, NSE symbol, BSE code or ISIN. Supports sector/industry filters. "
+                "Use this before other stock endpoints whenever the symbol is uncertain."
+            ),
             "parameters": {
                 "type": "object",
-                "properties": {"query": {"type": "string"}},
+                "properties": {
+                    "query": {"type": "string", "description": "Company, brand, symbol, BSE code or ISIN."},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
+                    "sector": {"type": "string"},
+                    "industry": {"type": "string"},
+                },
                 "required": ["query"],
+                "additionalProperties": False,
             },
         },
     },
@@ -107,21 +128,26 @@ class ResearchAI:
                 args = json.loads(call.function.arguments or "{}")
                 try:
                     if call.function.name == "search_stocks":
-                        result = await self.market_data.search_stocks(args["query"])
+                        result = await self.market_data.search_stocks(
+                            args["query"],
+                            limit=args.get("limit", 10),
+                            sector=args.get("sector"),
+                            industry=args.get("industry"),
+                        )
                     elif call.function.name == "get_quote":
-                        result = await self.market_data.quote(args["symbol"].upper())
+                        result = await self.market_data.quote(args["symbol"])
                     elif call.function.name == "get_financials":
                         result = await self.market_data.financials(
-                            args["symbol"].upper(), args.get("section", "annual")
+                            args["symbol"], args.get("section", "annual")
                         )
                     elif call.function.name == "get_price_history":
                         result = await self.market_data.price_history(
-                            args["symbol"].upper(), args.get("days", 90)
+                            args["symbol"], args.get("days", 90)
                         )
                     else:
                         result = {"error": "Unsupported tool"}
                 except Exception as exc:
-                    result = {"error": str(exc)}
+                    result = {"error": str(exc), "type": type(exc).__name__}
 
                 messages.append(
                     {
