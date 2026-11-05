@@ -27,8 +27,7 @@ def render_overlay(image_bytes: bytes, zones: list[dict]) -> tuple[bytes | None,
         box = (round(x0 * width), round(y0 * height), round(x1 * width), round(y1 * height))
         draw.rectangle(box, fill=color, outline=edge, width=max(2, width // 600))
         title = "SUPPLY" if zone["zone_type"] == "supply" else "DEMAND"
-        label = str(zone.get("label") or title)[:36]
-        draw.text((box[0] + 5, max(0, box[1] - 18)), label, fill=edge[:3] + (255,))
+        draw.text((box[0] + 5, max(0, box[1] - 18)), title, fill=edge[:3] + (255,))
         count += 1
     if not count:
         return None, 0
