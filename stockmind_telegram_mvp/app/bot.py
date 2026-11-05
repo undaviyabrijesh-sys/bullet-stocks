@@ -6,10 +6,11 @@ from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message
+from aiogram.types import BufferedInputFile, Message
 
 from .ai import ResearchAI
 from .crypto import BinanceMarketData
+from .overlay_engine import render_overlay
 from .config import (
     BETA_USER_LIMIT,
     DAILY_QUERY_LIMIT,
@@ -91,18 +92,32 @@ async def run_research(
         else "🔎 Understanding your question and checking market data…"
     )
     try:
-        answer = await research.answer(
-            list(histories[user_id]),
-            user_text,
-            image_bytes=image_bytes,
-            image_mime_type=image_mime_type,
-        )
+        overlay_image = None
+        if image_bytes is not None:
+            chart_result = await research.analyze_chart_image(
+                list(histories[user_id]), user_text, image_bytes, image_mime_type
+            )
+            answer = chart_result.get("analysis") or "I could not read the chart reliably."
+            try:
+                overlay_image, drawn_count = render_overlay(image_bytes, chart_result.get("zones", []))
+            except Exception:
+                overlay_image, drawn_count = None, 0
+            if not drawn_count:
+                answer += "\n\nI did not draw an overlay because no zone location was clear enough."
+        else:
+            answer = await research.answer(list(histories[user_id]), user_text)
+
         history_text = user_text or "Please analyse the attached chart screenshot for DNS zones."
         if image_bytes is not None:
             history_text += "\n[Chart screenshot attached; visual analysis was performed.]"
         histories[user_id].append({"role": "user", "content": history_text})
         histories[user_id].append({"role": "assistant", "content": answer})
         await status.edit_text(answer[:4000])
+        if overlay_image is not None:
+            await message.answer_photo(
+                BufferedInputFile(overlay_image, filename="stockmind-chart-zones.jpg"),
+                caption="StockMind AI visual zone overlay — estimated from this screenshot; verify against the chart price scale.",
+            )
     except Exception:
         await status.edit_text(
             "I couldn't complete this analysis right now. For screenshots, check that "
