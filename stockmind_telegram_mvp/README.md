@@ -70,3 +70,7 @@ The bot now returns a second image with translucent supply (red) and demand (gre
 Malformed or non-object model tool arguments are contained as explicit tool errors and returned to the model for recovery; they do not terminate the user's research turn before a response can be produced.
 
 Answers must show provider timestamps when available, distinguish missing/stale data from valid values, and never invent prices, fundamentals or technical indicators. This product is for research/education, not order execution or guaranteed-return claims.
+
+### Offline DNS benchmark and price-axis calibration
+
+The optional offline benchmark in `app/zone_evaluation.py` scores AI overlay geometry against manually annotated rectangles. It can also report price-boundary error when a fixture supplies at least three manually verified chart-axis anchors (`y` normalized to the full screenshot plus a positive numeric `price`). The calibration supports linear and logarithmic axes, rejects inconsistent/non-monotonic anchors, and refuses to extrapolate beyond the anchor range. This is manual calibration—not automatic OCR—and it does not change the Telegram bot's chart output. See [ZONE_BENCHMARK.md](ZONE_BENCHMARK.md) for the fixture format and scoring rules.
