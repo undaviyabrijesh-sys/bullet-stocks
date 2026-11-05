@@ -300,12 +300,15 @@ must explain that the overlay is an estimate and needs visual verification.
                 {"type": "image_url", "image_url": {"url": data_url, "detail": "high"}}
             ]}
         ]
-        response = await self.client.chat.completions.create(
-            model=self.vision_model,
-            messages=messages,
-            response_format=CHART_RESPONSE_FORMAT,
-            temperature=0.1
-        )
+        request_options = {
+            "model": self.vision_model,
+            "messages": messages,
+            "response_format": CHART_RESPONSE_FORMAT,
+            "temperature": 0.1,
+        }
+        if self.vision_model.startswith("gpt-6-luna"):
+            request_options["reasoning_effort"] = "none"
+        response = await self.client.chat.completions.create(**request_options)
         raw = response.choices[0].message.content
         if not raw:
             raise RuntimeError("Empty chart analysis response.")
@@ -322,13 +325,16 @@ must explain that the overlay is an estimate and needs visual verification.
         ]
 
         for _ in range(4):
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                tools=TOOLS,
-                tool_choice="auto",
-                temperature=0.2,
-            )
+            request_options = {
+                "model": self.model,
+                "messages": messages,
+                "tools": TOOLS,
+                "tool_choice": "auto",
+                "temperature": 0.2,
+            }
+            if self.model.startswith("gpt-6-luna"):
+                request_options["reasoning_effort"] = "none"
+            response = await self.client.chat.completions.create(**request_options)
             message = response.choices[0].message
             if not message.tool_calls:
                 return message.content or "I couldn't prepare a reliable answer. Please try again."
