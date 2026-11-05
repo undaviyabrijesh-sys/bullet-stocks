@@ -26,7 +26,6 @@ jobs:
           import html
           import json
           import os
-          import sys
           import urllib.error
           import urllib.request
 
@@ -46,6 +45,34 @@ jobs:
           def fmt(value):
               return "₹{:,.2f}".format(float(value))
 
+          def post_message(text, destination):
+              payload = json.dumps({
+                  "chat_id": destination,
+                  "text": text,
+                  "parse_mode": "HTML",
+                  "disable_web_page_preview": True,
+              }).encode("utf-8")
+              request = urllib.request.Request(
+                  f"https://api.telegram.org/bot{token}/sendMessage",
+                  data=payload,
+                  headers={"Content-Type": "application/json"},
+                  method="POST",
+              )
+              try:
+                  with urllib.request.urlopen(request, timeout=25) as response:
+                      return json.loads(response.read().decode("utf-8")), None
+              except urllib.error.HTTPError as exc:
+                  try:
+                      detail = json.loads(exc.read().decode("utf-8", errors="replace"))
+                  except Exception:
+                      detail = {"description": "HTTP " + str(exc.code)}
+                  migrated = detail.get("parameters", {}).get("migrate_to_chat_id")
+                  if migrated is not None:
+                      return None, ("migrate", str(migrated))
+                  return None, ("error", f"HTTP {exc.code}: {detail.get('description', 'Telegram request failed')}")
+              except Exception as exc:
+                  return None, ("error", f"{type(exc).__name__}: {exc}")
+
           failures = []
           for symbol in symbols:
               pos = positions.get(symbol)
@@ -54,17 +81,17 @@ jobs:
                   continue
 
               message_text = (
-                  f"🟢 {symbol} — ENTRY TRIGGERED\\n\\n"
-                  f"Entry: {fmt(pos['entry'])}\\n"
-                  f"Initial SL: {fmt(pos['initial_sl'])}\\n\\n"
-                  f"TARGET LEVELS\\n"
-                  f"🎯 T1: {fmt(pos['t1'])} (+25%)\\n"
-                  f"🎯 T2: {fmt(pos['t2'])} (+40%)\\n"
-                  f"🎯 T3: {fmt(pos['t3'])} (+50%)\\n\\n"
-                  f"EXIT PLAN\\n"
-                  f"• T1: Book 25% of original quantity\\n"
-                  f"• T2: Move SL to cost and activate monthly SMA10 trailing SL\\n"
-                  f"• T3: Book 25% of remaining quantity\\n"
+                  f"🟢 {symbol} — ENTRY TRIGGERED\n\n"
+                  f"Entry: {fmt(pos['entry'])}\n"
+                  f"Initial SL: {fmt(pos['initial_sl'])}\n\n"
+                  f"TARGET LEVELS\n"
+                  f"🎯 T1: {fmt(pos['t1'])} (+25%)\n"
+                  f"🎯 T2: {fmt(pos['t2'])} (+40%)\n"
+                  f"🎯 T3: {fmt(pos['t3'])} (+50%)\n\n"
+                  f"EXIT PLAN\n"
+                  f"• T1: Book 25% of original quantity\n"
+                  f"• T2: Move SL to cost and activate monthly SMA10 trailing SL\n"
+                  f"• T3: Book 25% of remaining quantity\n"
                   f"• Hold the balance until trailing SL or 90-trading-session time exit"
               )
 
@@ -78,34 +105,22 @@ jobs:
                       label, value = safe.split(": ", 1)
                       safe = f"<b>{label}:</b> <b>{value}</b>"
                   formatted.append(safe)
-              telegram_text = "\\n".join(formatted) + f"\\n\\n<i>⚠️ {html.escape(disclaimer)}</i>"
+              telegram_text = "\n".join(formatted) + f"\n\n<i>⚠️ {html.escape(disclaimer)}</i>"
 
-              payload = json.dumps({
-                  "chat_id": chat_id,
-                  "text": telegram_text,
-                  "parse_mode": "HTML",
-                  "disable_web_page_preview": True,
-              }).encode("utf-8")
-              request = urllib.request.Request(
-                  f"https://api.telegram.org/bot{token}/sendMessage",
-                  data=payload,
-                  headers={"Content-Type": "application/json"},
-                  method="POST",
-              )
+              result, outcome = post_message(telegram_text, chat_id)
+              if outcome and outcome[0] == "migrate":
+                  # Telegram group was upgraded; adopt Telegram's returned destination in memory.
+                  chat_id = outcome[1]
+                  print("Telegram chat migration detected; retrying this message using the updated destination.")
+                  result, outcome = post_message(telegram_text, chat_id)
 
-              try:
-                  with urllib.request.urlopen(request, timeout=25) as response:
-                      result = json.loads(response.read().decode("utf-8"))
-                  if not result.get("ok"):
-                      failures.append(symbol + ": Telegram API returned ok=false: " + str(result.get("description", "unknown")))
-                  else:
-                      message_id = result.get("result", {}).get("message_id")
-                      print(f"TELEGRAM_DELIVERED symbol={symbol} message_id={message_id}")
-              except urllib.error.HTTPError as exc:
-                  detail = exc.read().decode("utf-8", errors="replace")
-                  failures.append(f"{symbol}: HTTP {exc.code}: {detail[:300]}")
-              except Exception as exc:
-                  failures.append(f"{symbol}: request exception: {type(exc).__name__}: {exc}")
+              if outcome:
+                  failures.append(symbol + ": " + outcome[1])
+              elif not result or not result.get("ok"):
+                  failures.append(symbol + ": Telegram API did not confirm delivery")
+              else:
+                  message_id = result.get("result", {}).get("message_id")
+                  print(f"TELEGRAM_DELIVERED symbol={symbol} message_id={message_id}")
 
           if failures:
               print("Telegram resend failures:")
