@@ -4,7 +4,7 @@ A multilingual Telegram research assistant for Indian equities and crypto, inclu
 
 ## Included
 - Telegram bot (aiogram 3)
-- OpenAI tool-calling for intent understanding and research planning
+- OpenAI tool-calling for intent understanding and research planning (default model: GPT-6 Luna)
 - Tapetide REST adapter: stock search, latest/session-live quote, financial statements, daily history and historical 1/5/15-minute intraday bars
 - Binance public REST adapter: crypto spot and USD-M futures 24-hour ticker and OHLCV candles
 - Per-user conversational context
@@ -35,12 +35,12 @@ Windows activation: `.venv\\Scripts\\activate`.
 ## Configuration
 - TELEGRAM_BOT_TOKEN
 - OPENAI_API_KEY
-- OPENAI_MODEL (default: gpt-6-luna; function calling uses reasoning_effort=none)
+- OPENAI_MODEL (default: gpt-6-luna; Chat Completions function calling is configured with reasoning_effort=none)
 - TAPETIDE_TOKEN
 - DAILY_QUERY_LIMIT (default: 10)
 - BETA_USER_LIMIT (default: 10)
 - MAX_HISTORY_MESSAGES (default: 12)
-- OPENAI_VISION_MODEL (defaults to OPENAI_MODEL; must support image input and structured outputs)
+- OPENAI_VISION_MODEL (defaults to OPENAI_MODEL; must support image input and structured outputs; default GPT-6 Luna)
 - MAX_CHART_IMAGE_BYTES (default: 5 MB)
 
 ## Chart screenshot analysis
@@ -49,7 +49,7 @@ Send a chart screenshot as a Telegram photo or JPEG/PNG/WEBP image document, wit
 
 The vision model assesses visible chart structure and returns distinct supply/demand price bands, likely mitigation state, visible BOS/CHOCH or liquidity events, and conditional scenarios with invalidation. Existing user-drawn zones are assessed first and kept distinct from additional inferred zones. Numeric bounds are only reported when the chart scale is readable; otherwise the model must say that the level cannot be read reliably.
 
-The bot now returns a second image with translucent supply (red) and demand (green) bands when the vision model can locate the zones confidently. It also returns the written zone map. Each rectangle is positioned from normalized screenshot coordinates estimated by the vision model; it is not pixel-perfect calibration to exchange OHLC data, so users must verify its position against the visible price scale. When the location is unclear, the bot intentionally withholds the overlay rather than drawing a guessed box. This is visual screenshot research, not a live chart connection. The screenshot may be delayed or cropped, freshness may be indeterminate if prior candles are not visible, and chart-vision models can misread small labels or chart graphics. Verify levels against an OHLC/live market feed before relying on any alert or trading decision. Image analysis uses more input tokens than text-only questions.
+The bot now returns a second image with translucent supply (red) and demand (green) bands when the vision model can locate the zones confidently. It also returns the written zone map. Each rectangle is positioned from normalized screenshot coordinates estimated by the vision model; it is not pixel-perfect calibration to exchange OHLC data, so users must verify its position against the visible price scale. When the location is unclear, the bot intentionally withholds the overlay rather than drawing a guessed box. This is visual screenshot research, not a live chart connection. The screenshot may be delayed or cropped, freshness may be indeterminate if prior candles are not visible, and chart-vision models can misread small labels or chart graphics. Verify levels against an OHLC/live market feed before relying on any alert or trading decision. Image analysis uses more input tokens than text-only questions. GPT-6 Luna is selected for its low token cost and support for image input, Chat Completions function calling (with reasoning effort set to none), and structured outputs.
 
 ## Intraday data boundaries
 - Tapetide's Indian-equity intraday bars are historical and update after the session closes; they are not a live candle feed. A separate session-live quote route is integrated for supported stocks; availability/coverage and provider timestamp must be checked on every request.
