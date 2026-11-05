@@ -97,6 +97,42 @@ The user may ask in English, Hinglish, Hindi, Gujarati or mixed language. Reply 
 """ 
 
 
+CHART_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "chart_zone_map",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["analysis", "zones"],
+            "properties": {
+                "analysis": {"type": "string"},
+                "zones": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["zone_type", "label", "price_low", "price_high", "x_start", "x_end", "y_top", "y_bottom", "draw_overlay"],
+                        "properties": {
+                            "zone_type": {"type": "string", "enum": ["supply", "demand"]},
+                            "label": {"type": "string"},
+                            "price_low": {"type": ["string", "null"]},
+                            "price_high": {"type": ["string", "null"]},
+                            "x_start": {"type": "number"},
+                            "x_end": {"type": "number"},
+                            "y_top": {"type": "number"},
+                            "y_bottom": {"type": "number"},
+                            "draw_overlay": {"type": "boolean"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
 TOOLS = [
     {
         "type": "function",
@@ -242,6 +278,41 @@ class ResearchAI:
         self.vision_model = vision_model or model
         self.market_data = market_data
         self.crypto_data = crypto_data
+
+    async def analyze_chart_image(self, history, user_text, image_bytes, image_mime_type="image/jpeg"):
+        """Analyse the screenshot and return normalized locations for visible zones."""
+        if image_mime_type not in {"image/jpeg", "image/png", "image/webp"}:
+            raise ValueError("Unsupported image type.")
+        data_url = f"data:{image_mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+        instructions = """
+Return structured JSON. The zone coordinates are normalized to the full image (0 to 1),
+with x from left to right and y from top to bottom. Mark only clearly visible chart zones.
+Extend boxes to the right within the plot, not over the price scale. If geometry is unclear,
+set draw_overlay=false and all coordinates to zero. Never invent a box position. Set price
+bounds to null if the scale cannot be read. Return at most 8 distinct zones. The text analysis
+must explain that the overlay is an estimate and needs visual verification.
+"""
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            *history[-8:],
+            {"role": "user", "content": [
+                {"type": "text", "text": CHART_IMAGE_PROMPT + instructions + "\n" + (user_text or "Analyse DNS zones.")},
+                {"type": "image_url", "image_url": {"url": data_url, "detail": "high"}}
+            ]}
+        ]
+        response = await self.client.chat.completions.create(
+            model=self.vision_model,
+            messages=messages,
+            response_format=CHART_RESPONSE_FORMAT,
+            temperature=0.1
+        )
+        raw = response.choices[0].message.content
+        if not raw:
+            raise RuntimeError("Empty chart analysis response.")
+        data = json.loads(raw)
+        if not isinstance(data, dict) or not isinstance(data.get("zones"), list):
+            raise ValueError("Invalid chart analysis structure.")
+        return data
 
     async def answer(
         self,
