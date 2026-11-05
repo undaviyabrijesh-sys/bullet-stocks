@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 from stockmind_telegram_mvp.app.ai import ResearchAI, _parse_tool_arguments
 
 
-class ToolArgumentParsingTests(unittest.TestCase):
+class ToolArgumentParsingTests(unittest.IsolatedAsyncioTestCase):
     def test_parses_json_object(self):
         self.assertEqual(_parse_tool_arguments('{"symbol":"RELIANCE"}'), {"symbol": "RELIANCE"})
 
