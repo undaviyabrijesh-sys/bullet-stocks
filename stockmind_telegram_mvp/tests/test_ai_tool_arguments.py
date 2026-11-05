@@ -27,8 +27,10 @@ class ToolArgumentParsingTests(unittest.IsolatedAsyncioTestCase):
                     _parse_tool_arguments(raw)
 
     def test_rejects_non_string_argument_payload(self):
-        with self.assertRaisesRegex(ValueError, "valid JSON"):
-            _parse_tool_arguments({"symbol": "RELIANCE"})
+        for raw in ({"symbol": "RELIANCE"}, 0, False, []):
+            with self.subTest(raw=raw):
+                with self.assertRaisesRegex(ValueError, "JSON string"):
+                    _parse_tool_arguments(raw)
 
     async def test_malformed_tool_call_is_returned_to_model_and_turn_continues(self):
         malformed_call = SimpleNamespace(
