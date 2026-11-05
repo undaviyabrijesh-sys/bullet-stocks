@@ -5,7 +5,11 @@ from unittest.mock import patch
 from PIL import Image
 
 from stockmind_telegram_mvp.app import overlay_engine
-from stockmind_telegram_mvp.app.overlay_engine import render_overlay, validate_chart_image
+from stockmind_telegram_mvp.app.overlay_engine import (
+    _zone_overlay_label,
+    render_overlay,
+    validate_chart_image,
+)
 
 
 def sample_image(size=(640, 360), image_format="PNG"):
@@ -93,6 +97,19 @@ class OverlayRendererTests(unittest.TestCase):
         result, count = render_overlay(sample_image(), None)
         self.assertIsNone(result)
         self.assertEqual(count, 0)
+
+    def test_overlay_label_preserves_zone_origin_and_safely_falls_back(self):
+        self.assertEqual(
+            _zone_overlay_label({"label": "USER DEMAND"}, "demand"),
+            "USER DEMAND",
+        )
+        self.assertEqual(
+            _zone_overlay_label({"label": "AI SUPPLY – 10,000"}, "supply"),
+            "AI SUPPLY  10,000",
+        )
+        self.assertEqual(_zone_overlay_label({"label": "ગુજરાતી"}, "demand"), "DEMAND")
+        self.assertEqual(_zone_overlay_label({"label": " "}, "supply"), "SUPPLY")
+        self.assertEqual(_zone_overlay_label({"label": "X" * 80}, "demand"), "X" * 32)
 
     def test_rejects_invalid_image_bytes(self):
         with self.assertRaises(ValueError):
