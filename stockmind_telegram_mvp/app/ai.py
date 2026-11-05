@@ -142,9 +142,13 @@ MAX_CHART_ZONES = 8
 
 def _parse_tool_arguments(raw_arguments) -> dict:
     """Decode model tool arguments without allowing malformed JSON to abort a turn."""
+    if raw_arguments is None or raw_arguments == "":
+        raw_arguments = "{}"
+    if not isinstance(raw_arguments, str):
+        raise ValueError("Tool arguments must be a JSON string.")
     try:
-        arguments = json.loads(raw_arguments or "{}")
-    except (json.JSONDecodeError, TypeError) as exc:
+        arguments = json.loads(raw_arguments)
+    except json.JSONDecodeError as exc:
         raise ValueError("Tool arguments must be valid JSON.") from exc
     if not isinstance(arguments, dict):
         raise ValueError("Tool arguments must be a JSON object.")
