@@ -45,8 +45,9 @@ dp = Dispatcher()
 WELCOME = (
     "👋 Welcome to StockMind AI Beta!\n\n"
     "Ask about Indian stocks and crypto in English, Hinglish, Hindi, Gujarati or mixed language.\n\n"
-    "You can also upload a chart screenshot and ask me to mark/assess Demand & Supply (DNS), "
-    "fresh or mitigated zones, BOS/CHOCH, liquidity sweeps and conditional setups.\n\n"
+    "You can also upload a chart screenshot for Demand & Supply (DNS), fresh/mitigated zones, "
+    "BOS/CHOCH and liquidity analysis. When a zone is clear, I return an annotated copy with "
+    "red supply and green demand bands.\n\n"
     "Examples:\n"
     "• Analyse Reliance fundamentals\n"
     "• Bhai HDFC Bank ka kya scene hai?\n"
