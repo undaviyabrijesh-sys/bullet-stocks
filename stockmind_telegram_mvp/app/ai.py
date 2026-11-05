@@ -252,7 +252,7 @@ class ResearchAI:
     ) -> str:
         user_content = user_text
         if image_bytes is not None:
-            allowed_types = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+            allowed_types = {"image/jpeg", "image/png", "image/webp"}
             if image_mime_type not in allowed_types:
                 raise ValueError("Unsupported image type. Use JPEG, PNG, WEBP or GIF.")
             data_url = (
