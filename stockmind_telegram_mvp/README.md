@@ -1,11 +1,11 @@
 # StockMind AI — Telegram MVP
 
-A multilingual Telegram research assistant for Indian equities and crypto, including intraday chart analysis. Users can ask in English, Hinglish, Hindi, Gujarati or mixed/broken language. The AI decides which Tapetide read-only endpoints to call and responds in the user's language.
+A multilingual Telegram research assistant for Indian equities and crypto, including intraday chart analysis. Users can ask in English, Hinglish, Hindi, Gujarati or mixed/broken language. The AI selects the appropriate Tapetide or Binance read-only data tools and responds in the user's language.
 
 ## Included
 - Telegram bot (aiogram 3)
 - OpenAI tool-calling for intent understanding and research planning
-- Tapetide REST adapter: stock search, latest quote, financial statements, daily history and historical 1/5/15-minute intraday bars
+- Tapetide REST adapter: stock search, latest/session-live quote, financial statements, daily history and historical 1/5/15-minute intraday bars
 - Binance public REST adapter: crypto spot and USD-M futures 24-hour ticker and OHLCV candles
 - Per-user conversational context
 - Prototype cap of 10 beta users and 10 questions per user per day
@@ -38,7 +38,7 @@ Windows activation: `.venv\\Scripts\\activate`.
 - MAX_HISTORY_MESSAGES (default: 12)
 
 ## Intraday data boundaries
-- Tapetide's Indian-equity intraday bars are historical and update after the session closes; they are not a live intraday feed. Latest quotes are a separate endpoint and must be timestamped.
+- Tapetide's Indian-equity intraday bars are historical and update after the session closes; they are not a live candle feed. A separate session-live quote route is integrated for supported stocks; availability/coverage and provider timestamp must be checked on every request.
 - Binance public ticker/candle endpoints provide crypto market data without API credentials. The latest candle may still be forming; the assistant must label it accordingly.
 - This version does not provide a verified live Indian index/stock-options feed, broker execution, order routing, or exchange-grade streaming. Do not present delayed or end-of-session candles as real-time.
 - Indian cash-market session reference: 09:15–15:30 IST. Crypto markets trade 24/7.
