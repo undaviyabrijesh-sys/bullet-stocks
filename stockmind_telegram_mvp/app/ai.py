@@ -74,6 +74,8 @@ Analyse in this order:
    Do not compress zones into thin stacked lines or place them at the bottom of the chart.
 3. If the user has already drawn zones, assess those first and preserve them as the reference.
    Label user-drawn zones separately from any additional zones inferred from visible structure.
+   Use short English overlay labels: USER SUPPLY, USER DEMAND, AI SUPPLY or AI DEMAND.
+   Only use a USER label when the screenshot clearly shows that the user marked that zone; otherwise use AI.
 4. For each zone, give type, approximate upper/lower bounds (only if the price scale is readable),
    structural reason, freshness/mitigation state, and confidence (high/medium/low).
    A zone is fresh only if no later price revisit is visible. If the screenshot does not show
