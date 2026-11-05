@@ -34,6 +34,7 @@ class ChartResponseValidationTests(unittest.TestCase):
     def test_disables_overlay_for_out_of_range_or_non_finite_coordinates(self):
         invalid_zones = [
             zone(x_start=-0.1),
+            zone(x_start=10 ** 10000),
             zone(x_end=1.01),
             zone(y_top=float("nan")),
             zone(y_bottom=float("inf")),
@@ -67,7 +68,7 @@ class ChartResponseValidationTests(unittest.TestCase):
     def test_ignores_unknown_zone_types_and_non_object_items(self):
         result = sanitize_chart_analysis({
             "analysis": "One supported zone.",
-            "zones": [None, "supply", zone(zone_type="resistance"), zone()],
+            "zones": [None, "supply", zone(zone_type="resistance"), zone(zone_type=[]), zone()],
         })
 
         self.assertEqual(len(result["zones"]), 1)
