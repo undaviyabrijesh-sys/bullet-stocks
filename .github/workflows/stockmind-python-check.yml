@@ -24,3 +24,5 @@ jobs:
           python -m pip install -r stockmind_telegram_mvp/requirements.txt
       - name: Compile application modules
         run: python -m compileall -q stockmind_telegram_mvp/app
+      - name: Run overlay tests
+        run: python -m unittest discover -s stockmind_telegram_mvp/tests -v
