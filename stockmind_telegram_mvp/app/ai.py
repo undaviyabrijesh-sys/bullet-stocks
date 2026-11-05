@@ -1,5 +1,6 @@
 import base64
 import json
+import math
 from openai import AsyncOpenAI
 
 SYSTEM_PROMPT = """
@@ -110,6 +111,7 @@ CHART_RESPONSE_FORMAT = {
                 "analysis": {"type": "string"},
                 "zones": {
                     "type": "array",
+                    "maxItems": 8,
                     "items": {
                         "type": "object",
                         "additionalProperties": False,
@@ -119,10 +121,10 @@ CHART_RESPONSE_FORMAT = {
                             "label": {"type": "string"},
                             "price_low": {"type": ["string", "null"]},
                             "price_high": {"type": ["string", "null"]},
-                            "x_start": {"type": "number"},
-                            "x_end": {"type": "number"},
-                            "y_top": {"type": "number"},
-                            "y_bottom": {"type": "number"},
+                            "x_start": {"type": "number", "minimum": 0, "maximum": 1},
+                            "x_end": {"type": "number", "minimum": 0, "maximum": 1},
+                            "y_top": {"type": "number", "minimum": 0, "maximum": 1},
+                            "y_bottom": {"type": "number", "minimum": 0, "maximum": 1},
                             "draw_overlay": {"type": "boolean"}
                         }
                     }
@@ -131,6 +133,78 @@ CHART_RESPONSE_FORMAT = {
         }
     }
 }
+
+
+MAX_CHART_ZONES = 8
+
+
+def sanitize_chart_analysis(data: dict) -> dict:
+    """Keep chart prose usable while refusing unsafe or ambiguous overlay geometry."""
+    if not isinstance(data, dict):
+        raise ValueError("Invalid chart analysis response.")
+    analysis = data.get("analysis")
+    zones = data.get("zones")
+    if not isinstance(analysis, str) or not analysis.strip():
+        raise ValueError("Chart analysis did not contain readable analysis text.")
+    if not isinstance(zones, list):
+        raise ValueError("Chart analysis did not contain a zone list.")
+
+    safe_zones = []
+    for zone in zones[:MAX_CHART_ZONES]:
+        if not isinstance(zone, dict):
+            continue
+        zone_type = zone.get("zone_type")
+        if zone_type not in {"supply", "demand"}:
+            continue
+
+        label = zone.get("label")
+        if not isinstance(label, str) or not label.strip():
+            label = zone_type.upper()
+        price_low = zone.get("price_low")
+        price_high = zone.get("price_high")
+        if not isinstance(price_low, str):
+            price_low = None
+        if not isinstance(price_high, str):
+            price_high = None
+
+        raw_coordinates = [
+            zone.get("x_start"), zone.get("x_end"),
+            zone.get("y_top"), zone.get("y_bottom"),
+        ]
+        coordinates_valid = all(
+            not isinstance(value, bool)
+            and isinstance(value, (int, float))
+            and math.isfinite(value)
+            and 0 <= value <= 1
+            for value in raw_coordinates
+        )
+        draw_overlay = zone.get("draw_overlay") is True and coordinates_valid
+        if draw_overlay:
+            x_start, x_end, y_top, y_bottom = map(float, raw_coordinates)
+            draw_overlay = (
+                x_end > x_start
+                and y_bottom > y_top
+                and y_bottom - y_top <= 0.45
+            )
+
+        if not draw_overlay:
+            coordinates = [0.0, 0.0, 0.0, 0.0]
+        else:
+            coordinates = [float(value) for value in raw_coordinates]
+
+        safe_zones.append({
+            "zone_type": zone_type,
+            "label": label.strip()[:64],
+            "price_low": price_low[:32] if price_low is not None else None,
+            "price_high": price_high[:32] if price_high is not None else None,
+            "x_start": coordinates[0],
+            "x_end": coordinates[1],
+            "y_top": coordinates[2],
+            "y_bottom": coordinates[3],
+            "draw_overlay": draw_overlay,
+        })
+
+    return {"analysis": analysis.strip(), "zones": safe_zones}
 
 
 TOOLS = [
@@ -315,7 +389,7 @@ must explain that the overlay is an estimate and needs visual verification.
         data = json.loads(raw)
         if not isinstance(data, dict) or not isinstance(data.get("zones"), list):
             raise ValueError("Invalid chart analysis structure.")
-        return data
+        return sanitize_chart_analysis(data)
 
     async def answer(self, history: list[dict], user_text: str) -> str:
         messages = [
