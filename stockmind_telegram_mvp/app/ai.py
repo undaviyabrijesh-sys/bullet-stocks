@@ -138,6 +138,16 @@ CHART_RESPONSE_FORMAT = {
 MAX_CHART_ZONES = 8
 
 
+def _is_normalized_coordinate(value) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        numeric = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return False
+    return math.isfinite(numeric) and 0 <= numeric <= 1
+
+
 def sanitize_chart_analysis(data: dict) -> dict:
     """Keep chart prose usable while refusing unsafe or ambiguous overlay geometry."""
     if not isinstance(data, dict):
@@ -154,7 +164,7 @@ def sanitize_chart_analysis(data: dict) -> dict:
         if not isinstance(zone, dict):
             continue
         zone_type = zone.get("zone_type")
-        if zone_type not in {"supply", "demand"}:
+        if not isinstance(zone_type, str) or zone_type not in {"supply", "demand"}:
             continue
 
         label = zone.get("label")
@@ -171,13 +181,7 @@ def sanitize_chart_analysis(data: dict) -> dict:
             zone.get("x_start"), zone.get("x_end"),
             zone.get("y_top"), zone.get("y_bottom"),
         ]
-        coordinates_valid = all(
-            not isinstance(value, bool)
-            and isinstance(value, (int, float))
-            and math.isfinite(value)
-            and 0 <= value <= 1
-            for value in raw_coordinates
-        )
+        coordinates_valid = all(_is_normalized_coordinate(value) for value in raw_coordinates)
         draw_overlay = zone.get("draw_overlay") is True and coordinates_valid
         if draw_overlay:
             x_start, x_end, y_top, y_bottom = map(float, raw_coordinates)
