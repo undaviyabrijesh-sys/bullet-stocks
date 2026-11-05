@@ -101,6 +101,20 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         self.assertEqual(result["price_accuracy"]["unscored_zone_count"], 0)
         self.assertEqual(result["price_accuracy"]["mean_boundary_abs_error"], 0.0)
 
+    def test_rejects_screenshot_larger_than_configured_byte_limit(self):
+        self._write(self._record())
+
+        with self.assertRaisesRegex(ValueError, "exceeds max_image_bytes"):
+            evaluate_benchmark_manifest(
+                self.manifest, max_image_bytes=len(self.image_bytes) - 1
+            )
+
+    def test_rejects_non_positive_image_byte_limit(self):
+        self._write(self._record())
+
+        with self.assertRaisesRegex(ValueError, "max_image_bytes must be a positive integer"):
+            evaluate_benchmark_manifest(self.manifest, max_image_bytes=0)
+
     def test_rejects_screenshot_hash_mismatch(self):
         self._write(self._record(image_sha256="0" * 64))
 

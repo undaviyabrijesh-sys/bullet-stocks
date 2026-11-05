@@ -32,7 +32,7 @@ Use the same IoU threshold across a benchmark release. Report aggregate and per-
 
 ## Batch manifest runner
 
-The batch runner verifies that each fixture still points to the exact annotated screenshot before scoring it. It checks the SHA-256, actual image format, decoded image limit and recorded dimensions; rejects duplicate fixture IDs and paths that escape the manifest directory; then reports per-fixture results and micro-aggregated precision, recall, F1, IoU, center displacement and optional price-boundary errors.
+The batch runner verifies that each fixture still points to the exact annotated screenshot before scoring it. It reads at most the configured byte limit plus one byte, checks the SHA-256, actual image format, decoded image limit and recorded dimensions; rejects duplicate fixture IDs and paths that escape the manifest directory; then reports per-fixture results and micro-aggregated precision, recall, F1, IoU, center displacement and optional price-boundary errors. The default byte limit is 5 MiB, matching the Telegram bot's default upload cap. Use `--max-image-bytes` when the bot's `MAX_CHART_IMAGE_BYTES` setting has been overridden.
 
 Create a UTF-8 JSONL file with one fixture object per line. The following is the schema shape only; values are placeholders, not a real chart annotation:
 
@@ -70,6 +70,8 @@ Run from the repository root:
 
 ~~~bash
 python -m stockmind_telegram_mvp.app.zone_benchmark stockmind_telegram_mvp/benchmark/fixtures.jsonl
+# If MAX_CHART_IMAGE_BYTES is customized in the bot environment, pass the same limit:
+python -m stockmind_telegram_mvp.app.zone_benchmark stockmind_telegram_mvp/benchmark/fixtures.jsonl --max-image-bytes 10485760
 ~~~
 
 The JSON report is written to standard output and can be redirected to a versioned report file. A missing/empty manifest, malformed record, hash mismatch, changed dimensions, unsupported image or invalid manual annotation fails the run instead of emitting misleading aggregate metrics. The runner performs no AI request; predictions must be captured separately and paired with the exact source screenshot.

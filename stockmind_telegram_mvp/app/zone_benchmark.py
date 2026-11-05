@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 import re
+from io import BytesIO
 from pathlib import Path, PurePosixPath
 
 from PIL import Image
@@ -26,6 +27,7 @@ _REQUIRED_FIELDS = {
     "predicted_zones",
 }
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
 
 def _positive_integer(value, field):
@@ -53,7 +55,7 @@ def _image_path(manifest_dir, image_file):
     return resolved
 
 
-def _load_and_verify_image(record, manifest_dir, line_number):
+def _load_and_verify_image(record, manifest_dir, line_number, max_image_bytes):
     fixture_id = record.get("fixture_id")
     if not isinstance(fixture_id, str) or not fixture_id.strip():
         raise ValueError(f"line {line_number}: fixture_id must be a non-empty string")
@@ -66,7 +68,16 @@ def _load_and_verify_image(record, manifest_dir, line_number):
     expected_height = _positive_integer(record.get("image_height"), "image_height")
     image_path = _image_path(manifest_dir, record.get("image_file"))
 
-    image_bytes = image_path.read_bytes()
+    # Bound the read itself, not just a later size check, so a malformed or
+    # accidentally huge local fixture cannot exhaust memory before validation.
+    with image_path.open("rb") as image_file:
+        image_bytes = image_file.read(max_image_bytes + 1)
+    if len(image_bytes) > max_image_bytes:
+        raise ValueError(
+            f"line {line_number} ({fixture_id}): screenshot exceeds max_image_bytes "
+            f"({max_image_bytes})"
+        )
+
     actual_hash = hashlib.sha256(image_bytes).hexdigest()
     if actual_hash.lower() != expected_hash.lower():
         raise ValueError(f"line {line_number} ({fixture_id}): screenshot SHA-256 does not match")
@@ -74,7 +85,9 @@ def _load_and_verify_image(record, manifest_dir, line_number):
     # Reuse the production upload validator so the benchmark accepts only the
     # same static image formats and decoded-pixel ceiling as the Telegram bot.
     validate_chart_image(image_bytes)
-    with Image.open(image_path) as image:
+    # Inspect the same bounded bytes that were hashed and validated; do not
+    # reopen a path that could have changed between those operations.
+    with Image.open(BytesIO(image_bytes)) as image:
         actual_width, actual_height = image.size
     if (actual_width, actual_height) != (expected_width, expected_height):
         raise ValueError(
@@ -85,7 +98,7 @@ def _load_and_verify_image(record, manifest_dir, line_number):
     return actual_hash.lower()
 
 
-def _validate_record(record, manifest_dir, line_number):
+def _validate_record(record, manifest_dir, line_number, max_image_bytes):
     if not isinstance(record, dict):
         raise ValueError(f"line {line_number}: each fixture record must be a JSON object")
     missing = sorted(_REQUIRED_FIELDS - set(record))
@@ -93,7 +106,7 @@ def _validate_record(record, manifest_dir, line_number):
         raise ValueError(f"line {line_number}: missing required fields: {', '.join(missing)}")
 
     fixture_id = record["fixture_id"]
-    image_hash = _load_and_verify_image(record, manifest_dir, line_number)
+    image_hash = _load_and_verify_image(record, manifest_dir, line_number, max_image_bytes)
 
     for field in ("reference_zones", "predicted_zones"):
         if not isinstance(record[field], list):
@@ -195,8 +208,13 @@ def _aggregate_price_accuracy(fixtures):
     }
 
 
-def evaluate_benchmark_manifest(manifest_path):
-    """Validate screenshots and score every JSONL fixture in a manifest."""
+def evaluate_benchmark_manifest(manifest_path, *, max_image_bytes=DEFAULT_MAX_IMAGE_BYTES):
+    """Validate screenshots and score every JSONL fixture in a manifest.
+
+    The default image-byte ceiling matches the Telegram bot's 5 MiB default.
+    Pass an explicit limit when the bot is configured with a different ceiling.
+    """
+    max_image_bytes = _positive_integer(max_image_bytes, "max_image_bytes")
     manifest_path = Path(manifest_path).resolve()
     if not manifest_path.is_file():
         raise ValueError(f"benchmark manifest does not exist: {manifest_path}")
@@ -214,7 +232,9 @@ def evaluate_benchmark_manifest(manifest_path):
                     raise ValueError(
                         f"line {line_number}: invalid JSON ({exc.msg})"
                     ) from exc
-                fixture = _validate_record(record, manifest_path.parent, line_number)
+                fixture = _validate_record(
+                    record, manifest_path.parent, line_number, max_image_bytes
+                )
                 if fixture["fixture_id"] in seen_ids:
                     raise ValueError(
                         f"line {line_number}: duplicate fixture_id {fixture['fixture_id']!r}"
@@ -256,9 +276,17 @@ def main(argv=None):
         type=Path,
         help="JSONL manifest; image_file paths are relative to this file's directory",
     )
+    parser.add_argument(
+        "--max-image-bytes",
+        type=int,
+        default=DEFAULT_MAX_IMAGE_BYTES,
+        help="maximum bytes read per screenshot (default: 5 MiB)",
+    )
     args = parser.parse_args(argv)
     try:
-        result = evaluate_benchmark_manifest(args.manifest)
+        result = evaluate_benchmark_manifest(
+            args.manifest, max_image_bytes=args.max_image_bytes
+        )
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
     print(json.dumps(result, indent=2, sort_keys=True, allow_nan=False))
