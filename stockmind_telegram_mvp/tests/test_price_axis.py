@@ -74,9 +74,11 @@ class PriceAxisCalibrationTests(unittest.TestCase):
         ]
         for kwargs in (
             {"scale": "percent"},
+            {"scale": []},
             {"max_relative_error": 0},
             {"max_relative_error": 0.2},
             {"max_relative_error": True},
+            {"max_relative_error": 10 ** 10000},
         ):
             with self.subTest(kwargs=kwargs):
                 with self.assertRaises(ValueError):
@@ -92,6 +94,7 @@ class PriceAxisCalibrationTests(unittest.TestCase):
             [{"y": True, "price": 120}, *base[1:]],
             [{**base[0], "y": float("nan")}, *base[1:]],
             [{**base[0], "price": float("inf")}, *base[1:]],
+            [{**base[0], "price": 10 ** 10000}, *base[1:]],
             [{**base[0], "price": 0}, *base[1:]],
             [None, *base[1:]],
         ]
