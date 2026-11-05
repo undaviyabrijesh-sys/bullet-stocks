@@ -25,10 +25,8 @@ class PriceAxisCalibration:
 
     def price_at_y(self, y: float) -> float:
         """Convert a normalized screenshot y-coordinate to price without extrapolation."""
-        if isinstance(y, bool) or not isinstance(y, (int, float)):
-            raise ValueError("y must be a finite normalized coordinate")
-        y = float(y)
-        if not math.isfinite(y) or not 0 <= y <= 1:
+        y = _finite_number(y, "y")
+        if not 0 <= y <= 1:
             raise ValueError("y must be a finite normalized coordinate")
         if y < self.min_y - _Y_TOLERANCE or y > self.max_y + _Y_TOLERANCE:
             raise ValueError("y is outside the calibrated price-axis range")
@@ -46,7 +44,10 @@ class PriceAxisCalibration:
 def _finite_number(value, field):
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{field} must be a finite number")
-    value = float(value)
+    try:
+        value = float(value)
+    except (OverflowError, TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be a finite number") from exc
     if not math.isfinite(value):
         raise ValueError(f"{field} must be a finite number")
     return value
@@ -66,7 +67,7 @@ def calibrate_price_axis(
     broken/non-uniform scale can be detected instead of being fit perfectly by
     two points.
     """
-    if scale not in {"linear", "log"}:
+    if not isinstance(scale, str) or scale not in {"linear", "log"}:
         raise ValueError("scale must be 'linear' or 'log'")
     if not isinstance(anchors, (list, tuple)) or not 3 <= len(anchors) <= MAX_AXIS_ANCHORS:
         raise ValueError(f"anchors must contain between 3 and {MAX_AXIS_ANCHORS} entries")
