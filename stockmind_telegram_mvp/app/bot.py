@@ -24,7 +24,7 @@ from .config import (
 from .tapetide import TapetideClient
 
 IST = ZoneInfo("Asia/Kolkata")
-ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 market = TapetideClient(TAPETIDE_TOKEN)
 crypto_market = BinanceMarketData()
@@ -135,8 +135,11 @@ async def handle_chart_photo(message: Message):
         return
 
     try:
+        telegram_file = await bot.get_file(photo.file_id)
+        if not telegram_file.file_path:
+            raise RuntimeError("Telegram did not return a file path.")
         buffer = BytesIO()
-        await bot.download(photo, destination=buffer)
+        await bot.download_file(telegram_file.file_path, destination=buffer)
         image_bytes = buffer.getvalue()
         if len(image_bytes) > MAX_CHART_IMAGE_BYTES:
             await message.answer("That screenshot is too large. Please send an image under 5 MB.")
@@ -164,8 +167,11 @@ async def handle_chart_document(message: Message):
         return
 
     try:
+        telegram_file = await bot.get_file(document.file_id)
+        if not telegram_file.file_path:
+            raise RuntimeError("Telegram did not return a file path.")
         buffer = BytesIO()
-        await bot.download(document, destination=buffer)
+        await bot.download_file(telegram_file.file_path, destination=buffer)
         image_bytes = buffer.getvalue()
         if len(image_bytes) > MAX_CHART_IMAGE_BYTES:
             await message.answer("That image is too large. Please send an image under 5 MB.")
