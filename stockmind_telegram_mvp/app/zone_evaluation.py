@@ -2,9 +2,12 @@
 
 Coordinates are normalized to the full screenshot (0..1). This module does not
 infer or repair geometry; it scores only boxes that would actually be rendered.
+Optional price-axis scoring requires manually verified axis anchors.
 """
 from functools import lru_cache
 import math
+
+from .price_axis import calibrate_price_axis, zone_price_bounds
 
 MAX_EVALUATED_ZONES = 8
 ZONE_TYPES = {"supply", "demand"}
@@ -19,7 +22,7 @@ def _valid_box(zone, *, prediction):
     if prediction and zone.get("draw_overlay") is not True:
         return None
 
-    raw = [zone.get("x_start"), zone.get("x_end"), zone.get("y_top"), zone.get("y_bottom")]
+    raw = [zone.get(key) for key in ("x_start", "x_end", "y_top", "y_bottom")]
     if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in raw):
         return None
     try:
@@ -100,14 +103,81 @@ def _metrics(predictions, references, matches):
     }
 
 
-def evaluate_zone_predictions(predicted_zones, reference_zones, *, iou_threshold=0.5):
-    """Compare rendered AI rectangles with manually annotated rectangles.
+def _price_comparison(prediction, reference, calibration):
+    try:
+        predicted_bounds = zone_price_bounds(prediction["zone"], calibration)
+        reference_bounds = zone_price_bounds(reference["zone"], calibration)
+    except ValueError as exc:
+        return {"status": "unscored", "reason": str(exc)}
+
+    high_error = abs(predicted_bounds["price_high"] - reference_bounds["price_high"])
+    low_error = abs(predicted_bounds["price_low"] - reference_bounds["price_low"])
+    high_pct = 100 * high_error / reference_bounds["price_high"]
+    low_pct = 100 * low_error / reference_bounds["price_low"]
+    return {
+        "status": "scored",
+        "predicted_price_bounds": predicted_bounds,
+        "reference_price_bounds": reference_bounds,
+        "price_high_abs_error": high_error,
+        "price_low_abs_error": low_error,
+        "price_high_error_pct": high_pct,
+        "price_low_error_pct": low_pct,
+    }
+
+
+def _price_accuracy(matches, calibration):
+    if calibration is None:
+        return None
+    comparisons = [match["price_comparison"] for match in matches]
+    scored = [item for item in comparisons if item and item["status"] == "scored"]
+    boundary_errors = [
+        item[key]
+        for item in scored
+        for key in ("price_high_abs_error", "price_low_abs_error")
+    ]
+    boundary_percent_errors = [
+        item[key]
+        for item in scored
+        for key in ("price_high_error_pct", "price_low_error_pct")
+    ]
+    return {
+        "scale": calibration.scale,
+        "anchor_count": calibration.anchor_count,
+        "max_anchor_relative_error_pct": 100 * calibration.max_anchor_relative_error,
+        "scored_match_count": len(scored),
+        "unscored_match_count": len(comparisons) - len(scored),
+        "mean_boundary_abs_error": (
+            sum(boundary_errors) / len(boundary_errors) if boundary_errors else None
+        ),
+        "max_boundary_abs_error": max(boundary_errors) if boundary_errors else None,
+        "mean_boundary_error_pct": (
+            sum(boundary_percent_errors) / len(boundary_percent_errors)
+            if boundary_percent_errors else None
+        ),
+    }
+
+
+def evaluate_zone_predictions(
+    predicted_zones,
+    reference_zones,
+    *,
+    iou_threshold=0.5,
+    price_axis_anchors=None,
+    price_axis_scale="linear",
+    max_axis_relative_error=0.02,
+):
+    """Compare AI rectangles with manual annotations, optionally in price units.
 
     Predictions without draw_overlay=True or with invalid geometry are counted
     as ignored (not as drawn false positives). Invalid manual reference
     annotations raise ValueError so a broken fixture cannot silently skew scores.
     Only the first eight predictions are considered because the overlay renderer
-    draws at most eight; extra predictions are reported as ignored.
+    draws at most eight.
+
+    When price_axis_anchors are supplied, they must be 3..20 manually verified
+    {"y": normalized_full_image_y, "price": positive_price} points from the
+    same screenshot. Price errors are reported only for matched zones wholly
+    inside the calibrated y range. No OCR or price-axis extrapolation is done.
     """
     if isinstance(iou_threshold, bool) or not isinstance(iou_threshold, (int, float)):
         raise ValueError("iou_threshold must be a number greater than 0 and at most 1")
@@ -121,6 +191,14 @@ def evaluate_zone_predictions(predicted_zones, reference_zones, *, iou_threshold
     if len(reference_zones) > MAX_EVALUATED_ZONES:
         raise ValueError(f"reference_zones cannot exceed {MAX_EVALUATED_ZONES} entries")
 
+    calibration = None
+    if price_axis_anchors is not None:
+        calibration = calibrate_price_axis(
+            price_axis_anchors,
+            scale=price_axis_scale,
+            max_relative_error=max_axis_relative_error,
+        )
+
     valid_predictions = []
     ignored_predictions = max(0, len(predicted_zones) - MAX_EVALUATED_ZONES)
     for index, zone in enumerate(predicted_zones[:MAX_EVALUATED_ZONES]):
@@ -128,14 +206,24 @@ def evaluate_zone_predictions(predicted_zones, reference_zones, *, iou_threshold
         if box is None:
             ignored_predictions += 1
             continue
-        valid_predictions.append({"index": index, "zone_type": zone["zone_type"], "box": box})
+        valid_predictions.append({
+            "index": index,
+            "zone_type": zone["zone_type"],
+            "box": box,
+            "zone": zone,
+        })
 
     valid_references = []
     for index, zone in enumerate(reference_zones):
         box = _valid_box(zone, prediction=False)
         if box is None:
             raise ValueError(f"Invalid manual reference zone at index {index}")
-        valid_references.append({"index": index, "zone_type": zone["zone_type"], "box": box})
+        valid_references.append({
+            "index": index,
+            "zone_type": zone["zone_type"],
+            "box": box,
+            "zone": zone,
+        })
 
     by_type = {}
     all_matches = []
@@ -156,6 +244,9 @@ def evaluate_zone_predictions(predicted_zones, reference_zones, *, iou_threshold
                 "zone_type": zone_type,
                 "iou": score,
                 "center_error_normalized": center_error,
+                "price_comparison": (
+                    _price_comparison(pred, ref, calibration) if calibration else None
+                ),
             }
             matches.append(match)
             all_matches.append(match)
@@ -168,4 +259,5 @@ def evaluate_zone_predictions(predicted_zones, reference_zones, *, iou_threshold
         "by_zone_type": by_type,
         "ignored_prediction_count": ignored_predictions,
         "matches": sorted(all_matches, key=lambda item: item["prediction_index"]),
+        "price_accuracy": _price_accuracy(all_matches, calibration),
     }
