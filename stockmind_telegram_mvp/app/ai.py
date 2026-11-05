@@ -1,3 +1,4 @@
+import base64
 import json
 from openai import AsyncOpenAI
 
@@ -43,9 +44,8 @@ DEMAND AND SUPPLY (DNS) / PRICE-ACTION LANGUAGE:
 - Identify liquidity pools and sweeps separately from confirmed structure breaks. A wick through a
   level alone is not automatically a BOS or a valid entry.
 - State the exact candle/timeframe and data source used. Never invent a zone from missing candles.
-  If the user asks to analyse a chart image but no image/chart-reading capability is available in the
-  current Telegram build, ask for symbol, timeframe and OHLC data or explain that image analysis is
-  not enabled yet. Do not pretend to have seen a chart.
+  When a chart image is attached, inspect only what is visibly supported; distinguish visual estimates
+  from verified market data and never claim the screenshot is live.
 - For every proposed setup, give zone bounds, invalidation, confirmation trigger, targets and the
   reason the setup is invalidated. Avoid guaranteed calls.
 
@@ -59,6 +59,43 @@ INTRADAY AND CRYPTO:
 - For Indian index/options intraday, do not fabricate option-chain, live premium, OI or Greeks data. Explain when the connected source does not provide a live feed.
 Identify Tapetide or Binance as the source for each dataset.
 """
+
+CHART_IMAGE_PROMPT = """
+The user has attached a trading-chart screenshot. Analyse the visible chart as a price-action
+research assistant, focusing on Demand and Supply (DNS). Do not claim to have read hidden chart
+data or live prices. Respect the visible price scale and chart timeframe.
+
+Analyse in this order:
+1. Read the visible symbol, exchange, timeframe and current/last displayed price only when legible.
+   Mark any unreadable or missing field as unknown; ask for it only if it changes the analysis.
+2. Identify meaningful supply and demand as distinct PRICE BANDS anchored to visible bases,
+   displacement/impulse candles and swing structure. Keep multiple meaningful zones separate.
+   Do not compress zones into thin stacked lines or place them at the bottom of the chart.
+3. If the user has already drawn zones, assess those first and preserve them as the reference.
+   Label user-drawn zones separately from any additional zones inferred from visible structure.
+4. For each zone, give type, approximate upper/lower bounds (only if the price scale is readable),
+   structural reason, freshness/mitigation state, and confidence (high/medium/low).
+   A zone is fresh only if no later price revisit is visible. If the screenshot does not show
+   enough history to determine this, say "freshness cannot be confirmed".
+5. Describe visible BOS/CHOCH, liquidity sweep, rejection, retest or imbalance only when the
+   candle sequence supports it. A wick through a level alone is not automatically a BOS.
+6. Give conditional scenarios: what confirmation is needed, what would invalidate the idea, and
+   plausible next visible levels. Do not invent exact entries, stops or targets from an unreadable
+   scale, and do not give guaranteed buy/sell calls.
+7. State limitations: screenshot timestamp may be unknown, cropped history can hide prior tests,
+   and chart patterns need confirmation from OHLC/live feed before an alert or trade decision.
+
+Use this response structure:
+- Chart read
+- Supply zones
+- Demand zones
+- Structure / liquidity
+- Conditional scenarios and invalidation
+- What additional detail is needed (only if necessary)
+
+The user may ask in English, Hinglish, Hindi, Gujarati or mixed language. Reply in their style.
+""" 
+
 
 TOOLS = [
     {
@@ -94,6 +131,19 @@ TOOLS = [
                 "required": ["symbol"],
             },
         },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_live_quote",
+            "description": "Get a session-live quote for an NSE/BSE stock where the provider supports it.",
+            "parameters": {
+                "type": "object",
+                "properties": {"symbol": {"type": "string"}},
+                "required": ["symbol"],
+                "additionalProperties": False
+            }
+        }
     },
     {
         "type": "function",
@@ -184,22 +234,53 @@ TOOLS = [
 
 
 class ResearchAI:
-    def __init__(self, api_key: str, model: str, market_data, crypto_data):
+    def __init__(
+        self, api_key: str, model: str, market_data, crypto_data, vision_model: str | None = None
+    ):
         self.client = AsyncOpenAI(api_key=api_key)
         self.model = model
+        self.vision_model = vision_model or model
         self.market_data = market_data
         self.crypto_data = crypto_data
 
-    async def answer(self, history: list[dict], user_text: str) -> str:
+    async def answer(
+        self,
+        history: list[dict],
+        user_text: str,
+        image_bytes: bytes | None = None,
+        image_mime_type: str = "image/jpeg",
+    ) -> str:
+        user_content = user_text
+        if image_bytes is not None:
+            allowed_types = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+            if image_mime_type not in allowed_types:
+                raise ValueError("Unsupported image type. Use JPEG, PNG, WEBP or GIF.")
+            data_url = (
+                f"data:{image_mime_type};base64,"
+                f"{base64.b64encode(image_bytes).decode('ascii')}"
+            )
+            user_content = [
+                {
+                    "type": "text",
+                    "text": CHART_IMAGE_PROMPT + "\nUser question/caption: " + (
+                        user_text.strip() or "Please analyse this chart screenshot."
+                    ),
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": data_url, "detail": "high"},
+                },
+            ]
+
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             *history,
-            {"role": "user", "content": user_text},
+            {"role": "user", "content": user_content},
         ]
 
         for _ in range(4):
             response = await self.client.chat.completions.create(
-                model=self.model,
+                model=self.vision_model if image_bytes is not None else self.model,
                 messages=messages,
                 tools=TOOLS,
                 tool_choice="auto",
@@ -222,7 +303,9 @@ class ResearchAI:
                         )
                     elif call.function.name == "get_quote":
                         result = await self.market_data.quote(args["symbol"])
-                    elif call.function.name == "get_live_quote":\n                        result = await self.market_data.live_quote(args["symbol"])\n                    elif call.function.name == "get_financials":
+                    elif call.function.name == "get_live_quote":
+                        result = await self.market_data.live_quote(args["symbol"])
+                    elif call.function.name == "get_financials":
                         result = await self.market_data.financials(
                             args["symbol"], args.get("section", "annual")
                         )
