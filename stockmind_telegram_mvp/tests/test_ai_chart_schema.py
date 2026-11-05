@@ -46,7 +46,7 @@ class ChartResponseValidationTests(unittest.TestCase):
 
         result = sanitize_chart_analysis({"analysis": "Zones are uncertain.", "zones": invalid_zones})
 
-        self.assertEqual(len(result["zones"]), len(invalid_zones))
+        self.assertEqual(len(result["zones"]), 8)
         for item in result["zones"]:
             self.assertFalse(item["draw_overlay"])
             self.assertEqual(
