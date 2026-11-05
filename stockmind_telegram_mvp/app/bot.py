@@ -105,6 +105,7 @@ async def main():
         await dp.start_polling(bot)
     finally:
         await market.close()
+        await crypto_market.close()
         await bot.session.close()
 
 
