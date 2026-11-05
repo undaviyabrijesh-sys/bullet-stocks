@@ -10,7 +10,7 @@ from aiogram.types import BufferedInputFile, Message
 
 from .ai import ResearchAI
 from .crypto import BinanceMarketData
-from .overlay_engine import render_overlay
+from .overlay_engine import render_overlay, validate_chart_image
 from .config import (
     BETA_USER_LIMIT,
     DAILY_QUERY_LIMIT,
@@ -71,6 +71,14 @@ async def run_research(
     if user is None:
         return
 
+    if image_bytes is not None:
+        try:
+            # Inspect the actual file bytes; do not trust the Telegram MIME header.
+            image_mime_type = validate_chart_image(image_bytes)
+        except ValueError as exc:
+            await message.answer(str(exc))
+            return
+
     user_id = user.id
     if user_id not in beta_users and len(beta_users) >= BETA_USER_LIMIT:
         await message.answer("The 10-person beta is currently full. Please try again later.")
@@ -100,7 +108,7 @@ async def run_research(
             )
             answer = chart_result.get("analysis") or "I could not read the chart reliably."
             try:
-                overlay_image, drawn_count = render_overlay(image_bytes, chart_result.get("zones", []))
+                overlay_image, drawn_count = render_overlay(image_bytes, chart_result.get("zones", []), validated=True)
             except Exception:
                 overlay_image, drawn_count = None, 0
             if not drawn_count:
