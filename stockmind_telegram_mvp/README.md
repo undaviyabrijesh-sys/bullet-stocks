@@ -18,10 +18,12 @@ A multilingual Telegram research assistant for Indian equities and crypto, inclu
 1. Create a bot with Telegram's @BotFather.
 2. Create an OpenAI API key.
 3. Create a Tapetide token and confirm that your plan permits the intended beta data display and caching.
-4. Copy .env.example to .env and set the credentials.
-5. Install and run:
+4. Enter the project directory and copy .env.example to .env.
+5. Install dependencies and run:
 
 ```bash
+cd stockmind_telegram_mvp
+cp .env.example .env
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
