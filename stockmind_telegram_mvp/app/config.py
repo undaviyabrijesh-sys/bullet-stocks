@@ -14,7 +14,7 @@ def required(name: str) -> str:
 TELEGRAM_BOT_TOKEN = required("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = required("OPENAI_API_KEY")
 TAPETIDE_TOKEN = required("TAPETIDE_TOKEN")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-6-luna")
 # Keep this vision-capable; the default model accepts image input.
 OPENAI_VISION_MODEL = os.getenv("OPENAI_VISION_MODEL", OPENAI_MODEL)
 MAX_CHART_IMAGE_BYTES = int(os.getenv("MAX_CHART_IMAGE_BYTES", str(5 * 1024 * 1024)))
