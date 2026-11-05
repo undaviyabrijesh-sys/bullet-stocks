@@ -314,13 +314,7 @@ must explain that the overlay is an estimate and needs visual verification.
             raise ValueError("Invalid chart analysis structure.")
         return data
 
-    async def answer(
-        self,
-        history: list[dict],
-        user_text: str,
-        image_bytes: bytes | None = None,
-        image_mime_type: str = "image/jpeg",
-    ) -> str:
+    async def answer(self, history: list[dict], user_text: str) -> str:
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             *history,
