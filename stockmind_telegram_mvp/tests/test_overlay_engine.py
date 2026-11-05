@@ -93,6 +93,21 @@ class OverlayRendererTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertEqual(count, 0)
 
+    def test_skips_coordinates_too_large_to_convert_to_float(self):
+        zones = [{
+            "zone_type": "demand",
+            "draw_overlay": True,
+            "x_start": 10 ** 400,
+            "x_end": 0.9,
+            "y_top": 0.3,
+            "y_bottom": 0.4,
+        }]
+
+        result, count = render_overlay(sample_image(), zones)
+
+        self.assertIsNone(result)
+        self.assertEqual(count, 0)
+
     def test_non_list_zones_are_ignored(self):
         result, count = render_overlay(sample_image(), None)
         self.assertIsNone(result)

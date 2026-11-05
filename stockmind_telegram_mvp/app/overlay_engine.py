@@ -93,7 +93,12 @@ def render_overlay(
         raw_coordinates = [zone.get(key) for key in ("x_start", "x_end", "y_top", "y_bottom")]
         if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in raw_coordinates):
             continue
-        coordinates = [float(value) for value in raw_coordinates]
+        try:
+            coordinates = [float(value) for value in raw_coordinates]
+        except (OverflowError, ValueError):
+            # JSON can contain arbitrarily large integers; skip malformed model
+            # geometry rather than letting float conversion abort the whole render.
+            continue
         if not all(math.isfinite(value) and 0 <= value <= 1 for value in coordinates):
             continue
 
