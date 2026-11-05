@@ -69,6 +69,12 @@ class TapetideClient:
         symbol = quote(symbol.strip().upper(), safe="")
         return await self._get(f"/stocks/{symbol}/quote")
 
+
+    async def live_quote(self, symbol: str):
+        """Fetch the provider's session-live quote route; availability depends on coverage/session."""
+        symbol = quote(symbol.strip().upper(), safe="")
+        return await self._get(f"/stocks/{symbol}/quote/live")
+
     async def financials(self, symbol: str, section: str = "annual"):
         symbol = quote(symbol.strip().upper(), safe="")
         return await self._get(
