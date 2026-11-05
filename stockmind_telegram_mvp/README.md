@@ -35,12 +35,12 @@ Windows activation: `.venv\\Scripts\\activate`.
 ## Configuration
 - TELEGRAM_BOT_TOKEN
 - OPENAI_API_KEY
-- OPENAI_MODEL (default: gpt-4.1-mini)
+- OPENAI_MODEL (default: gpt-6-luna; function calling uses reasoning_effort=none)
 - TAPETIDE_TOKEN
 - DAILY_QUERY_LIMIT (default: 10)
 - BETA_USER_LIMIT (default: 10)
 - MAX_HISTORY_MESSAGES (default: 12)
-- OPENAI_VISION_MODEL (defaults to OPENAI_MODEL; must support image input)
+- OPENAI_VISION_MODEL (defaults to OPENAI_MODEL; must support image input and structured outputs)
 - MAX_CHART_IMAGE_BYTES (default: 5 MB)
 
 ## Chart screenshot analysis
