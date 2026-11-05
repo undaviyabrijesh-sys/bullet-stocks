@@ -52,6 +52,18 @@ def validate_chart_image(image_bytes: bytes) -> str:
     return SUPPORTED_IMAGE_MIME_TYPES[image_format]
 
 
+def _zone_overlay_label(zone: dict, zone_type: str) -> str:
+    fallback = "SUPPLY" if zone_type == "supply" else "DEMAND"
+    label = zone.get("label")
+    if not isinstance(label, str):
+        return fallback
+    # Pillow's default bitmap font is not Unicode-complete. Keep overlay labels
+    # short, printable and English-safe; the full multilingual explanation stays in chat.
+    label = " ".join(label.split()).encode("ascii", "ignore").decode("ascii")
+    label = "".join(character for character in label if character.isprintable())
+    return label[:32].strip().upper() or fallback
+
+
 def render_overlay(
     image_bytes: bytes, zones: list[dict], *, validated: bool = False
 ) -> tuple[bytes | None, int]:
@@ -98,7 +110,7 @@ def render_overlay(
         color = (220, 65, 65, 60) if zone_type == "supply" else (30, 170, 100, 60)
         edge = (235, 65, 65, 230) if zone_type == "supply" else (25, 185, 110, 230)
         draw.rectangle((left, top, right, bottom), fill=color, outline=edge, width=max(2, width // 600))
-        title = "SUPPLY" if zone_type == "supply" else "DEMAND"
+        title = _zone_overlay_label(zone, zone_type)
         draw.text((left + 5, max(0, top - 18)), title, fill=edge[:3] + (255,))
         count += 1
 
