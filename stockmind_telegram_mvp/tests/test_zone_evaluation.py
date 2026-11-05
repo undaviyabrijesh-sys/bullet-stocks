@@ -21,6 +21,13 @@ def prediction(zone_type="demand", **overrides):
     return value
 
 
+AXIS_ANCHORS = [
+    {"y": 0.2, "price": 120},
+    {"y": 0.5, "price": 90},
+    {"y": 0.8, "price": 60},
+]
+
+
 class ZoneEvaluationTests(unittest.TestCase):
     def test_exact_match_has_perfect_scores(self):
         result = evaluate_zone_predictions([prediction()], [zone()])
@@ -29,6 +36,7 @@ class ZoneEvaluationTests(unittest.TestCase):
         self.assertEqual(result["overall"]["recall"], 1.0)
         self.assertEqual(result["overall"]["f1"], 1.0)
         self.assertEqual(result["overall"]["mean_iou"], 1.0)
+        self.assertIsNone(result["price_accuracy"])
 
     def test_supply_does_not_match_demand_at_same_coordinates(self):
         result = evaluate_zone_predictions([prediction("supply")], [zone("demand")])
@@ -62,9 +70,7 @@ class ZoneEvaluationTests(unittest.TestCase):
         self.assertEqual(result["overall"]["false_negative"], 1)
 
     def test_predictions_beyond_renderer_eight_zone_cap_are_ignored(self):
-        result = evaluate_zone_predictions(
-            [prediction() for _ in range(9)], [zone()]
-        )
+        result = evaluate_zone_predictions([prediction() for _ in range(9)], [zone()])
         self.assertEqual(result["overall"]["predicted"], 8)
         self.assertEqual(result["ignored_prediction_count"], 1)
 
@@ -91,6 +97,45 @@ class ZoneEvaluationTests(unittest.TestCase):
             with self.subTest(threshold=threshold):
                 with self.assertRaises(ValueError):
                     evaluate_zone_predictions([], [], iou_threshold=threshold)
+
+    def test_price_axis_error_is_reported_separately_from_iou(self):
+        result = evaluate_zone_predictions(
+            [prediction(y_top=0.41, y_bottom=0.61)],
+            [zone()],
+            price_axis_anchors=AXIS_ANCHORS,
+        )
+        self.assertEqual(result["overall"]["true_positive"], 1)
+        self.assertGreater(result["overall"]["mean_iou"], 0.8)
+        accuracy = result["price_accuracy"]
+        self.assertEqual(accuracy["scored_match_count"], 1)
+        self.assertAlmostEqual(accuracy["mean_boundary_abs_error"], 1.0)
+        self.assertAlmostEqual(accuracy["mean_boundary_error_pct"], 1.125)
+        comparison = result["matches"][0]["price_comparison"]
+        self.assertAlmostEqual(comparison["predicted_price_bounds"]["price_high"], 99)
+        self.assertAlmostEqual(comparison["reference_price_bounds"]["price_low"], 80)
+
+    def test_price_comparison_is_unscored_instead_of_extrapolating(self):
+        result = evaluate_zone_predictions(
+            [prediction(y_top=0.19, y_bottom=0.4)],
+            [zone(y_top=0.2, y_bottom=0.4)],
+            price_axis_anchors=AXIS_ANCHORS,
+        )
+        self.assertEqual(result["overall"]["true_positive"], 1)
+        self.assertEqual(result["price_accuracy"]["scored_match_count"], 0)
+        self.assertEqual(result["price_accuracy"]["unscored_match_count"], 1)
+        self.assertEqual(result["matches"][0]["price_comparison"]["status"], "unscored")
+
+    def test_distorted_axis_fails_loudly_for_price_scoring(self):
+        with self.assertRaisesRegex(ValueError, "distorted or inconsistent"):
+            evaluate_zone_predictions(
+                [prediction()],
+                [zone()],
+                price_axis_anchors=[
+                    {"y": 0.1, "price": 150},
+                    {"y": 0.5, "price": 90},
+                    {"y": 0.9, "price": 20},
+                ],
+            )
 
 
 if __name__ == "__main__":
