@@ -10,7 +10,7 @@ A multilingual Telegram research assistant for Indian equities and crypto, inclu
 - Per-user conversational context
 - Prototype cap of 10 beta users and 10 questions per user per day
 - Intraday analysis for Indian cash equities (historical 1/5/15-minute candles) and crypto (Binance spot/USD-M futures)
-- Telegram chart screenshot analysis using a vision-capable OpenAI model (photo uploads and JPEG/PNG/WEBP/GIF image documents)
+- Telegram chart screenshot analysis using a vision-capable OpenAI model (photo uploads and JPEG/PNG/WEBP image documents)
 - Visual DNS zone assessment: distinct supply/demand bands, user-drawn zone review, freshness/mitigation, structure and conditional scenarios
 - No order placement or trade execution
 
@@ -43,7 +43,7 @@ Windows activation: `.venv\\Scripts\\activate`.
 
 ## Chart screenshot analysis
 
-Send a chart screenshot as a Telegram photo or JPEG/PNG/WEBP/GIF image document, with a caption such as "BTC 1H — mark demand and supply" or "Is my demand zone still fresh?". Keep the price scale, timeframe and enough candles visible; include the symbol, exchange and timeframe in the caption when they are not shown.
+Send a chart screenshot as a Telegram photo or JPEG/PNG/WEBP image document, with a caption such as "BTC 1H — mark demand and supply" or "Is my demand zone still fresh?". Keep the price scale, timeframe and enough candles visible; include the symbol, exchange and timeframe in the caption when they are not shown.
 
 The vision model assesses visible chart structure and returns distinct supply/demand price bands, likely mitigation state, visible BOS/CHOCH or liquidity events, and conditional scenarios with invalidation. Existing user-drawn zones are assessed first and kept distinct from additional inferred zones. Numeric bounds are only reported when the chart scale is readable; otherwise the model must say that the level cannot be read reliably.
 
