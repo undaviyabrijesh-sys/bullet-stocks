@@ -4,6 +4,7 @@
    "ADANIPORTS",
    "ANANDRATHI",
    "DIVISLAB",
+   "ETERNAL",
    "KRISHANA",
    "NITINSPIN",
    "PHOENIXLTD",
@@ -53,7 +54,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-05T10:04:00+05:30"
+   "last_processed_bar": "2026-11-05T10:10:00+05:30"
   },
   "KINGFA": {
    "entry": 6733.02,
@@ -75,7 +76,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-05T10:03:00+05:30"
+   "last_processed_bar": "2026-11-05T10:10:00+05:30"
   },
   "SONACOMS": {
    "entry": 853.74,
@@ -97,7 +98,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-05T10:04:00+05:30"
+   "last_processed_bar": "2026-11-05T10:10:00+05:30"
   },
   "KRISHANA": {
    "entry": 234.6,
@@ -119,7 +120,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-05T10:04:00+05:30"
+   "last_processed_bar": "2026-11-05T10:10:00+05:30"
   },
   "SHREEPUSHK": {
    "entry": 635.7999877929688,
@@ -141,7 +142,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-05T10:04:00+05:30"
+   "last_processed_bar": "2026-11-05T10:10:00+05:30"
   },
   "NITINSPIN": {
    "entry": 690.25,
@@ -163,7 +164,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-05T10:04:00+05:30"
+   "last_processed_bar": "2026-11-05T10:10:00+05:30"
   },
   "PHOENIXLTD": {
    "entry": 2044.0,
@@ -184,7 +185,7 @@
    "trailing": false,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-05T10:04:00+05:30"
+   "last_processed_bar": "2026-11-05T10:10:00+05:30"
   },
   "ADANIPORTS": {
    "entry": 1915.0,
@@ -205,7 +206,7 @@
    "trailing": false,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-05T10:04:00+05:30"
+   "last_processed_bar": "2026-11-05T10:10:00+05:30"
   },
   "DIVISLAB": {
    "entry": 10074.5,
@@ -228,7 +229,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-05T10:06:23+05:30"
+   "last_processed_bar": "2026-11-05T10:10:00+05:30"
   },
   "ANANDRATHI": {
    "entry": 2347.0,
@@ -251,7 +252,30 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-05T10:06:23+05:30"
+   "last_processed_bar": "2026-11-05T10:10:00+05:30"
+  },
+  "ETERNAL": {
+   "entry": 354.20001220703125,
+   "initial_sl": 279.2560005187988,
+   "sl": 279.2560005187988,
+   "level": 346.5,
+   "opened": "2026-11-05T10:12:55+05:30",
+   "setup_month": "Oct'26",
+   "monthly_sma20": 279.2560005187988,
+   "monthly_sma10": 280.5290023803711,
+   "t1": 442.75001525878906,
+   "t2": 495.8800170898437,
+   "t3": 531.3000183105469,
+   "t4": 708.4000244140625,
+   "strategy_version": 3,
+   "t1_done": false,
+   "t2_done": false,
+   "t3_done": false,
+   "trailing": false,
+   "trail_activation_date": null,
+   "remaining_fraction": 1.0,
+   "realised_pnl_fraction": 0.0,
+   "last_processed_bar": "2026-11-05T10:12:55+05:30"
   }
  },
  "closed": [
