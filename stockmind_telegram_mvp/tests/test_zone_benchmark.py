@@ -28,6 +28,25 @@ def _zone(zone_type="demand", **overrides):
     return value
 
 
+def _prediction_metadata(**overrides):
+    value = {
+        "provider": "openai",
+        "model": "vision-model-2026-11-05",
+        "requested_model": "vision-model",
+        "prompt_version": "dns-chart-v1",
+        "prompt_sha256": "a" * 64,
+        "generated_at": "2026-11-05T20:24:00Z",
+        "system_fingerprint": "fp-test",
+        "settings": {
+            "temperature": 0.1,
+            "image_detail": "high",
+            "response_format": "json_schema:chart_zone_map",
+        },
+    }
+    value.update(overrides)
+    return value
+
+
 def _prediction(zone_type="demand", **overrides):
     value = _zone(zone_type, **overrides)
     value["draw_overlay"] = True
@@ -54,6 +73,7 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
             "image_height": 30,
             "reference_zones": [_zone()],
             "predicted_zones": [_prediction()],
+            "prediction_metadata": _prediction_metadata(),
         }
         record.update(overrides)
         return record
@@ -81,6 +101,75 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         self.assertAlmostEqual(result["overall"]["f1"], 2 / 3)
         self.assertEqual(result["overall"]["mean_iou"], 1.0)
         self.assertEqual(result["by_zone_type"]["demand"]["reference"], 2)
+        self.assertEqual(result["prediction_profile"]["model"], "vision-model-2026-11-05")
+        self.assertEqual(len(result["prediction_profile_sha256"]), 64)
+        self.assertEqual(
+            result["fixtures"][0]["prediction_metadata"]["generated_at"],
+            "2026-11-05T20:24:00Z",
+        )
+
+    def test_allows_different_generation_times_for_the_same_profile(self):
+        self._write(
+            self._record("first"),
+            self._record(
+                "second",
+                prediction_metadata=_prediction_metadata(
+                    generated_at="2026-11-05T20:25:00+00:00"
+                ),
+            ),
+        )
+
+        result = evaluate_benchmark_manifest(self.manifest)
+
+        self.assertEqual(result["fixture_count"], 2)
+        self.assertEqual(
+            result["fixtures"][1]["prediction_metadata"]["generated_at"],
+            "2026-11-05T20:25:00+00:00",
+        )
+
+    def test_rejects_mixed_prediction_profiles_in_one_manifest(self):
+        self._write(
+            self._record("first"),
+            self._record(
+                "second",
+                prediction_metadata=_prediction_metadata(model="another-model"),
+            ),
+        )
+
+        with self.assertRaisesRegex(ValueError, "mixed prediction profiles"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_rejects_timezone_naive_generation_timestamp(self):
+        self._write(
+            self._record(
+                prediction_metadata=_prediction_metadata(
+                    generated_at="2026-11-05T20:24:00"
+                )
+            )
+        )
+
+        with self.assertRaisesRegex(ValueError, "must include a timezone"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_rejects_non_finite_model_settings(self):
+        self._write(
+            self._record(
+                prediction_metadata=_prediction_metadata(
+                    settings={"temperature": float("nan")}
+                )
+            )
+        )
+
+        with self.assertRaisesRegex(ValueError, "finite JSON values"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_rejects_missing_prediction_metadata(self):
+        record = self._record()
+        del record["prediction_metadata"]
+        self._write(record)
+
+        with self.assertRaisesRegex(ValueError, "prediction_metadata"):
+            evaluate_benchmark_manifest(self.manifest)
 
     def test_price_axis_metrics_are_aggregated_without_inventing_missing_values(self):
         self._write(

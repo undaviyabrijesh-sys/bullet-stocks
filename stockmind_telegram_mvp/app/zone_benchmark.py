@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 import re
+from datetime import datetime
 from io import BytesIO
 from pathlib import Path, PurePosixPath
 
@@ -25,6 +26,7 @@ _REQUIRED_FIELDS = {
     "image_height",
     "reference_zones",
     "predicted_zones",
+    "prediction_metadata",
 }
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -34,6 +36,92 @@ def _positive_integer(value, field):
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError(f"{field} must be a positive integer")
     return value
+
+
+def _validate_prediction_metadata(metadata, line_number, fixture_id):
+    if not isinstance(metadata, dict):
+        raise ValueError(
+            f"line {line_number} ({fixture_id}): prediction_metadata must be a JSON object"
+        )
+
+    string_fields = (
+        "provider",
+        "model",
+        "requested_model",
+        "prompt_version",
+        "prompt_sha256",
+        "generated_at",
+    )
+    normalized = {}
+    for field in string_fields:
+        value = metadata.get(field)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(
+                f"line {line_number} ({fixture_id}): prediction_metadata.{field} "
+                "must be a non-empty string"
+            )
+        normalized[field] = value.strip()
+
+    if not _SHA256_RE.fullmatch(normalized["prompt_sha256"]):
+        raise ValueError(
+            f"line {line_number} ({fixture_id}): prediction_metadata.prompt_sha256 "
+            "must be a 64-character SHA-256 hex digest"
+        )
+    normalized["prompt_sha256"] = normalized["prompt_sha256"].lower()
+
+    try:
+        generated_at = datetime.fromisoformat(
+            normalized["generated_at"].replace("Z", "+00:00")
+        )
+    except ValueError as exc:
+        raise ValueError(
+            f"line {line_number} ({fixture_id}): prediction_metadata.generated_at "
+            "must be an ISO-8601 timestamp with a timezone"
+        ) from exc
+    if generated_at.tzinfo is None or generated_at.utcoffset() is None:
+        raise ValueError(
+            f"line {line_number} ({fixture_id}): prediction_metadata.generated_at "
+            "must include a timezone"
+        )
+
+    fingerprint = metadata.get("system_fingerprint")
+    if fingerprint is not None and (
+        not isinstance(fingerprint, str) or not fingerprint.strip()
+    ):
+        raise ValueError(
+            f"line {line_number} ({fixture_id}): system_fingerprint must be a non-empty string or null"
+        )
+    normalized["system_fingerprint"] = fingerprint.strip() if fingerprint else None
+
+    settings = metadata.get("settings")
+    if not isinstance(settings, dict):
+        raise ValueError(
+            f"line {line_number} ({fixture_id}): prediction_metadata.settings must be a JSON object"
+        )
+    normalized["settings"] = settings
+
+    # Generated time is fixture-specific; the remaining fields define the
+    # inference profile and must be identical within one aggregate report.
+    profile = {
+        "provider": normalized["provider"],
+        "model": normalized["model"],
+        "requested_model": normalized["requested_model"],
+        "prompt_version": normalized["prompt_version"],
+        "prompt_sha256": normalized["prompt_sha256"],
+        "system_fingerprint": normalized["system_fingerprint"],
+        "settings": settings,
+    }
+    try:
+        canonical_profile = json.dumps(
+            profile, sort_keys=True, separators=(",", ":"), allow_nan=False
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"line {line_number} ({fixture_id}): prediction metadata settings "
+            "must contain finite JSON values"
+        ) from exc
+    profile_sha256 = hashlib.sha256(canonical_profile.encode("utf-8")).hexdigest()
+    return normalized, profile, profile_sha256
 
 
 def _image_path(manifest_dir, image_file):
@@ -106,6 +194,11 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
         raise ValueError(f"line {line_number}: missing required fields: {', '.join(missing)}")
 
     fixture_id = record["fixture_id"]
+    prediction_metadata, prediction_profile, prediction_profile_sha256 = (
+        _validate_prediction_metadata(
+            record["prediction_metadata"], line_number, fixture_id
+        )
+    )
     image_hash = _load_and_verify_image(record, manifest_dir, line_number, max_image_bytes)
 
     for field in ("reference_zones", "predicted_zones"):
@@ -136,6 +229,9 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
     return {
         "fixture_id": fixture_id,
         "image_sha256": image_hash,
+        "prediction_metadata": prediction_metadata,
+        "_prediction_profile": prediction_profile,
+        "_prediction_profile_sha256": prediction_profile_sha256,
         "overall": result["overall"],
         "by_zone_type": result["by_zone_type"],
         "ignored_prediction_count": result["ignored_prediction_count"],
@@ -221,6 +317,8 @@ def evaluate_benchmark_manifest(manifest_path, *, max_image_bytes=DEFAULT_MAX_IM
 
     fixtures = []
     seen_ids = set()
+    prediction_profile = None
+    prediction_profile_sha256 = None
     try:
         with manifest_path.open("r", encoding="utf-8") as manifest:
             for line_number, raw_line in enumerate(manifest, start=1):
@@ -240,6 +338,17 @@ def evaluate_benchmark_manifest(manifest_path, *, max_image_bytes=DEFAULT_MAX_IM
                         f"line {line_number}: duplicate fixture_id {fixture['fixture_id']!r}"
                     )
                 seen_ids.add(fixture["fixture_id"])
+                if prediction_profile_sha256 is None:
+                    prediction_profile = fixture.pop("_prediction_profile")
+                    prediction_profile_sha256 = fixture.pop("_prediction_profile_sha256")
+                else:
+                    fixture_profile = fixture.pop("_prediction_profile")
+                    fixture_profile_sha256 = fixture.pop("_prediction_profile_sha256")
+                    if fixture_profile_sha256 != prediction_profile_sha256:
+                        raise ValueError(
+                            f"line {line_number} ({fixture['fixture_id']}): mixed prediction "
+                            "profiles; split this manifest by provider, model, prompt and settings"
+                        )
                 fixtures.append(fixture)
     except UnicodeDecodeError as exc:
         raise ValueError("benchmark manifest must be UTF-8 JSONL") from exc
@@ -257,6 +366,8 @@ def evaluate_benchmark_manifest(manifest_path, *, max_image_bytes=DEFAULT_MAX_IM
 
     return {
         "fixture_count": len(fixtures),
+        "prediction_profile": prediction_profile,
+        "prediction_profile_sha256": prediction_profile_sha256,
         "ignored_prediction_count": sum(
             fixture["ignored_prediction_count"] for fixture in fixtures
         ),

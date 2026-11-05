@@ -1,6 +1,8 @@
 import base64
+import hashlib
 import json
 import math
+from datetime import datetime, timezone
 from openai import AsyncOpenAI
 
 SYSTEM_PROMPT = """
@@ -97,7 +99,58 @@ Use this response structure:
 - What additional detail is needed (only if necessary)
 
 The user may ask in English, Hinglish, Hindi, Gujarati or mixed language. Reply in their style.
-""" 
+"""
+
+CHART_PROMPT_VERSION = "dns-chart-v1"
+CHART_IMAGE_INSTRUCTIONS = """
+Return structured JSON. The zone coordinates are normalized to the full image (0 to 1),
+with x from left to right and y from top to bottom. Mark only clearly visible chart zones.
+Extend boxes to the right within the plot, not over the price scale. If geometry is unclear,
+set draw_overlay=false and all coordinates to zero. Never invent a box position. Set price
+bounds to null if the scale cannot be read. Return at most 8 distinct zones. The text analysis
+must explain that the overlay is an estimate and needs visual verification.
+"""
+CHART_PROMPT_SHA256 = hashlib.sha256(
+    json.dumps(
+        [SYSTEM_PROMPT, CHART_IMAGE_PROMPT, CHART_IMAGE_INSTRUCTIONS],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+).hexdigest()
+
+
+def build_chart_prediction_metadata(response, requested_model, settings):
+    """Capture provider-returned model/time metadata without guessing missing values."""
+    actual_model = getattr(response, "model", None)
+    if not isinstance(actual_model, str) or not actual_model.strip():
+        actual_model = None
+
+    created = getattr(response, "created", None)
+    generated_at = None
+    if isinstance(created, int) and not isinstance(created, bool) and created > 0:
+        try:
+            generated_at = (
+                datetime.fromtimestamp(created, tz=timezone.utc)
+                .isoformat(timespec="seconds")
+                .replace("+00:00", "Z")
+            )
+        except (OverflowError, OSError, ValueError):
+            generated_at = None
+
+    fingerprint = getattr(response, "system_fingerprint", None)
+    if not isinstance(fingerprint, str) or not fingerprint.strip():
+        fingerprint = None
+
+    return {
+        "provider": "openai",
+        "model": actual_model,
+        "requested_model": requested_model if isinstance(requested_model, str) else None,
+        "prompt_version": CHART_PROMPT_VERSION,
+        "prompt_sha256": CHART_PROMPT_SHA256,
+        "generated_at": generated_at,
+        "system_fingerprint": fingerprint,
+        "settings": dict(settings),
+    }
 
 
 CHART_RESPONSE_FORMAT = {
@@ -379,29 +432,27 @@ class ResearchAI:
         if image_mime_type not in {"image/jpeg", "image/png", "image/webp"}:
             raise ValueError("Unsupported image type.")
         data_url = f"data:{image_mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
-        instructions = """
-Return structured JSON. The zone coordinates are normalized to the full image (0 to 1),
-with x from left to right and y from top to bottom. Mark only clearly visible chart zones.
-Extend boxes to the right within the plot, not over the price scale. If geometry is unclear,
-set draw_overlay=false and all coordinates to zero. Never invent a box position. Set price
-bounds to null if the scale cannot be read. Return at most 8 distinct zones. The text analysis
-must explain that the overlay is an estimate and needs visual verification.
-"""
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             *history[-8:],
             {"role": "user", "content": [
-                {"type": "text", "text": CHART_IMAGE_PROMPT + instructions + "\n" + (user_text or "Analyse DNS zones.")},
+                {"type": "text", "text": CHART_IMAGE_PROMPT + CHART_IMAGE_INSTRUCTIONS + "\n" + (user_text or "Analyse DNS zones.")},
                 {"type": "image_url", "image_url": {"url": data_url, "detail": "high"}}
             ]}
         ]
+        chart_settings = {
+            "temperature": 0.1,
+            "image_detail": "high",
+            "response_format": "json_schema:chart_zone_map",
+        }
         request_options = {
             "model": self.vision_model,
             "messages": messages,
             "response_format": CHART_RESPONSE_FORMAT,
-            "temperature": 0.1,
+            "temperature": chart_settings["temperature"],
         }
         if self.vision_model.startswith("gpt-6-luna"):
+            chart_settings["reasoning_effort"] = "none"
             request_options["reasoning_effort"] = "none"
         response = await self.client.chat.completions.create(**request_options)
         raw = response.choices[0].message.content
@@ -410,7 +461,11 @@ must explain that the overlay is an estimate and needs visual verification.
         data = json.loads(raw)
         if not isinstance(data, dict) or not isinstance(data.get("zones"), list):
             raise ValueError("Invalid chart analysis structure.")
-        return sanitize_chart_analysis(data)
+        result = sanitize_chart_analysis(data)
+        result["prediction_metadata"] = build_chart_prediction_metadata(
+            response, self.vision_model, chart_settings
+        )
+        return result
 
     async def answer(self, history: list[dict], user_text: str) -> str:
         messages = [

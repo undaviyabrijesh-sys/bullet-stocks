@@ -2,6 +2,14 @@
 
 This benchmark compares AI overlay rectangles with zones manually marked on the exact same chart screenshot. It is an offline evaluation aid; it does not alter bot responses or make a live model call.
 
+## Prediction provenance
+
+Every fixture must include a prediction_metadata object containing provider, the model identifier returned by the provider, requested_model, prompt_version, prompt_sha256, generated_at, settings and optional system_fingerprint. generated_at must be an ISO-8601 timestamp with an explicit timezone. Missing provider-returned model IDs or timestamps are not guessed; such incomplete metadata cannot be benchmarked.
+
+The chart analyzer returns this metadata with its structured result. prompt_sha256 hashes the static system/chart instructions (not the screenshot, user text or prior conversation). Bump CHART_PROMPT_VERSION when the intended prompt behavior changes; the hash also detects accidental prompt edits that were not accompanied by a version bump. settings records the chart request's temperature, image detail, response format and any reasoning setting.
+
+One manifest may contain only one prediction profile: provider, returned/requested model, prompt version/hash, system fingerprint and settings must match across all fixtures. Per-fixture generation timestamps may differ. A mixed-profile manifest fails rather than silently averaging unlike model configurations. To compare model configurations, create separate manifests using the same screenshots and manual reference zones, then compare their reports.
+
 ## Annotation rules
 
 - Keep the original screenshot unchanged and record its SHA-256, width and height.
@@ -13,7 +21,7 @@ This benchmark compares AI overlay rectangles with zones manually marked on the 
 - For price-level scoring, manually record at least three legible price-axis anchors from the same screenshot. Each anchor is an object with y normalized to the full screenshot and a positive numeric price. Record anchors at distinct vertical positions and in top-to-bottom order with descending prices.
 - Choose linear for a standard arithmetic price axis or log for a logarithmic axis. Do not use the logarithmic option merely because price values are large.
 
-A fixture record should contain a stable fixture_id, image_file, image_sha256, image_width, image_height, reference_zones and predicted_zones. The image_file must be a relative path contained within the manifest directory. Each reference zone needs zone_type and the four normalized coordinates. Predicted zones should be the structured AI zones, including draw_overlay. Optional price_axis_anchors and price_axis_scale fields enable price-unit scoring. Additional descriptive metadata fields may be included.
+A fixture record should contain a stable fixture_id, image_file, image_sha256, image_width, image_height, reference_zones, predicted_zones and prediction_metadata. The image_file must be a relative path contained within the manifest directory. Each reference zone needs zone_type and the four normalized coordinates. Predicted zones should be the structured AI zones, including draw_overlay. Optional price_axis_anchors and price_axis_scale fields enable price-unit scoring. Additional descriptive metadata fields may be included.
 
 ## Geometry scoring
 
@@ -62,7 +70,21 @@ Create a UTF-8 JSONL file with one fixture object per line. The following is the
       "y_bottom": 0.68,
       "draw_overlay": true
     }
-  ]
+  ],
+  "prediction_metadata": {
+    "provider": "openai",
+    "model": "provider-returned-model-id",
+    "requested_model": "configured-model-alias",
+    "prompt_version": "dns-chart-v1",
+    "prompt_sha256": "replace-with-64-character-prompt-sha256",
+    "generated_at": "2026-11-05T20:24:00Z",
+    "system_fingerprint": null,
+    "settings": {
+      "temperature": 0.1,
+      "image_detail": "high",
+      "response_format": "json_schema:chart_zone_map"
+    }
+  }
 }
 ~~~
 
@@ -74,7 +96,7 @@ python -m stockmind_telegram_mvp.app.zone_benchmark stockmind_telegram_mvp/bench
 python -m stockmind_telegram_mvp.app.zone_benchmark stockmind_telegram_mvp/benchmark/fixtures.jsonl --max-image-bytes 10485760
 ~~~
 
-The JSON report is written to standard output and can be redirected to a versioned report file. A missing/empty manifest, malformed record, hash mismatch, changed dimensions, unsupported image or invalid manual annotation fails the run instead of emitting misleading aggregate metrics. The runner performs no AI request; predictions must be captured separately and paired with the exact source screenshot.
+The JSON report is written to standard output and can be redirected to a versioned report file. A missing/empty manifest, malformed record, missing/invalid provenance, mixed prediction profiles, hash mismatch, changed dimensions, unsupported image or invalid manual annotation fails the run instead of emitting misleading aggregate metrics. The runner performs no AI request; predictions must be captured separately and paired with the exact source screenshot.
 
 Aggregate precision/recall/F1 are micro-averaged from total TP/FP/FN counts. Mean IoU and center displacement are averaged across matched zones, not across screenshots. Price errors are averaged across scored zone boundaries; zones outside the calibrated y-range are counted as unscored rather than extrapolated.
 
