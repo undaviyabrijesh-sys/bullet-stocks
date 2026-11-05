@@ -8,6 +8,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 
 from .ai import ResearchAI
+from .crypto import BinanceMarketData
 from .config import (
     BETA_USER_LIMIT,
     DAILY_QUERY_LIMIT,
@@ -21,7 +22,8 @@ from .tapetide import TapetideClient
 
 IST = ZoneInfo("Asia/Kolkata")
 market = TapetideClient(TAPETIDE_TOKEN)
-research = ResearchAI(OPENAI_API_KEY, OPENAI_MODEL, market)
+crypto_market = BinanceMarketData()
+research = ResearchAI(OPENAI_API_KEY, OPENAI_MODEL, market, crypto_market)
 
 # Prototype-only in-memory state. Persist this before external beta testing.
 histories = defaultdict(lambda: deque(maxlen=MAX_HISTORY_MESSAGES))
