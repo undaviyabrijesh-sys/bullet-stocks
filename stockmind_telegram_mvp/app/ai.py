@@ -140,6 +140,17 @@ CHART_RESPONSE_FORMAT = {
 MAX_CHART_ZONES = 8
 
 
+def _parse_tool_arguments(raw_arguments) -> dict:
+    """Decode model tool arguments without allowing malformed JSON to abort a turn."""
+    try:
+        arguments = json.loads(raw_arguments or "{}")
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ValueError("Tool arguments must be valid JSON.") from exc
+    if not isinstance(arguments, dict):
+        raise ValueError("Tool arguments must be a JSON object.")
+    return arguments
+
+
 def _is_normalized_coordinate(value) -> bool:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return False
@@ -421,48 +432,53 @@ must explain that the overlay is an estimate and needs visual verification.
 
             messages.append(message.model_dump(exclude_none=True))
             for call in message.tool_calls:
-                args = json.loads(call.function.arguments or "{}")
                 try:
-                    if call.function.name == "search_stocks":
-                        result = await self.market_data.search_stocks(
-                            args["query"],
-                            limit=args.get("limit", 10),
-                            sector=args.get("sector"),
-                            industry=args.get("industry"),
-                        )
-                    elif call.function.name == "get_quote":
-                        result = await self.market_data.quote(args["symbol"])
-                    elif call.function.name == "get_live_quote":
-                        result = await self.market_data.live_quote(args["symbol"])
-                    elif call.function.name == "get_financials":
-                        result = await self.market_data.financials(
-                            args["symbol"], args.get("section", "annual")
-                        )
-                    elif call.function.name == "get_price_history":
-                        result = await self.market_data.price_history(
-                            args["symbol"], args.get("days", 90)
-                        )
-                    elif call.function.name == "get_intraday_stock_bars":
-                        result = await self.market_data.intraday_bars(
-                            args["symbol"], interval=args.get("interval", 5),
-                            date=args.get("date"), from_date=args.get("from_date"),
-                            to_date=args.get("to_date"), limit=args.get("limit", 375)
-                        )
-                    elif call.function.name == "get_crypto_klines":
-                        result = await self.crypto_data.klines(
-                            args["symbol"], args.get("interval", "15m"),
-                            args.get("market", "spot"), args.get("limit", 100)
-                        )
-                    elif call.function.name == "get_crypto_ticker":
-                        result = await self.crypto_data.ticker(
-                            args["symbol"], args.get("market", "spot")
-                        )
-                    else:
-                        result = {"error": "Unsupported tool"}
-                except Exception as exc:
-                    result = {"error": str(exc), "type": type(exc).__name__}
+                    args = _parse_tool_arguments(call.function.arguments)
+                except ValueError as exc:
+                    result = {"error": str(exc), "type": "InvalidToolArguments"}
+                else:
+                    try:
+                        if call.function.name == "search_stocks":
+                            result = await self.market_data.search_stocks(
+                                args["query"],
+                                limit=args.get("limit", 10),
+                                sector=args.get("sector"),
+                                industry=args.get("industry"),
+                            )
+                        elif call.function.name == "get_quote":
+                            result = await self.market_data.quote(args["symbol"])
+                        elif call.function.name == "get_live_quote":
+                            result = await self.market_data.live_quote(args["symbol"])
+                        elif call.function.name == "get_financials":
+                            result = await self.market_data.financials(
+                                args["symbol"], args.get("section", "annual")
+                            )
+                        elif call.function.name == "get_price_history":
+                            result = await self.market_data.price_history(
+                                args["symbol"], args.get("days", 90)
+                            )
+                        elif call.function.name == "get_intraday_stock_bars":
+                            result = await self.market_data.intraday_bars(
+                                args["symbol"], interval=args.get("interval", 5),
+                                date=args.get("date"), from_date=args.get("from_date"),
+                                to_date=args.get("to_date"), limit=args.get("limit", 375)
+                            )
+                        elif call.function.name == "get_crypto_klines":
+                            result = await self.crypto_data.klines(
+                                args["symbol"], args.get("interval", "15m"),
+                                args.get("market", "spot"), args.get("limit", 100)
+                            )
+                        elif call.function.name == "get_crypto_ticker":
+                            result = await self.crypto_data.ticker(
+                                args["symbol"], args.get("market", "spot")
+                            )
+                        else:
+                            result = {"error": "Unsupported tool"}
+    
+                    except Exception as exc:
+                        result = {"error": str(exc), "type": type(exc).__name__}
 
-                messages.append(
+                messages.append(                messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": call.id,
