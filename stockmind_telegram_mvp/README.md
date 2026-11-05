@@ -67,4 +67,6 @@ The bot now returns a second image with translucent supply (red) and demand (gre
 - Keep .env out of Git. Never commit tokens or API keys.
 
 ## Data integrity
+Malformed or non-object model tool arguments are contained as explicit tool errors and returned to the model for recovery; they do not terminate the user's research turn before a response can be produced.
+
 Answers must show provider timestamps when available, distinguish missing/stale data from valid values, and never invent prices, fundamentals or technical indicators. This product is for research/education, not order execution or guaranteed-return claims.
