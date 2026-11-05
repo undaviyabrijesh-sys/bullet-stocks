@@ -474,11 +474,10 @@ must explain that the overlay is an estimate and needs visual verification.
                             )
                         else:
                             result = {"error": "Unsupported tool"}
-    
                     except Exception as exc:
                         result = {"error": str(exc), "type": type(exc).__name__}
 
-                messages.append(                messages.append(
+                messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": call.id,
