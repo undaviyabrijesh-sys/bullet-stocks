@@ -80,5 +80,31 @@ class TapetideClient:
         days = max(1, min(int(days), 365))
         return await self._get(f"/stocks/{symbol}/price", {"days": days})
 
+
+    async def intraday_bars(
+        self,
+        symbol: str,
+        *,
+        interval: int = 5,
+        date: str | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        limit: int = 375,
+    ):
+        """Fetch historical 1/5/15-minute NSE/BSE bars; Tapetide updates after session close."""
+        symbol = quote(symbol.strip().upper(), safe="")
+        if interval not in (1, 5, 15):
+            raise ValueError("Intraday interval must be 1, 5 or 15 minutes")
+        if date and (from_date or to_date):
+            raise ValueError("Use date or from_date/to_date, not both")
+        if bool(from_date) != bool(to_date):
+            raise ValueError("from_date and to_date must be supplied together")
+        params = {"interval": interval, "limit": max(1, min(int(limit), 2000))}
+        if date:
+            params["date"] = date
+        elif from_date and to_date:
+            params.update({"from": from_date, "to": to_date})
+        return await self._get(f"/stocks/{symbol}/prices/intraday", params)
+
     async def close(self):
         await self.client.aclose()
