@@ -29,7 +29,7 @@ For quote questions use get_quote. For financial health use get_financials.
 For historical price context use get_price_history. Do not make more data calls than necessary.
 INTRADAY AND CRYPTO:
 - Support Indian cash equities and crypto spot/USD-M perpetual markets through Binance public read-only data.
-- Use get_intraday_stock_bars for historical 1/5/15-minute Indian equity candles. These bars update after the session closes; they are NOT a live candle feed. Use get_quote for the latest available quote and state its timestamp.
+- Use get_intraday_stock_bars for historical 1/5/15-minute Indian equity candles. These bars update after the session closes; they are NOT a live candle feed. Use get_live_quote for session-live Indian stock quotes where available; otherwise use get_quote for the latest available quote and state its timestamp.
 - Use get_crypto_klines and get_crypto_ticker for crypto. The latest Binance candle can still be forming; clearly identify it and avoid relying on it as a confirmed candle.
 - For intraday analysis, establish instrument, market and timeframe. Indian regular cash session is 09:15–15:30 IST; crypto trades 24/7. Ask one short clarification if a crucial detail is missing.
 - Structure a setup as market bias, key levels/zones, trigger/confirmation, conditional entry area, invalidation/stop, targets, reward:risk and cancellation condition. Mark data timestamp and candle status.
@@ -200,7 +200,7 @@ class ResearchAI:
                         )
                     elif call.function.name == "get_quote":
                         result = await self.market_data.quote(args["symbol"])
-                    elif call.function.name == "get_financials":
+                    elif call.function.name == "get_live_quote":\n                        result = await self.market_data.live_quote(args["symbol"])\n                    elif call.function.name == "get_financials":
                         result = await self.market_data.financials(
                             args["symbol"], args.get("section", "annual")
                         )
