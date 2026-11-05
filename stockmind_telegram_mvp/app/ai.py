@@ -321,37 +321,15 @@ must explain that the overlay is an estimate and needs visual verification.
         image_bytes: bytes | None = None,
         image_mime_type: str = "image/jpeg",
     ) -> str:
-        user_content = user_text
-        if image_bytes is not None:
-            allowed_types = {"image/jpeg", "image/png", "image/webp"}
-            if image_mime_type not in allowed_types:
-                raise ValueError("Unsupported image type. Use JPEG, PNG, WEBP or GIF.")
-            data_url = (
-                f"data:{image_mime_type};base64,"
-                f"{base64.b64encode(image_bytes).decode('ascii')}"
-            )
-            user_content = [
-                {
-                    "type": "text",
-                    "text": CHART_IMAGE_PROMPT + "\nUser question/caption: " + (
-                        user_text.strip() or "Please analyse this chart screenshot."
-                    ),
-                },
-                {
-                    "type": "image_url",
-                    "image_url": {"url": data_url, "detail": "high"},
-                },
-            ]
-
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             *history,
-            {"role": "user", "content": user_content},
+            {"role": "user", "content": user_text},
         ]
 
         for _ in range(4):
             response = await self.client.chat.completions.create(
-                model=self.vision_model if image_bytes is not None else self.model,
+                model=self.model,
                 messages=messages,
                 tools=TOOLS,
                 tool_choice="auto",
