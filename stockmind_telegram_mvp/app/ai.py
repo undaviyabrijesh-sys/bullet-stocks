@@ -110,15 +110,6 @@ set draw_overlay=false and all coordinates to zero. Never invent a box position.
 bounds to null if the scale cannot be read. Return at most 8 distinct zones. The text analysis
 must explain that the overlay is an estimate and needs visual verification.
 """
-CHART_PROMPT_SHA256 = hashlib.sha256(
-    json.dumps(
-        [SYSTEM_PROMPT, CHART_IMAGE_PROMPT, CHART_IMAGE_INSTRUCTIONS],
-        ensure_ascii=False,
-        separators=(",", ":"),
-    ).encode("utf-8")
-).hexdigest()
-
-
 def build_chart_prediction_metadata(response, requested_model, settings):
     """Capture provider-returned model/time metadata without guessing missing values."""
     actual_model = getattr(response, "model", None)
@@ -189,6 +180,20 @@ CHART_RESPONSE_FORMAT = {
     }
 }
 
+
+CHART_PROMPT_SHA256 = hashlib.sha256(
+    json.dumps(
+        [
+            SYSTEM_PROMPT,
+            CHART_IMAGE_PROMPT,
+            CHART_IMAGE_INSTRUCTIONS,
+            CHART_RESPONSE_FORMAT,
+        ],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+).hexdigest()
 
 MAX_CHART_ZONES = 8
 
