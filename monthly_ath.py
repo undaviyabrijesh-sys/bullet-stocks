@@ -125,19 +125,31 @@ def telegram_send(text):
         result = response.json()
         if not response.ok or not result.get("ok"):
             print("Telegram error:", response.status_code, result.get("description", "Unknown error"))
+        else:
+            print("Telegram message delivered; message_id:", result.get("result", {}).get("message_id"))
     except Exception as exc:
         print("Telegram failed:", exc)
 
 
 def telegram_entry_alert(r, pos, now):
-    """Telegram entry card for the capital-recycling exit plan."""
+    """Detailed Telegram entry card matching the Discord breakout signal."""
     if not pos:
+        print(f"Telegram entry skipped for {r.get('symbol')}: position was not created.")
         return
     symbol = r["symbol"]
+    risk_pct = (pos["entry"] - pos["initial_sl"]) / pos["entry"] * 100 if pos["entry"] else 0.0
     message = (
-        f"🟢 {symbol} — ENTRY TRIGGERED\n\n"
-        f"Entry: {fmt(pos['entry'])}\n"
-        f"Initial SL: {fmt(pos['initial_sl'])}\n\n"
+        f"🟢 {symbol} — BREAKOUT TRIGGERED\n"
+        f"Entry observed at current scan price · {now:%d %b %Y, %I:%M %p} IST\n\n"
+        f"CMP: {fmt(r['price'])}\n"
+        f"Breakout trigger: {fmt(r['trigger'])}\n"
+        f"Planned entry: {fmt(pos['entry'])}\n"
+        f"Initial SL: {fmt(pos['initial_sl'])} ({risk_pct:.1f}% below entry)\n"
+        f"Monthly ATH high: {fmt(r['level'])} ({r['setup_month']})\n\n"
+        f"QUALITY SCORE\n"
+        f"Score: {r['score']:.0f}/100\n"
+        f"Volume: {r['vol_ratio']:.1f}x\n"
+        f"Relative strength vs Nifty: {r['rs'] * 100:+.0f}%\n\n"
         f"TARGET LEVELS\n"
         f"🎯 T1: {fmt(pos['t1'])} (+25%)\n"
         f"🎯 T2: {fmt(pos['t2'])} (+40%)\n"
@@ -147,7 +159,7 @@ def telegram_entry_alert(r, pos, now):
         f"• T2: Move SL to cost and activate monthly SMA10 trailing SL\n"
         f"• T3: Book 25% of remaining quantity\n"
         f"• Hold the balance until trailing SL or 90-trading-session time exit\n\n"
-        f"Breakout trigger: {fmt(r['trigger'])}"
+        f"Open chart: {tv_link(symbol)}"
     )
     telegram_send(message)
 
