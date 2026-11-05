@@ -3,7 +3,7 @@ from io import BytesIO
 
 from PIL import Image
 
-from app.overlay_engine import render_overlay
+from stockmind_telegram_mvp.app.overlay_engine import render_overlay
 
 
 def sample_image():
