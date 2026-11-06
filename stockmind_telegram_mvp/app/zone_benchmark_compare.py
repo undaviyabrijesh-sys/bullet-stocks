@@ -1,5 +1,6 @@
 """Paired comparison of StockMind chart-zone benchmark reports."""
 import argparse
+import hashlib
 import json
 import math
 import re
@@ -53,8 +54,17 @@ def _validate_report(report, label):
     profile_hash = report.get("prediction_profile_sha256")
     if not isinstance(profile_hash, str) or not _SHA256_RE.fullmatch(profile_hash):
         raise ValueError(f"{label} report has an invalid prediction_profile_sha256")
-    if not isinstance(report.get("prediction_profile"), dict):
+    profile = report.get("prediction_profile")
+    if not isinstance(profile, dict):
         raise ValueError(f"{label} report is missing prediction_profile")
+    try:
+        canonical_profile = json.dumps(
+            profile, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} prediction_profile must contain finite JSON values") from exc
+    if hashlib.sha256(canonical_profile).hexdigest() != profile_hash:
+        raise ValueError(f"{label} prediction_profile_sha256 does not match prediction_profile")
     guideline = report.get("annotation_guideline_version")
     if not isinstance(guideline, str) or not guideline:
         raise ValueError(f"{label} report is missing annotation_guideline_version")
@@ -83,6 +93,16 @@ def _validate_report(report, label):
             not isinstance(calibration_hash, str) or not _SHA256_RE.fullmatch(calibration_hash)
         ):
             raise ValueError(f"{prefix} has an invalid price_axis_calibration_sha256")
+        prediction_metadata = fixture.get("prediction_metadata")
+        if not isinstance(prediction_metadata, dict):
+            raise ValueError(f"{prefix} prediction_metadata must be a JSON object")
+        profile_fields = (
+            "provider", "model", "requested_model", "prompt_version",
+            "prompt_sha256", "system_fingerprint", "settings"
+        )
+        fixture_profile = {field: prediction_metadata.get(field) for field in profile_fields}
+        if fixture_profile != profile:
+            raise ValueError(f"{prefix} prediction_metadata does not match report prediction_profile")
         annotation = fixture.get("annotation_metadata")
         if not isinstance(annotation, dict):
             raise ValueError(f"{prefix} annotation_metadata must be a JSON object")

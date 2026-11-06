@@ -83,6 +83,20 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         self.assertEqual(result["overall"]["false_negative"]["delta"], 1)
         self.assertEqual(result["by_symbol"][0]["value"], "BTCUSDT")
 
+    def test_rejects_profile_hash_that_does_not_match_profile(self):
+        baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
+        candidate = self._report("candidate", [])
+        candidate["prediction_profile"]["model"] = "tampered-model"
+        with self.assertRaisesRegex(ValueError, "prediction_profile_sha256 does not match"):
+            compare_benchmark_reports(baseline, candidate)
+
+    def test_rejects_fixture_prediction_metadata_outside_report_profile(self):
+        baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
+        candidate = self._report("candidate", [])
+        candidate["fixtures"][0]["prediction_metadata"]["model"] = "tampered-model"
+        with self.assertRaisesRegex(ValueError, "does not match report prediction_profile"):
+            compare_benchmark_reports(baseline, candidate)
+
     def test_rejects_different_screenshot_hashes(self):
         baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
         candidate = self._report("candidate", [])
