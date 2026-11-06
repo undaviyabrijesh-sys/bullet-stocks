@@ -4,7 +4,7 @@ This benchmark compares AI overlay rectangles with zones manually marked on the 
 
 ## Prediction provenance
 
-Every fixture must include a prediction_metadata object containing provider, the model identifier returned by the provider, requested_model, prompt_version, prompt_sha256, generated_at, settings and optional system_fingerprint. generated_at must be an ISO-8601 timestamp with an explicit timezone. Missing provider-returned model IDs or timestamps are not guessed; such incomplete metadata cannot be benchmarked.
+Every fixture must include a prediction_metadata object containing provider, the model identifier returned by the provider, requested_model, prompt_version, prompt_sha256, generated_at, settings and optional system_fingerprint. The chart prompt is supplied as a separate system message from the user's caption and conversation history. Text embedded in a screenshot is treated as chart content, not executable instructions; the caption can describe the requested analysis but cannot override the chart evidence rules or structured output contract. generated_at must be an ISO-8601 timestamp with an explicit timezone. Missing provider-returned model IDs or timestamps are not guessed; such incomplete metadata cannot be benchmarked.
 
 The chart analyzer returns this metadata with its structured result. prompt_sha256 hashes the static system/chart instructions and structured response schema (not the screenshot, user text or prior conversation). Bump CHART_PROMPT_VERSION when the intended prompt behavior changes; the hash also detects accidental prompt edits that were not accompanied by a version bump. settings records the chart request's temperature, image detail, response format and any reasoning setting.
 

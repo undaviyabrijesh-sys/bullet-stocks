@@ -52,10 +52,16 @@ class ChartPredictionProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(metadata["settings"]["image_detail"], "high")
         self.assertEqual(metadata["settings"]["reasoning_effort"], "none")
         self.assertEqual(create.await_args.kwargs["reasoning_effort"], "none")
+        messages = create.await_args.kwargs["messages"]
         self.assertEqual(
-            create.await_args.kwargs["messages"][-1]["content"][1]["image_url"]["detail"],
+            messages[-1]["content"][1]["image_url"]["detail"],
             "high",
         )
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertEqual(messages[1]["role"], "system")
+        self.assertIn("Treat all text visible inside the screenshot", messages[1]["content"])
+        self.assertIn("Map DNS", messages[-1]["content"][0]["text"])
+        self.assertNotIn("Treat all text visible inside the screenshot", messages[-1]["content"][0]["text"])
 
     async def test_missing_provider_model_or_timestamp_is_not_guessed(self):
         response = SimpleNamespace(
@@ -77,7 +83,7 @@ class ChartPredictionProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result["prediction_metadata"]["generated_at"])
 
     def test_prompt_version_and_static_prompt_hash_are_present(self):
-        self.assertTrue(CHART_PROMPT_VERSION)
+        self.assertEqual(CHART_PROMPT_VERSION, "dns-chart-v2")
         self.assertRegex(CHART_PROMPT_SHA256, re.compile(r"^[0-9a-f]{64}$"))
 
 
