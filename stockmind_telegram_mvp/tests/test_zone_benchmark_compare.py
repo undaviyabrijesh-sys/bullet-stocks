@@ -151,6 +151,8 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         row["predicted"] = 1
         row["false_positive"] = 1
         row["precision"] = 0.0
+        row["recall"] = None
+        row["f1"] = 0.0
 
         with self.assertRaisesRegex(ValueError, "by_zone_type counts do not reconcile"):
             compare_benchmark_reports(baseline, candidate)
@@ -195,6 +197,47 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         candidate["overall"]["recall"] = 0.9
 
         with self.assertRaisesRegex(ValueError, "overall metrics do not match"):
+            compare_benchmark_reports(baseline, candidate)
+
+    def test_rejects_integer_too_large_for_finite_float_metrics(self):
+        baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
+        candidate = self._report("candidate", [])
+        candidate["fixtures"][0]["overall"]["mean_center_error_normalized"] = 10 ** 1000
+
+        with self.assertRaisesRegex(ValueError, "must be finite or null"):
+            compare_benchmark_reports(baseline, candidate)
+
+    def test_rejects_non_string_match_zone_type_without_crashing(self):
+        baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
+        candidate = self._report("candidate", [{**_zone(), "draw_overlay": True}])
+        candidate["fixtures"][0]["matches"][0]["zone_type"] = []
+
+        with self.assertRaisesRegex(ValueError, "invalid shape or zone_type"):
+            compare_benchmark_reports(baseline, candidate)
+
+    def test_rejects_non_string_price_axis_scale_without_crashing(self):
+        anchors = [
+            {"y": 0.2, "price": 120},
+            {"y": 0.5, "price": 90},
+            {"y": 0.8, "price": 60},
+        ]
+        baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}], anchors=anchors)
+        candidate = self._report("candidate", [{**_zone(), "draw_overlay": True}], anchors=anchors)
+        candidate["fixtures"][0]["price_accuracy"]["scale"] = []
+
+        with self.assertRaisesRegex(ValueError, "scale must be linear or log"):
+            compare_benchmark_reports(baseline, candidate)
+
+    def test_rejects_match_iou_below_declared_threshold(self):
+        baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
+        candidate = self._report("candidate", [{**_zone(), "draw_overlay": True}])
+        candidate["fixtures"][0]["matches"][0]["iou"] = 0.4
+        candidate["fixtures"][0]["overall"]["mean_iou"] = 0.4
+        candidate["fixtures"][0]["by_zone_type"]["demand"]["mean_iou"] = 0.4
+        candidate["overall"]["mean_iou"] = 0.4
+        candidate["by_zone_type"]["demand"]["mean_iou"] = 0.4
+
+        with self.assertRaisesRegex(ValueError, "below the fixture threshold"):
             compare_benchmark_reports(baseline, candidate)
 
     def test_rejects_duplicate_fixture_ids(self):

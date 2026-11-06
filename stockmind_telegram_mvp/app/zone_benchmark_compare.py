@@ -24,7 +24,12 @@ _CONTEXT_FIELDS = ("asset_class", "symbol", "exchange", "timeframe")
 
 
 def _finite(value):
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (OverflowError, ValueError):
+        return False
 
 
 def _validate_metrics(row, label):
@@ -102,7 +107,7 @@ def _validate_price_accuracy(price, matches, label):
     missing = sorted(required - set(price))
     if missing:
         raise ValueError(f"{label} is missing fields: {', '.join(missing)}")
-    if price["scale"] not in {"linear", "log"}:
+    if not isinstance(price["scale"], str) or price["scale"] not in {"linear", "log"}:
         raise ValueError(f"{label}.scale must be linear or log")
     anchor_count = price["anchor_count"]
     if isinstance(anchor_count, bool) or not isinstance(anchor_count, int) or not 3 <= anchor_count <= 20:
@@ -294,7 +299,11 @@ def _validate_report(report, label):
         prediction_indices = set()
         reference_indices = set()
         for match_index, match in enumerate(matches):
-            if not isinstance(match, dict) or match.get("zone_type") not in {"supply", "demand"}:
+            if (
+                not isinstance(match, dict)
+                or not isinstance(match.get("zone_type"), str)
+                or match.get("zone_type") not in {"supply", "demand"}
+            ):
                 raise ValueError(f"{prefix} match {match_index} has an invalid shape or zone_type")
             for field, seen in (
                 ("prediction_index", prediction_indices),
@@ -310,8 +319,12 @@ def _validate_report(report, label):
                 value = match.get(field)
                 if not _finite(value) or value < 0:
                     raise ValueError(f"{prefix} match {match_index}.{field} is invalid")
+            if match["iou"] <= 0 or match["iou"] + 1e-12 < threshold:
+                raise ValueError(f"{prefix} match {match_index}.iou is below the fixture threshold")
             if match["iou"] > 1:
                 raise ValueError(f"{prefix} match {match_index}.iou cannot exceed 1")
+            if match["center_error_normalized"] > math.sqrt(2) + 1e-12:
+                raise ValueError(f"{prefix} match {match_index}.center_error_normalized exceeds image bounds")
 
         _validate_metric_consistency(fixture["overall"], matches, f"{prefix}.overall")
         for zone_type in ("supply", "demand"):
