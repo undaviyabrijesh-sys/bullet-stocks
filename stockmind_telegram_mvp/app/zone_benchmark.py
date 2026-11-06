@@ -27,6 +27,7 @@ _REQUIRED_FIELDS = {
     "reference_zones",
     "predicted_zones",
     "prediction_metadata",
+    "annotation_metadata",
 }
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _ANNOTATOR_ID_RE = re.compile(r"^ann-[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")

@@ -27,7 +27,8 @@ Every fixture must include an `annotation_metadata` object. Only annotations tha
 ~~~
 
 - Use pseudonymous IDs with the `ann-` and `rev-` prefixes. Never put names, email addresses, chat handles or other personal information in benchmark metadata; the validator rejects extra fields.
-- The reviewer must be a separate person/ID from the annotator. A pending, rejected or self-reviewed annotation cannot be scored.
+- Use a distinct reviewer ID (`rev-...`); project controls must ensure it maps to a different human from the annotator. A pending, rejected or self-reviewed annotation cannot be scored.
+- The validator checks declared metadata and formats; it cannot authenticate annotators or prove that a human review actually occurred. Keep reviewer-to-ID mappings and audit evidence in an access-controlled system outside this repository.
 - Both timestamps must be ISO-8601 with an explicit timezone, and review time cannot precede annotation time.
 - Use one guideline version throughout a manifest. When annotation rules change, increment the version and benchmark that release separately.
 - Preserve the provenance metadata with each report so a later model comparison can be traced to its approved ground truth.

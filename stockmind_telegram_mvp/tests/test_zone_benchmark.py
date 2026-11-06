@@ -222,6 +222,16 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "anonymized ID"):
             evaluate_benchmark_manifest(self.manifest)
 
+    def test_rejects_reviewer_id_that_is_not_a_separate_reviewer_id(self):
+        self._write(
+            self._record(
+                annotation_metadata=_annotation_metadata(reviewer_id="ann-001")
+            )
+        )
+
+        with self.assertRaisesRegex(ValueError, "separate anonymized ID"):
+            evaluate_benchmark_manifest(self.manifest)
+
     def test_rejects_annotation_metadata_with_unapproved_extra_fields(self):
         metadata = _annotation_metadata()
         metadata["reviewer_email"] = "reviewer@example.com"
