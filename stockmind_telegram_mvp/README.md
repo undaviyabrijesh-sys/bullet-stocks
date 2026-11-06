@@ -71,6 +71,17 @@ Malformed or non-object model tool arguments are contained as explicit tool erro
 
 Answers must show provider timestamps when available, distinguish missing/stale data from valid values, and never invent prices, fundamentals or technical indicators. This product is for research/education, not order execution or guaranteed-return claims.
 
+## Automated tests
+
+Run the StockMind checks from the repository root:
+
+```bash
+python -m compileall -q stockmind_telegram_mvp/app
+python -m unittest discover -s stockmind_telegram_mvp/tests -v
+```
+
+The research-to-Telegram flow tests import the bot with disposable dummy configuration and mock the research provider and Telegram message methods. They cover successful text/chart delivery, progress-message failure, ambiguous final-message delivery, optional overlay-photo failure, and provider failure. These tests do not contact OpenAI, Tapetide, Binance or Telegram and do not validate live service credentials.
+
 ### Offline DNS benchmark and price-axis calibration
 
 The optional offline benchmark in `app/zone_evaluation.py` scores AI overlay geometry against manually annotated rectangles. It can also report price-boundary error when a fixture supplies at least three manually verified chart-axis anchors (`y` normalized to the full screenshot plus a positive numeric `price`). The calibration supports linear and logarithmic axes, rejects inconsistent/non-monotonic anchors, and refuses to extrapolate beyond the anchor range. This is manual calibration—not automatic OCR—and it does not change the Telegram bot's chart output. See [ZONE_BENCHMARK.md](ZONE_BENCHMARK.md) for the fixture format and scoring rules.
