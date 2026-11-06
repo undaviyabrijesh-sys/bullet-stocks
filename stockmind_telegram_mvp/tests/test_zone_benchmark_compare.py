@@ -68,6 +68,9 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         }
         if anchors is not None:
             record["price_axis_anchors"] = anchors
+            record["price_axis_plot_bounds"] = {
+                "x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9
+            }
             record["price_axis_scale"] = "linear"
         manifest = self.root / f"{model}-{fixture_id}.jsonl"
         manifest.write_text(json.dumps(record) + "\n", encoding="utf-8")
