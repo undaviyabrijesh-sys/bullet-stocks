@@ -30,6 +30,7 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
         bot_module.usage.clear()
         bot_module.usage_day.clear()
         bot_module.beta_users.clear()
+        bot_module.user_locks.clear()
 
         self.user_id = 987654321
         self.status = SimpleNamespace(edit_text=AsyncMock())
@@ -57,6 +58,79 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
                 {"role": "user", "content": "Analyse BTC"},
                 {"role": "assistant", "content": "BTC structure is unclear."},
             ],
+        )
+
+    async def test_same_user_requests_are_serialized_and_second_sees_first_turn(self):
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+        calls = []
+
+        async def answer(history, user_text):
+            calls.append((list(history), user_text))
+            if user_text == "first request":
+                first_started.set()
+                await release_first.wait()
+            return f"answer: {user_text}"
+
+        research = self.use_research(answer=AsyncMock(side_effect=answer))
+        first_task = asyncio.create_task(bot_module.run_research(self.message, "first request"))
+        await asyncio.wait_for(first_started.wait(), timeout=1)
+
+        second_task = asyncio.create_task(bot_module.run_research(self.message, "second request"))
+        await asyncio.sleep(0)
+        self.assertFalse(second_task.done(), "same-user request should wait for the active turn")
+
+        release_first.set()
+        await asyncio.wait_for(asyncio.gather(first_task, second_task), timeout=1)
+
+        research.answer.assert_awaited()
+        self.assertEqual([user_text for _, user_text in calls], ["first request", "second request"])
+        self.assertEqual(
+            calls[1][0],
+            [
+                {"role": "user", "content": "first request"},
+                {"role": "assistant", "content": "answer: first request"},
+            ],
+        )
+        self.assertEqual(
+            list(bot_module.histories[self.user_id]),
+            [
+                {"role": "user", "content": "first request"},
+                {"role": "assistant", "content": "answer: first request"},
+                {"role": "user", "content": "second request"},
+                {"role": "assistant", "content": "answer: second request"},
+            ],
+        )
+
+    async def test_reset_waits_for_active_same_user_research(self):
+        bot_module.histories[self.user_id].append(
+            {"role": "assistant", "content": "previous context"}
+        )
+        research_started = asyncio.Event()
+        release_research = asyncio.Event()
+
+        async def answer(history, user_text):
+            research_started.set()
+            await release_research.wait()
+            return "completed answer"
+
+        self.use_research(answer=AsyncMock(side_effect=answer))
+        research_task = asyncio.create_task(bot_module.run_research(self.message, "new question"))
+        await asyncio.wait_for(research_started.wait(), timeout=1)
+
+        reset_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=self.user_id),
+            answer=AsyncMock(),
+        )
+        reset_task = asyncio.create_task(bot_module.reset(reset_message))
+        await asyncio.sleep(0)
+        self.assertFalse(reset_task.done(), "reset should wait until the active turn commits")
+
+        release_research.set()
+        await asyncio.wait_for(asyncio.gather(research_task, reset_task), timeout=1)
+        self.assertEqual(list(bot_module.histories[self.user_id]), [])
+        reset_message.answer.assert_awaited_once_with(
+            "Conversation context cleared. Ask a new research question."
         )
 
     async def test_chart_analysis_is_saved_even_when_overlay_delivery_fails(self):
