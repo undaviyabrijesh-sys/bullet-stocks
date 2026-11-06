@@ -94,6 +94,14 @@ class TapetideResponseValidationTests(unittest.IsolatedAsyncioTestCase):
 
 class BinanceResponseValidationTests(unittest.IsolatedAsyncioTestCase):
     def make_client(self, response):
+        # AsyncClient attaches the originating request before raise_for_status().
+        # Rebuild mocked responses with that same required HTTPX invariant.
+        response = httpx.Response(
+            response.status_code,
+            headers=response.headers,
+            content=response.content,
+            request=httpx.Request("GET", "https://api.binance.com/test"),
+        )
         client = object.__new__(BinanceMarketData)
         client.client = SimpleNamespace(get=AsyncMock(return_value=response))
         return client
