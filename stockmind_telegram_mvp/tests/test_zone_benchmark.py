@@ -102,6 +102,15 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
             "annotation_metadata": _annotation_metadata(),
         }
         record.update(overrides)
+        # The standard fixture represents a fully known plot. Tests that need
+        # missing-boundary behaviour override either field with None.
+        if "reference_plot_bounds" not in record:
+            record["reference_plot_bounds"] = (
+                record.get("price_axis_plot_bounds")
+                or {"x_start": 0.0, "x_end": 1.0, "y_top": 0.0, "y_bottom": 1.0}
+            )
+        if "predicted_plot_bounds" not in record:
+            record["predicted_plot_bounds"] = record["reference_plot_bounds"]
         return record
 
     def _write(self, *records):
@@ -458,6 +467,20 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         ))
         with self.assertRaisesRegex(ValueError, "falls outside the manually marked main price plot"):
             evaluate_benchmark_manifest(self.manifest)
+
+    def test_predictions_without_model_plot_bounds_are_ignored_not_scored(self):
+        self._write(self._record(predicted_plot_bounds=None))
+
+        result = evaluate_benchmark_manifest(self.manifest)
+
+        self.assertEqual(result["overall"]["predicted"], 0)
+        self.assertEqual(result["overall"]["true_positive"], 0)
+        self.assertEqual(result["overall"]["false_negative"], 1)
+        self.assertEqual(result["ignored_prediction_count"], 1)
+        self.assertEqual(
+            result["fixtures"][0]["plot_boundary_accuracy"]["status"],
+            "missing_prediction",
+        )
 
     def test_prediction_below_renderer_pixel_minimum_is_a_missed_zone(self):
         self._write(

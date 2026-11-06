@@ -183,8 +183,10 @@ def evaluate_zone_predictions(
 ):
     """Compare AI rectangles with manual annotations, optionally in price units.
 
-    Predictions without draw_overlay=True or with invalid geometry are counted
-    as ignored (not as drawn false positives). Invalid manual reference
+    Predictions without draw_overlay=True, without a valid predicted_plot_bounds
+    frame, or with invalid geometry are counted as ignored (not as drawn false
+    positives). The model plot frame is mandatory for every drawable prediction,
+    even when no manual reference plot was supplied. Invalid manual reference
     annotations, including zones outside a supplied manual plot boundary, raise
     ValueError so a broken fixture cannot silently skew scores.
     Only the first eight predictions are considered because the overlay renderer
@@ -324,29 +326,29 @@ def evaluate_zone_predictions(
                 "reference_plot_bounds must match price_axis_plot_bounds when both are supplied"
             )
 
+    # Production rendering always requires a valid model plot frame. Apply
+    # that rule even when a fixture has no manual plot annotation; otherwise a
+    # zone with no renderable frame could be counted as a true positive.
+    predicted_plot_box = normalized_plot_bounds_to_pixel_box(
+        predicted_plot_bounds, image_width, image_height
+    )
+    drawable_predictions = []
+    for zone in valid_predictions:
+        left, top, right, bottom = zone["box_px"]
+        if (
+            predicted_plot_box is None
+            or left < predicted_plot_box[0]
+            or top < predicted_plot_box[1]
+            or right > predicted_plot_box[2]
+            or bottom > predicted_plot_box[3]
+        ):
+            ignored_predictions += 1
+            continue
+        drawable_predictions.append(zone)
+    valid_predictions = drawable_predictions
+
     plot_boundary_accuracy = None
     if reference_plot_bounds is not None:
-        # Production rendering requires a valid model plot frame and rejects
-        # any zone not fully contained by that frame. Benchmark zone metrics
-        # must score the same drawable set, not raw boxes the renderer skips.
-        predicted_plot_box = normalized_plot_bounds_to_pixel_box(
-            predicted_plot_bounds, image_width, image_height
-        )
-        drawable_predictions = []
-        for zone in valid_predictions:
-            left, top, right, bottom = zone["box_px"]
-            if (
-                predicted_plot_box is None
-                or left < predicted_plot_box[0]
-                or top < predicted_plot_box[1]
-                or right > predicted_plot_box[2]
-                or bottom > predicted_plot_box[3]
-            ):
-                ignored_predictions += 1
-                continue
-            drawable_predictions.append(zone)
-        valid_predictions = drawable_predictions
-
         plot_boundary_accuracy = build_plot_boundary_accuracy(
             reference_plot_bounds,
             predicted_plot_bounds,

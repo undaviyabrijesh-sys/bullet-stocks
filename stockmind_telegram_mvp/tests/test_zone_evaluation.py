@@ -3,6 +3,18 @@ import unittest
 from stockmind_telegram_mvp.app.zone_evaluation import evaluate_zone_predictions
 
 def evaluate(predicted_zones, reference_zones, **kwargs):
+    # Most geometry-only unit tests use the full screenshot as a known plot.
+    # Tests for missing/invalid model or manual bounds pass those arguments
+    # explicitly so they exercise the fail-closed production path.
+    if not any(
+        key in kwargs
+        for key in ("reference_plot_bounds", "predicted_plot_bounds", "price_axis_plot_bounds")
+    ):
+        full_image = {
+            "x_start": 0.0, "x_end": 1.0, "y_top": 0.0, "y_bottom": 1.0
+        }
+        kwargs["reference_plot_bounds"] = full_image
+        kwargs["predicted_plot_bounds"] = full_image
     return evaluate_zone_predictions(
         predicted_zones,
         reference_zones,
@@ -61,9 +73,14 @@ class ZoneEvaluationTests(unittest.TestCase):
             x_start=0.0, x_end=0.2,
             y_top=0.2, y_bottom=0.4,
         )
+        full_image = {
+            "x_start": 0.0, "x_end": 1.0, "y_top": 0.0, "y_bottom": 1.0
+        }
         result = evaluate_zone_predictions(
             [tiny],
             [reference],
+            predicted_plot_bounds=full_image,
+            reference_plot_bounds=full_image,
             image_width=10,
             image_height=10,
         )
@@ -294,6 +311,19 @@ class ZoneEvaluationTests(unittest.TestCase):
         self.assertEqual(
             result["plot_boundary_accuracy"]["predicted_zone_count"], 0
         )
+
+    def test_predictions_without_model_plot_bounds_are_ignored_even_without_manual_plot(self):
+        result = evaluate_zone_predictions(
+            [prediction()],
+            [zone()],
+            image_width=640,
+            image_height=360,
+        )
+        self.assertEqual(result["ignored_prediction_count"], 1)
+        self.assertEqual(result["overall"]["predicted"], 0)
+        self.assertEqual(result["overall"]["true_positive"], 0)
+        self.assertEqual(result["overall"]["false_negative"], 1)
+        self.assertIsNone(result["plot_boundary_accuracy"])
 
     def test_predicted_plot_requires_independent_manual_reference(self):
         with self.assertRaisesRegex(ValueError, "reference_plot_bounds is required"):

@@ -58,6 +58,16 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
             "generated_at": "2026-11-06T03:00:00Z", "system_fingerprint": "fp-test",
             "settings": {"temperature": 0.1, "image_detail": "high"}
         }
+        axis_bounds = {
+            "x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9
+        }
+        if reference_plot_bounds is None:
+            reference_plot_bounds = (
+                axis_bounds if anchors is not None else
+                {"x_start": 0.0, "x_end": 1.0, "y_top": 0.0, "y_bottom": 1.0}
+            )
+        if predicted_plot_bounds is None:
+            predicted_plot_bounds = reference_plot_bounds
         record = {
             "fixture_id": fixture_id, "image_file": "chart.png",
             "image_sha256": self.image_hash, "image_width": 40, "image_height": 30,
@@ -65,12 +75,10 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
             "predicted_zones": predicted, "prediction_metadata": metadata,
             "annotation_metadata": _annotation(),
             "market_context": context if context is not None else self.context,
-            "iou_threshold": threshold
+            "iou_threshold": threshold,
+            "reference_plot_bounds": reference_plot_bounds,
+            "predicted_plot_bounds": predicted_plot_bounds,
         }
-        if reference_plot_bounds is not None:
-            record["reference_plot_bounds"] = reference_plot_bounds
-        if predicted_plot_bounds is not None:
-            record["predicted_plot_bounds"] = predicted_plot_bounds
         if anchors is not None:
             record["price_axis_anchors"] = anchors
             record["price_axis_plot_bounds"] = {
