@@ -39,10 +39,10 @@ Every fixture must include an `annotation_metadata` object. Only annotations tha
 - Use the same full-image coordinate frame for the AI prediction and manual annotation. Do not crop one side or score against a different screenshot.
 - Keep no more than eight reference zones, matching the current overlay cap.
 - Do not infer unreadable price values. Geometry-only fixtures need no price-axis data.
-- For price-level scoring, manually record at least three legible price-axis anchors from the same screenshot. Each anchor is an object with y normalized to the full screenshot and a positive numeric price. Record anchors at distinct vertical positions and in top-to-bottom order with descending prices.
+- For price-level scoring, manually record at least three legible price-axis anchors from the same screenshot and manually mark the main price-plot rectangle as `price_axis_plot_bounds`. Each anchor is an object with y normalized to the full screenshot and a positive numeric price. Anchor y-coordinates must fall inside the marked plot's vertical span (the labels themselves may sit in the adjacent price scale). Record anchors at distinct vertical positions and in top-to-bottom order with descending prices. Anchors in toolbars or indicator panels are rejected.
 - Choose linear for a standard arithmetic price axis or log for a logarithmic axis. Do not use the logarithmic option merely because price values are large.
 
-A fixture record should contain a stable fixture_id, image_file, image_sha256, image_width, image_height, reference_zones, predicted_zones, prediction_metadata and approved annotation_metadata. The image_file must be a relative path contained within the manifest directory. Optional `market_context` can record `asset_class`, `symbol`, `exchange` and `timeframe`. Values are trimmed, limited to 32/64/64/16 characters respectively, and control characters are rejected. Asset class, exchange and timeframe are case-folded; symbols are uppercased so case-only variants share one group. Omitted dimensions are reported in a `null` group rather than silently excluded. Timeframe aliases such as `60m` and `1h` are intentionally not assumed equivalent. Each reference zone needs zone_type and the four normalized coordinates. Predicted zones should be the structured AI zones, including draw_overlay. Optional price_axis_anchors and price_axis_scale fields enable price-unit scoring. Additional descriptive metadata fields may be included.
+A fixture record should contain a stable fixture_id, image_file, image_sha256, image_width, image_height, reference_zones, predicted_zones, prediction_metadata and approved annotation_metadata. The image_file must be a relative path contained within the manifest directory. Optional `market_context` can record `asset_class`, `symbol`, `exchange` and `timeframe`. Values are trimmed, limited to 32/64/64/16 characters respectively, and control characters are rejected. Asset class, exchange and timeframe are case-folded; symbols are uppercased so case-only variants share one group. Omitted dimensions are reported in a `null` group rather than silently excluded. Timeframe aliases such as `60m` and `1h` are intentionally not assumed equivalent. Each reference zone needs zone_type and the four normalized coordinates. Predicted zones should be the structured AI zones, including draw_overlay. When price_axis_anchors are present, price_axis_plot_bounds is required and must describe the manually reviewed main price-plot rectangle; price_axis_scale selects linear or log price-unit scoring. Additional descriptive metadata fields may be included.
 
 ## Geometry scoring
 
@@ -167,12 +167,17 @@ result = evaluate_zone_predictions(
         {"y": 0.43, "price": 100.0},
         {"y": 0.68, "price": 75.0},
     ],
+    price_axis_plot_bounds={
+        "x_start": 0.08, "x_end": 0.92,
+        "y_top": 0.12, "y_bottom": 0.9,
+    },
     price_axis_scale="linear",
 )
 ~~~
 
 Price-axis calibration:
-- requires 3..20 manually verified anchors; two points are deliberately insufficient because they cannot expose a distorted/non-uniform scale;
+- requires 3..20 manually verified anchors and a manually marked main price-plot rectangle; two points are deliberately insufficient because they cannot expose a distorted/non-uniform scale;
+- rejects anchor y-coordinates outside the marked main price plot, preventing toolbar or lower indicator-panel labels from calibrating the candle chart;
 - fits either a linear price axis or a linear fit in log-price space;
 - rejects reversed/non-monotonic anchors and fits whose maximum anchor residual exceeds 2% by default (the caller may set a stricter tolerance, up to 10%);
 - never extrapolates beyond the first/last anchor y-coordinate;

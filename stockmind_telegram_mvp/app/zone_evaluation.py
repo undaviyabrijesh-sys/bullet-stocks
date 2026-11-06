@@ -7,7 +7,7 @@ Optional price-axis scoring requires manually verified axis anchors.
 from functools import lru_cache
 import math
 
-from .overlay_engine import normalized_zone_to_pixel_box
+from .overlay_engine import normalized_plot_bounds_to_pixel_box, normalized_zone_to_pixel_box
 from .price_axis import calibrate_price_axis, zone_price_bounds
 
 MAX_EVALUATED_ZONES = 8
@@ -172,6 +172,7 @@ def evaluate_zone_predictions(
     *,
     iou_threshold=0.5,
     price_axis_anchors=None,
+    price_axis_plot_bounds=None,
     price_axis_scale="linear",
     max_axis_relative_error=0.02,
     image_width,
@@ -187,7 +188,10 @@ def evaluate_zone_predictions(
     screenshot dimensions; predictions too small to pass the renderer's pixel
     threshold are ignored and their reference zones remain false negatives.
 
-    When price_axis_anchors are supplied, they must be 3..20 manually verified
+    When price_axis_anchors are supplied, a manually reviewed
+    price_axis_plot_bounds rectangle is also required. Every anchor y must fall
+    within that main price-plot's vertical span (the labels may sit in the
+    adjacent price scale). Anchors must be 3..20 manually verified
     {"y": normalized_full_image_y, "price": positive_price} points from the
     same screenshot. Price errors are reported only for matched zones wholly
     inside the calibrated y range. No OCR or price-axis extrapolation is done.
@@ -208,12 +212,33 @@ def evaluate_zone_predictions(
         raise ValueError(f"reference_zones cannot exceed {MAX_EVALUATED_ZONES} entries")
 
     calibration = None
-    if price_axis_anchors is not None:
+    if price_axis_anchors is None:
+        if price_axis_plot_bounds is not None:
+            raise ValueError("price_axis_plot_bounds requires price_axis_anchors")
+    else:
+        if price_axis_plot_bounds is None:
+            raise ValueError(
+                "price_axis_plot_bounds is required with price_axis_anchors"
+            )
+        plot_box = normalized_plot_bounds_to_pixel_box(
+            price_axis_plot_bounds, image_width, image_height
+        )
+        if plot_box is None:
+            raise ValueError("price_axis_plot_bounds must be a valid normalized plot rectangle")
+        _, plot_top, _, plot_bottom = plot_box
+        plot_top_normalized = plot_top / image_height
+        plot_bottom_normalized = plot_bottom / image_height
         calibration = calibrate_price_axis(
             price_axis_anchors,
             scale=price_axis_scale,
             max_relative_error=max_axis_relative_error,
         )
+        for index, anchor in enumerate(price_axis_anchors):
+            anchor_y = float(anchor["y"])  # validated by calibrate_price_axis
+            if not plot_top_normalized <= anchor_y < plot_bottom_normalized:
+                raise ValueError(
+                    f"price-axis anchor at index {index} falls outside the manually marked main price plot"
+                )
 
     valid_predictions = []
     ignored_predictions = max(0, len(predicted_zones) - MAX_EVALUATED_ZONES)

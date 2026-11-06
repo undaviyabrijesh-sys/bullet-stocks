@@ -354,6 +354,7 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
             raise ValueError(f"line {line_number} ({fixture_id}): {field} must be a JSON array")
 
     anchors = record.get("price_axis_anchors")
+    axis_plot_bounds = record.get("price_axis_plot_bounds")
     scale = record.get("price_axis_scale")
     if scale is not None and anchors is None:
         raise ValueError(
@@ -361,6 +362,14 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
         )
     if anchors is not None and not isinstance(anchors, list):
         raise ValueError(f"line {line_number} ({fixture_id}): price_axis_anchors must be a JSON array")
+    if anchors is not None and axis_plot_bounds is None:
+        raise ValueError(
+            f"line {line_number} ({fixture_id}): price_axis_plot_bounds is required with price_axis_anchors"
+        )
+    if anchors is None and axis_plot_bounds is not None:
+        raise ValueError(
+            f"line {line_number} ({fixture_id}): price_axis_plot_bounds requires price_axis_anchors"
+        )
 
     try:
         result = evaluate_zone_predictions(
@@ -370,6 +379,7 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
             image_height=record["image_height"],
             iou_threshold=record.get("iou_threshold", 0.5),
             price_axis_anchors=anchors,
+            price_axis_plot_bounds=axis_plot_bounds,
             price_axis_scale=scale or "linear",
             max_axis_relative_error=record.get("max_axis_relative_error", 0.02),
         )
@@ -381,6 +391,7 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
         price_axis_calibration_sha256 = (
             _canonical_json_sha256({
                 "anchors": anchors,
+                "plot_bounds": axis_plot_bounds,
                 "scale": scale or "linear",
                 "max_axis_relative_error": record.get("max_axis_relative_error", 0.02),
             })

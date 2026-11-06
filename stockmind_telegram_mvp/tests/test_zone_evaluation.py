@@ -32,6 +32,9 @@ def prediction(zone_type="demand", **overrides):
     return value
 
 
+PLOT_BOUNDS = {"x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9}
+
+
 AXIS_ANCHORS = [
     {"y": 0.2, "price": 120},
     {"y": 0.5, "price": 90},
@@ -152,6 +155,7 @@ class ZoneEvaluationTests(unittest.TestCase):
             [prediction(y_top=0.41, y_bottom=0.61)],
             [zone()],
             price_axis_anchors=AXIS_ANCHORS,
+            price_axis_plot_bounds=PLOT_BOUNDS,
         )
         self.assertEqual(result["overall"]["true_positive"], 1)
         self.assertGreater(result["overall"]["mean_iou"], 0.8)
@@ -168,11 +172,34 @@ class ZoneEvaluationTests(unittest.TestCase):
             [prediction(y_top=0.19, y_bottom=0.4)],
             [zone(y_top=0.2, y_bottom=0.4)],
             price_axis_anchors=AXIS_ANCHORS,
+            price_axis_plot_bounds=PLOT_BOUNDS,
         )
         self.assertEqual(result["overall"]["true_positive"], 1)
         self.assertEqual(result["price_accuracy"]["scored_match_count"], 0)
         self.assertEqual(result["price_accuracy"]["unscored_match_count"], 1)
         self.assertEqual(result["matches"][0]["price_comparison"]["status"], "unscored")
+
+
+    def test_price_axis_anchors_require_a_manually_marked_plot(self):
+        with self.assertRaisesRegex(ValueError, "price_axis_plot_bounds is required"):
+            evaluate([prediction()], [zone()], price_axis_anchors=AXIS_ANCHORS)
+
+    def test_price_axis_anchors_outside_main_plot_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "falls outside the manually marked main price plot"):
+            evaluate(
+                [prediction()],
+                [zone()],
+                price_axis_anchors=[
+                    {"y": 0.05, "price": 130},
+                    {"y": 0.5, "price": 90},
+                    {"y": 0.8, "price": 60},
+                ],
+                price_axis_plot_bounds=PLOT_BOUNDS,
+            )
+
+    def test_plot_bounds_without_price_anchors_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "requires price_axis_anchors"):
+            evaluate([prediction()], [zone()], price_axis_plot_bounds=PLOT_BOUNDS)
 
     def test_distorted_axis_fails_loudly_for_price_scoring(self):
         with self.assertRaisesRegex(ValueError, "distorted or inconsistent"):
@@ -184,6 +211,7 @@ class ZoneEvaluationTests(unittest.TestCase):
                     {"y": 0.5, "price": 90},
                     {"y": 0.9, "price": 20},
                 ],
+                price_axis_plot_bounds=PLOT_BOUNDS,
             )
 
 

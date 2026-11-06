@@ -399,6 +399,7 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
                     {"y": 0.8, "price": 60},
                 ],
                 price_axis_scale="linear",
+                price_axis_plot_bounds={"x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9},
             )
         )
 
@@ -408,6 +409,48 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         self.assertEqual(result["price_accuracy"]["scored_zone_count"], 1)
         self.assertEqual(result["price_accuracy"]["unscored_zone_count"], 0)
         self.assertEqual(result["price_accuracy"]["mean_boundary_abs_error"], 0.0)
+
+
+    def test_price_axis_anchors_require_manual_plot_bounds(self):
+        self._write(self._record(
+            price_axis_anchors=[
+                {"y": 0.2, "price": 120},
+                {"y": 0.5, "price": 90},
+                {"y": 0.8, "price": 60},
+            ],
+            price_axis_scale="linear",
+        ))
+        with self.assertRaisesRegex(ValueError, "price_axis_plot_bounds is required"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_price_axis_calibration_fingerprint_includes_plot_bounds(self):
+        anchors = [
+            {"y": 0.2, "price": 120},
+            {"y": 0.5, "price": 90},
+            {"y": 0.8, "price": 60},
+        ]
+        bounds_a = {"x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9}
+        bounds_b = {"x_start": 0.1, "x_end": 0.9, "y_top": 0.15, "y_bottom": 0.9}
+        self._write(
+            self._record("plot-a", price_axis_anchors=anchors, price_axis_plot_bounds=bounds_a),
+            self._record("plot-b", price_axis_anchors=anchors, price_axis_plot_bounds=bounds_b),
+        )
+        result = evaluate_benchmark_manifest(self.manifest)
+        hashes = [fixture["price_axis_calibration_sha256"] for fixture in result["fixtures"]]
+        self.assertNotEqual(hashes[0], hashes[1])
+
+    def test_price_axis_anchors_outside_manual_plot_are_rejected(self):
+        self._write(self._record(
+            price_axis_anchors=[
+                {"y": 0.05, "price": 130},
+                {"y": 0.5, "price": 90},
+                {"y": 0.8, "price": 60},
+            ],
+            price_axis_scale="linear",
+            price_axis_plot_bounds={"x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9},
+        ))
+        with self.assertRaisesRegex(ValueError, "falls outside the manually marked main price plot"):
+            evaluate_benchmark_manifest(self.manifest)
 
     def test_prediction_below_renderer_pixel_minimum_is_a_missed_zone(self):
         self._write(
