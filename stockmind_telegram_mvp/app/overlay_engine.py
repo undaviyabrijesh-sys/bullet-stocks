@@ -118,6 +118,18 @@ def normalized_zone_to_pixel_box(
     return left, top, right, bottom
 
 
+def _pillow_rectangle_bounds(pixel_box: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    """Convert half-open pixel bounds to Pillow's inclusive rectangle endpoints.
+
+    normalized_zone_to_pixel_box returns [left, right) × [top, bottom)
+    geometry, matching the evaluator's width/height calculations. Pillow's
+    ImageDraw.rectangle includes both endpoints, so right and bottom must be
+    decremented to draw exactly the same pixel extent.
+    """
+    left, top, right, bottom = pixel_box
+    return left, top, right - 1, bottom - 1
+
+
 def render_overlay(
     image_bytes: bytes, zones: list[dict], *, validated: bool = False
 ) -> tuple[bytes | None, int]:
@@ -148,7 +160,7 @@ def render_overlay(
 
         color = (220, 65, 65, 60) if zone_type == "supply" else (30, 170, 100, 60)
         edge = (235, 65, 65, 230) if zone_type == "supply" else (25, 185, 110, 230)
-        draw.rectangle((left, top, right, bottom), fill=color, outline=edge, width=max(2, width // 600))
+        draw.rectangle(_pillow_rectangle_bounds((left, top, right, bottom)), fill=color, outline=edge, width=max(2, width // 600))
         title = _zone_overlay_label(zone, zone_type)
         draw.text((left + 5, max(0, top - 18)), title, fill=edge[:3] + (255,))
         count += 1
