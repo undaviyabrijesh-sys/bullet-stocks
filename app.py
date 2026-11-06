@@ -22,6 +22,7 @@ import yfinance as yf
 DB_PATH = Path("paper_portfolio.db")
 WATCH_FILE = Path("watchlist.json")
 SCANNER_STATE_URL = "https://raw.githubusercontent.com/undaviyabrijesh-sys/bullet-stocks/main/state.json"
+WATCHLIST_URL = "https://raw.githubusercontent.com/undaviyabrijesh-sys/bullet-stocks/main/watchlist.json"
 IST = "Asia/Kolkata"
 
 def configured_admin_password():
@@ -247,14 +248,51 @@ def load_trades(status=None):
         return [dict(r) for r in rows]
 
 
-def get_watchlist():
-    if not WATCH_FILE.exists():
-        return []
+@st.cache_data(ttl=60, show_spinner=False)
+def get_watchlist_snapshot():
+    """Load the latest scanner-generated watchlist from main, with a local fallback."""
+    errors = []
     try:
-        data = json.loads(WATCH_FILE.read_text(encoding="utf-8"))
-        return data.get("items", [])
-    except Exception:
-        return []
+        req = urllib.request.Request(
+            WATCHLIST_URL,
+            headers={"User-Agent": "Salty-Trades-Dashboard/1.0", "Cache-Control": "no-cache"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        items = payload.get("items") if isinstance(payload, dict) else None
+        if not isinstance(items, list):
+            raise ValueError("Remote watchlist payload has no valid items list.")
+        return {
+            "items": items,
+            "date": payload.get("date"),
+            "scanned": payload.get("scanned"),
+            "source": "GitHub main · live scanner output",
+            "error": None,
+        }
+    except Exception as exc:
+        errors.append(f"GitHub watchlist unavailable: {type(exc).__name__}: {exc}")
+
+    try:
+        if WATCH_FILE.exists():
+            payload = json.loads(WATCH_FILE.read_text(encoding="utf-8"))
+            items = payload.get("items") if isinstance(payload, dict) else None
+            if isinstance(items, list):
+                return {
+                    "items": items,
+                    "date": payload.get("date"),
+                    "scanned": payload.get("scanned"),
+                    "source": "local fallback · may be stale",
+                    "error": "; ".join(errors),
+                }
+    except Exception as exc:
+        errors.append(f"Local watchlist unavailable: {type(exc).__name__}: {exc}")
+
+    return {"items": [], "date": None, "scanned": None, "source": "unavailable", "error": "; ".join(errors)}
+
+
+def get_watchlist():
+    """Backward-compatible list accessor used by the dashboard's signal logic."""
+    return get_watchlist_snapshot().get("items", [])
 
 @st.cache_data(ttl=30, show_spinner=False)
 def get_scanner_state():
@@ -726,7 +764,8 @@ def dashboard():
         st.caption("Market quotes refresh every 60 seconds.")
         st.caption("Paper processing cadence: 5 minutes.")
         st.caption("Data: Yahoo Finance 1-minute candles.")
-    watchlist = get_watchlist()
+    watchlist_snapshot = get_watchlist_snapshot()
+    watchlist = watchlist_snapshot.get("items", [])
     scanner_state = get_scanner_state()
     scanner_positions = scanner_state.get("positions", {}) if isinstance(scanner_state.get("positions", {}), dict) else {}
     trades = load_trades()
@@ -766,6 +805,9 @@ def dashboard():
     top[4].metric("Open positions", len(scanner_positions) if scanner_positions else len(open_trades))
     top[5].metric("Watchlist", len(watchlist))
     st.caption(f"Portfolio source: {portfolio_source} · Share quantity = floor(ticket allocation ÷ entry). Quote source: Yahoo Finance 1-minute candles · Last available bar: {max((q['time'] for q in quotes.values()), default='—')} IST · Cached for 45 seconds")
+    st.caption(f"Scanner watchlist: {len(watchlist)} symbols · {watchlist_snapshot.get('scanned') or '—'} scanned · scanner date {watchlist_snapshot.get('date') or 'unknown'} · source: {watchlist_snapshot.get('source')} · fetched/cached for 60 seconds")
+    if watchlist_snapshot.get("error"):
+        st.warning(f"Watchlist refresh fallback: {watchlist_snapshot['error']}")
 
     tabs = st.tabs(["◈ COMMAND CENTER", "⌁ MARKET SCANNER", "▣ POSITIONS", "⌗ CHART LAB", "◉ PORTFOLIO RISK", "≋ ACTIVITY LOG"])
 
