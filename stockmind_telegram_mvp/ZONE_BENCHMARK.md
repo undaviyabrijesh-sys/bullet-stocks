@@ -32,6 +32,7 @@ The evaluator:
 - performs one-to-one matching, maximizing the number of qualifying matches before maximizing total IoU;
 - reports precision, recall, F1, false positives, false negatives, mean matched intersection-over-union (IoU), and normalized center displacement;
 - uses the same pixel rounding as the Telegram renderer and ignores predictions narrower than 3 px or shorter than 2 px, exactly as the renderer does;
+- treats normalized pixel boxes as half-open bounds and converts them to Pillow's inclusive `right - 1`, `bottom - 1` drawing endpoints, so the rendered fill extent matches the evaluator's pixel geometry;
 - converts pixel-rounded boxes back to normalized screenshot coordinates before IoU and center-error scoring, and uses those same quantized y-boundaries for price-axis errors;
 - reports invalid, disabled or sub-minimum AI rectangles separately as ignored predictions; a sub-minimum prediction leaves its manual reference as a false negative;
 - treats a disabled/invalid AI rectangle as no drawn prediction, so a missed reference zone remains a false negative;
