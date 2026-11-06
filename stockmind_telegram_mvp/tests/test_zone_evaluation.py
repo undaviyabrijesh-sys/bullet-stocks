@@ -313,8 +313,8 @@ class ZoneEvaluationTests(unittest.TestCase):
         outside_zones = (
             zone(x_start=0.05),
             zone(x_end=0.95),
-            zone(y_top=0.05),
-            zone(y_bottom=0.95),
+            zone(y_top=0.05, y_bottom=0.4),
+            zone(y_top=0.6, y_bottom=0.95),
         )
         for reference in outside_zones:
             with self.subTest(reference=reference):
