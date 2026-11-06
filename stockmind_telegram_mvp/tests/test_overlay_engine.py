@@ -26,12 +26,15 @@ class OverlayRendererTests(unittest.TestCase):
         self.assertEqual(validate_chart_image(sample_image(image_format="JPEG")), "image/jpeg")
         self.assertEqual(validate_chart_image(sample_image(image_format="WEBP")), "image/webp")
 
-    def test_rejects_truncated_jpeg_before_vision_request(self):
+    def test_rejects_truncated_pixel_data_or_container_before_vision_request(self):
         # Pillow's verify() alone accepts this truncated JPEG; full pixel decoding
         # detects the missing image data before the bot sends it to the vision API.
-        truncated = sample_image(image_format="JPEG")[:-10]
-        with self.assertRaisesRegex(ValueError, "not a valid JPEG"):
-            validate_chart_image(truncated)
+        # A truncated PNG container is rejected by the separate integrity check.
+        for image_format in ("JPEG", "PNG"):
+            with self.subTest(image_format=image_format):
+                truncated = sample_image(image_format=image_format)[:-10]
+                with self.assertRaisesRegex(ValueError, "not a valid"):
+                    validate_chart_image(truncated)
 
     def test_rejects_unsupported_or_corrupt_image_bytes(self):
         output = BytesIO()
