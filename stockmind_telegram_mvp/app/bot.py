@@ -1,7 +1,6 @@
 import asyncio
 from collections import defaultdict, deque
 from datetime import datetime
-from io import BytesIO
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher, F
@@ -11,6 +10,7 @@ from aiogram.types import BufferedInputFile, Message
 from .ai import ResearchAI
 from .crypto import BinanceMarketData
 from .overlay_engine import render_overlay, validate_chart_image
+from .image_upload import BoundedBytesIO, UploadTooLargeError
 from .config import (
     BETA_USER_LIMIT,
     DAILY_QUERY_LIMIT,
@@ -168,12 +168,15 @@ async def handle_chart_photo(message: Message):
         telegram_file = await bot.get_file(photo.file_id)
         if not telegram_file.file_path:
             raise RuntimeError("Telegram did not return a file path.")
-        buffer = BytesIO()
+        buffer = BoundedBytesIO(MAX_CHART_IMAGE_BYTES)
         await bot.download_file(telegram_file.file_path, destination=buffer)
         image_bytes = buffer.getvalue()
         if len(image_bytes) > MAX_CHART_IMAGE_BYTES:
             await message.answer("That screenshot is too large. Please send an image under 5 MB.")
             return
+    except UploadTooLargeError:
+        await message.answer("That screenshot is too large. Please send an image under 5 MB.")
+        return
     except Exception:
         await message.answer("I couldn't download that screenshot. Please send it again.")
         return
@@ -200,12 +203,15 @@ async def handle_chart_document(message: Message):
         telegram_file = await bot.get_file(document.file_id)
         if not telegram_file.file_path:
             raise RuntimeError("Telegram did not return a file path.")
-        buffer = BytesIO()
+        buffer = BoundedBytesIO(MAX_CHART_IMAGE_BYTES)
         await bot.download_file(telegram_file.file_path, destination=buffer)
         image_bytes = buffer.getvalue()
         if len(image_bytes) > MAX_CHART_IMAGE_BYTES:
             await message.answer("That image is too large. Please send an image under 5 MB.")
             return
+    except UploadTooLargeError:
+        await message.answer("That image is too large. Please send an image under 5 MB.")
+        return
     except Exception:
         await message.answer("I couldn't download that image. Please send it again.")
         return
