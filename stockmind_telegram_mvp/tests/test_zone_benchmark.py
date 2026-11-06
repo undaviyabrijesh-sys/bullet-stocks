@@ -47,6 +47,20 @@ def _prediction_metadata(**overrides):
     return value
 
 
+def _annotation_metadata(**overrides):
+    value = {
+        "source": "manual",
+        "annotator_id": "ann-001",
+        "reviewer_id": "rev-002",
+        "guideline_version": "dns-manual-v1",
+        "review_status": "approved",
+        "annotated_at": "2026-11-05T19:00:00Z",
+        "reviewed_at": "2026-11-05T19:15:00Z",
+    }
+    value.update(overrides)
+    return value
+
+
 def _prediction(zone_type="demand", **overrides):
     value = _zone(zone_type, **overrides)
     value["draw_overlay"] = True
@@ -74,6 +88,7 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
             "reference_zones": [_zone()],
             "predicted_zones": [_prediction()],
             "prediction_metadata": _prediction_metadata(),
+            "annotation_metadata": _annotation_metadata(),
         }
         record.update(overrides)
         return record
@@ -106,6 +121,10 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         self.assertEqual(
             result["fixtures"][0]["prediction_metadata"]["generated_at"],
             "2026-11-05T20:24:00Z",
+        )
+        self.assertEqual(result["annotation_guideline_version"], "dns-manual-v1")
+        self.assertEqual(
+            result["fixtures"][0]["annotation_metadata"]["reviewer_id"], "rev-002"
         )
 
     def test_allows_different_generation_times_for_the_same_profile(self):
@@ -169,6 +188,93 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         self._write(record)
 
         with self.assertRaisesRegex(ValueError, "prediction_metadata"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_rejects_non_manual_annotation_source(self):
+        self._write(
+            self._record(
+                annotation_metadata=_annotation_metadata(source="ai_generated")
+            )
+        )
+
+        with self.assertRaisesRegex(ValueError, "source must be 'manual'"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_rejects_annotations_that_are_not_approved(self):
+        self._write(
+            self._record(
+                annotation_metadata=_annotation_metadata(review_status="pending")
+            )
+        )
+
+        with self.assertRaisesRegex(ValueError, "review_status must be 'approved'"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_rejects_non_anonymized_annotator_or_reviewer_ids(self):
+        self._write(
+            self._record(
+                annotation_metadata=_annotation_metadata(
+                    annotator_id="person@example.com"
+                )
+            )
+        )
+
+        with self.assertRaisesRegex(ValueError, "anonymized ID"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_rejects_annotation_metadata_with_unapproved_extra_fields(self):
+        metadata = _annotation_metadata()
+        metadata["reviewer_email"] = "reviewer@example.com"
+        self._write(self._record(annotation_metadata=metadata))
+
+        with self.assertRaisesRegex(ValueError, "unsupported fields"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_rejects_timezone_naive_annotation_timestamps(self):
+        self._write(
+            self._record(
+                annotation_metadata=_annotation_metadata(
+                    reviewed_at="2026-11-05T19:15:00"
+                )
+            )
+        )
+
+        with self.assertRaisesRegex(ValueError, "reviewed_at must include a timezone"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_rejects_review_timestamp_before_annotation_timestamp(self):
+        self._write(
+            self._record(
+                annotation_metadata=_annotation_metadata(
+                    annotated_at="2026-11-05T19:20:00Z",
+                    reviewed_at="2026-11-05T19:15:00Z",
+                )
+            )
+        )
+
+        with self.assertRaisesRegex(ValueError, "cannot be earlier"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_rejects_mixed_annotation_guideline_versions(self):
+        self._write(
+            self._record("first"),
+            self._record(
+                "second",
+                annotation_metadata=_annotation_metadata(
+                    guideline_version="dns-manual-v2"
+                ),
+            ),
+        )
+
+        with self.assertRaisesRegex(ValueError, "mixed annotation guideline versions"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_rejects_missing_annotation_provenance(self):
+        record = self._record()
+        del record["annotation_metadata"]
+        self._write(record)
+
+        with self.assertRaisesRegex(ValueError, "annotation_metadata"):
             evaluate_benchmark_manifest(self.manifest)
 
     def test_price_axis_metrics_are_aggregated_without_inventing_missing_values(self):

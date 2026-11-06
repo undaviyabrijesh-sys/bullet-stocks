@@ -12,6 +12,26 @@ One manifest may contain only one prediction profile: provider, returned/request
 
 ## Annotation rules
 
+Every fixture must include an `annotation_metadata` object. Only annotations that have been independently reviewed and approved are eligible for scoring:
+
+~~~json
+{
+  "source": "manual",
+  "annotator_id": "ann-001",
+  "reviewer_id": "rev-002",
+  "guideline_version": "dns-manual-v1",
+  "review_status": "approved",
+  "annotated_at": "2026-11-05T19:00:00Z",
+  "reviewed_at": "2026-11-05T19:15:00Z"
+}
+~~~
+
+- Use pseudonymous IDs with the `ann-` and `rev-` prefixes. Never put names, email addresses, chat handles or other personal information in benchmark metadata; the validator rejects extra fields.
+- The reviewer must be a separate person/ID from the annotator. A pending, rejected or self-reviewed annotation cannot be scored.
+- Both timestamps must be ISO-8601 with an explicit timezone, and review time cannot precede annotation time.
+- Use one guideline version throughout a manifest. When annotation rules change, increment the version and benchmark that release separately.
+- Preserve the provenance metadata with each report so a later model comparison can be traced to its approved ground truth.
+
 - Keep the original screenshot unchanged and record its SHA-256, width and height.
 - Mark each visible reference zone as supply or demand.
 - Express each rectangle relative to the full screenshot: x_start, x_end, y_top and y_bottom are normalized to 0..1.
@@ -21,7 +41,7 @@ One manifest may contain only one prediction profile: provider, returned/request
 - For price-level scoring, manually record at least three legible price-axis anchors from the same screenshot. Each anchor is an object with y normalized to the full screenshot and a positive numeric price. Record anchors at distinct vertical positions and in top-to-bottom order with descending prices.
 - Choose linear for a standard arithmetic price axis or log for a logarithmic axis. Do not use the logarithmic option merely because price values are large.
 
-A fixture record should contain a stable fixture_id, image_file, image_sha256, image_width, image_height, reference_zones, predicted_zones and prediction_metadata. The image_file must be a relative path contained within the manifest directory. Each reference zone needs zone_type and the four normalized coordinates. Predicted zones should be the structured AI zones, including draw_overlay. Optional price_axis_anchors and price_axis_scale fields enable price-unit scoring. Additional descriptive metadata fields may be included.
+A fixture record should contain a stable fixture_id, image_file, image_sha256, image_width, image_height, reference_zones, predicted_zones, prediction_metadata and approved annotation_metadata. The image_file must be a relative path contained within the manifest directory. Each reference zone needs zone_type and the four normalized coordinates. Predicted zones should be the structured AI zones, including draw_overlay. Optional price_axis_anchors and price_axis_scale fields enable price-unit scoring. Additional descriptive metadata fields may be included.
 
 ## Geometry scoring
 
@@ -74,6 +94,15 @@ Create a UTF-8 JSONL file with one fixture object per line. The following is the
       "draw_overlay": true
     }
   ],
+  "annotation_metadata": {
+    "source": "manual",
+    "annotator_id": "ann-001",
+    "reviewer_id": "rev-002",
+    "guideline_version": "dns-manual-v1",
+    "review_status": "approved",
+    "annotated_at": "2026-11-05T19:00:00Z",
+    "reviewed_at": "2026-11-05T19:15:00Z"
+  },
   "prediction_metadata": {
     "provider": "openai",
     "model": "provider-returned-model-id",
@@ -99,7 +128,7 @@ python -m stockmind_telegram_mvp.app.zone_benchmark stockmind_telegram_mvp/bench
 python -m stockmind_telegram_mvp.app.zone_benchmark stockmind_telegram_mvp/benchmark/fixtures.jsonl --max-image-bytes 10485760
 ~~~
 
-The JSON report is written to standard output and can be redirected to a versioned report file. A missing/empty manifest, malformed record, missing/invalid provenance, mixed prediction profiles, hash mismatch, changed dimensions, unsupported image or invalid manual annotation fails the run instead of emitting misleading aggregate metrics. The runner performs no AI request; predictions must be captured separately and paired with the exact source screenshot.
+The JSON report is written to standard output and can be redirected to a versioned report file. A missing/empty manifest, malformed record, missing/invalid provenance, mixed prediction profiles, mixed annotation guideline versions, missing or unapproved annotation provenance, hash mismatch, changed dimensions, unsupported image or invalid manual annotation fails the run instead of emitting misleading aggregate metrics. The runner performs no AI request; predictions must be captured separately and paired with the exact source screenshot.
 
 Aggregate precision/recall/F1 are micro-averaged from total TP/FP/FN counts. Mean IoU and center displacement are averaged across matched zones, not across screenshots. Price errors are averaged across scored zone boundaries; zones outside the calibrated y-range are counted as unscored rather than extrapolated.
 

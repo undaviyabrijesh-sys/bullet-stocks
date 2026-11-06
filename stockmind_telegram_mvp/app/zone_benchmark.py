@@ -29,6 +29,9 @@ _REQUIRED_FIELDS = {
     "prediction_metadata",
 }
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+_ANNOTATOR_ID_RE = re.compile(r"^ann-[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
+_REVIEWER_ID_RE = re.compile(r"^rev-[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
+_GUIDELINE_VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
 
@@ -124,6 +127,90 @@ def _validate_prediction_metadata(metadata, line_number, fixture_id):
     return normalized, profile, profile_sha256
 
 
+def _validate_annotation_metadata(metadata, line_number, fixture_id):
+    """Require approved, independently reviewed annotations with pseudonymous IDs.
+
+    The allow-listed schema intentionally excludes names, email addresses and
+    other personal details from benchmark reports.
+    """
+    prefix = f"line {line_number} ({fixture_id}): annotation_metadata"
+    if not isinstance(metadata, dict):
+        raise ValueError(f"{prefix} must be a JSON object")
+
+    required = {
+        "source",
+        "annotator_id",
+        "reviewer_id",
+        "guideline_version",
+        "review_status",
+        "annotated_at",
+        "reviewed_at",
+    }
+    missing = sorted(required - set(metadata))
+    extra = sorted(set(metadata) - required)
+    if missing:
+        raise ValueError(f"{prefix} is missing fields: {', '.join(missing)}")
+    if extra:
+        raise ValueError(
+            f"{prefix} contains unsupported fields: {', '.join(extra)}; "
+            "store only anonymized annotation provenance"
+        )
+
+    if metadata["source"] != "manual":
+        raise ValueError(f"{prefix}.source must be 'manual'")
+
+    annotator_id = metadata["annotator_id"]
+    if not isinstance(annotator_id, str) or not _ANNOTATOR_ID_RE.fullmatch(annotator_id):
+        raise ValueError(
+            f"{prefix}.annotator_id must be an anonymized ID like 'ann-001'"
+        )
+    reviewer_id = metadata["reviewer_id"]
+    if not isinstance(reviewer_id, str) or not _REVIEWER_ID_RE.fullmatch(reviewer_id):
+        raise ValueError(
+            f"{prefix}.reviewer_id must be a separate anonymized ID like 'rev-001'"
+        )
+    if annotator_id == reviewer_id:
+        raise ValueError(f"{prefix} requires a reviewer distinct from the annotator")
+
+    guideline_version = metadata["guideline_version"]
+    if (
+        not isinstance(guideline_version, str)
+        or not _GUIDELINE_VERSION_RE.fullmatch(guideline_version)
+    ):
+        raise ValueError(
+            f"{prefix}.guideline_version must be a non-empty version token"
+        )
+    if metadata["review_status"] != "approved":
+        raise ValueError(f"{prefix}.review_status must be 'approved'")
+
+    parsed_times = {}
+    for field in ("annotated_at", "reviewed_at"):
+        value = metadata[field]
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{prefix}.{field} must be an ISO-8601 timestamp")
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError(
+                f"{prefix}.{field} must be an ISO-8601 timestamp with a timezone"
+            ) from exc
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise ValueError(f"{prefix}.{field} must include a timezone")
+        parsed_times[field] = parsed
+    if parsed_times["reviewed_at"] < parsed_times["annotated_at"]:
+        raise ValueError(f"{prefix}.reviewed_at cannot be earlier than annotated_at")
+
+    return {
+        "source": "manual",
+        "annotator_id": annotator_id,
+        "reviewer_id": reviewer_id,
+        "guideline_version": guideline_version,
+        "review_status": "approved",
+        "annotated_at": metadata["annotated_at"].strip(),
+        "reviewed_at": metadata["reviewed_at"].strip(),
+    }
+
+
 def _image_path(manifest_dir, image_file):
     if not isinstance(image_file, str) or not image_file.strip():
         raise ValueError("image_file must be a non-empty relative path")
@@ -199,6 +286,9 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
             record["prediction_metadata"], line_number, fixture_id
         )
     )
+    annotation_metadata = _validate_annotation_metadata(
+        record["annotation_metadata"], line_number, fixture_id
+    )
     image_hash = _load_and_verify_image(record, manifest_dir, line_number, max_image_bytes)
 
     for field in ("reference_zones", "predicted_zones"):
@@ -232,6 +322,7 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
         "fixture_id": fixture_id,
         "image_sha256": image_hash,
         "prediction_metadata": prediction_metadata,
+        "annotation_metadata": annotation_metadata,
         "_prediction_profile": prediction_profile,
         "_prediction_profile_sha256": prediction_profile_sha256,
         "overall": result["overall"],
@@ -321,6 +412,7 @@ def evaluate_benchmark_manifest(manifest_path, *, max_image_bytes=DEFAULT_MAX_IM
     seen_ids = set()
     prediction_profile = None
     prediction_profile_sha256 = None
+    annotation_guideline_version = None
     try:
         with manifest_path.open("r", encoding="utf-8") as manifest:
             for line_number, raw_line in enumerate(manifest, start=1):
@@ -335,6 +427,14 @@ def evaluate_benchmark_manifest(manifest_path, *, max_image_bytes=DEFAULT_MAX_IM
                 fixture = _validate_record(
                     record, manifest_path.parent, line_number, max_image_bytes
                 )
+                fixture_guideline = fixture["annotation_metadata"]["guideline_version"]
+                if annotation_guideline_version is None:
+                    annotation_guideline_version = fixture_guideline
+                elif fixture_guideline != annotation_guideline_version:
+                    raise ValueError(
+                        f"line {line_number} ({fixture['fixture_id']}): mixed annotation "
+                        "guideline versions; split this manifest by guideline version"
+                    )
                 if fixture["fixture_id"] in seen_ids:
                     raise ValueError(
                         f"line {line_number}: duplicate fixture_id {fixture['fixture_id']!r}"
@@ -370,6 +470,7 @@ def evaluate_benchmark_manifest(manifest_path, *, max_image_bytes=DEFAULT_MAX_IM
         "fixture_count": len(fixtures),
         "prediction_profile": prediction_profile,
         "prediction_profile_sha256": prediction_profile_sha256,
+        "annotation_guideline_version": annotation_guideline_version,
         "ignored_prediction_count": sum(
             fixture["ignored_prediction_count"] for fixture in fixtures
         ),
