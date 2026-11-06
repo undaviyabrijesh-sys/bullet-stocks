@@ -281,7 +281,7 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
             plot_delta["mean_predicted_plot_outside_reference_pct"], 0
         )
         self.assertLess(
-            result["fixtures"][0]["plot_boundary_accuracy"]["delta"]["mean_plot_iou"],
+            result["fixtures"][0]["plot_boundary_accuracy"]["delta"]["plot_iou"],
             0,
         )
 

@@ -216,7 +216,7 @@ class ZoneEvaluationTests(unittest.TestCase):
 
     def test_plot_boundary_metrics_measure_edges_and_zone_spill(self):
         result = evaluate(
-            [prediction(x_start=0.05, x_end=0.95, y_top=0.2, y_bottom=0.95)],
+            [prediction(x_start=0.05, x_end=0.95, y_top=0.6, y_bottom=0.95)],
             [zone()],
             reference_plot_bounds=PLOT_BOUNDS,
             predicted_plot_bounds={
@@ -273,7 +273,7 @@ class ZoneEvaluationTests(unittest.TestCase):
             evaluate([prediction()], [zone()], predicted_plot_bounds=PLOT_BOUNDS)
 
     def test_invalid_manual_reference_plot_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "reference_plot_bounds must be valid"):
+        with self.assertRaisesRegex(ValueError, "reference_plot_bounds must be a valid"):
             evaluate(
                 [prediction()],
                 [zone()],

@@ -258,33 +258,53 @@ def aggregate_plot_boundary_accuracy(fixtures):
 
 
 def compare_plot_boundary_accuracy(baseline, candidate):
-    """Return paired plot-boundary summaries and candidate-minus-baseline deltas."""
+    """Return paired fixture or aggregate plot metrics and candidate-minus-baseline deltas."""
     if baseline is None and candidate is None:
         return None
-    scalar_fields = (
-        "fixture_count", "scored_fixture_count", "missing_prediction_count",
-        "invalid_prediction_count", "mean_plot_iou",
-        "mean_predicted_plot_outside_reference_pct", "mean_right_margin_overlap_pct",
-        "mean_bottom_panel_overlap_pct", "predicted_zone_count",
-        "zones_outside_reference_plot_count", "zones_outside_reference_plot_pct",
-        "mean_predicted_zone_area_outside_reference_pct",
-        "mean_right_margin_zone_area_pct", "mean_bottom_panel_zone_area_pct",
+    is_fixture = any(
+        row is not None and "plot_iou" in row
+        for row in (baseline, candidate)
     )
-    edge_fields = _EDGE_NAMES
+    if is_fixture:
+        scalar_fields = (
+            "plot_iou", "predicted_plot_outside_reference_pct",
+            "right_margin_overlap_pct", "bottom_panel_overlap_pct",
+            "predicted_zone_count", "zones_outside_reference_plot_count",
+            "zones_outside_reference_plot_pct",
+            "predicted_zone_area_outside_reference_pct",
+            "right_margin_zone_area_pct", "bottom_panel_zone_area_pct",
+        )
+        edge_field = "edge_displacement_normalized"
+    else:
+        scalar_fields = (
+            "fixture_count", "scored_fixture_count", "missing_prediction_count",
+            "invalid_prediction_count", "mean_plot_iou",
+            "mean_predicted_plot_outside_reference_pct", "mean_right_margin_overlap_pct",
+            "mean_bottom_panel_overlap_pct", "predicted_zone_count",
+            "zones_outside_reference_plot_count", "zones_outside_reference_plot_pct",
+            "mean_predicted_zone_area_outside_reference_pct",
+            "mean_right_margin_zone_area_pct", "mean_bottom_panel_zone_area_pct",
+        )
+        edge_field = "mean_edge_displacement_normalized"
+
     delta = {}
     for field in scalar_fields:
         first = baseline.get(field) if baseline else None
         second = candidate.get(field) if candidate else None
-        delta[field] = second - first if isinstance(first, (int, float)) and not isinstance(first, bool) and isinstance(second, (int, float)) and not isinstance(second, bool) else None
-    delta["mean_edge_displacement_normalized"] = {
-        edge: (
-            candidate["mean_edge_displacement_normalized"][edge]
-            - baseline["mean_edge_displacement_normalized"][edge]
-            if baseline and candidate
-            and baseline["mean_edge_displacement_normalized"][edge] is not None
-            and candidate["mean_edge_displacement_normalized"][edge] is not None
+        delta[field] = (
+            second - first
+            if isinstance(first, (int, float)) and not isinstance(first, bool)
+            and isinstance(second, (int, float)) and not isinstance(second, bool)
             else None
         )
-        for edge in edge_fields
+    delta[edge_field] = {
+        edge: (
+            candidate[edge_field][edge] - baseline[edge_field][edge]
+            if baseline and candidate
+            and baseline[edge_field][edge] is not None
+            and candidate[edge_field][edge] is not None
+            else None
+        )
+        for edge in _EDGE_NAMES
     }
     return {"baseline": baseline, "candidate": candidate, "delta": delta}
