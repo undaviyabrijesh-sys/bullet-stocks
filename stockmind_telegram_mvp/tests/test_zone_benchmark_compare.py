@@ -136,6 +136,67 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "market_context"):
             compare_benchmark_reports(baseline, candidate)
 
+    def test_rejects_metric_values_that_do_not_match_confusion_counts(self):
+        baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
+        candidate = self._report("candidate", [])
+        candidate["fixtures"][0]["overall"]["precision"] = 0.25
+
+        with self.assertRaisesRegex(ValueError, "overall.precision does not agree"):
+            compare_benchmark_reports(baseline, candidate)
+
+    def test_rejects_supply_demand_counts_that_do_not_reconcile_with_overall(self):
+        baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
+        candidate = self._report("candidate", [])
+        row = candidate["fixtures"][0]["by_zone_type"]["supply"]
+        row["predicted"] = 1
+        row["false_positive"] = 1
+        row["precision"] = 0.0
+
+        with self.assertRaisesRegex(ValueError, "by_zone_type counts do not reconcile"):
+            compare_benchmark_reports(baseline, candidate)
+
+    def test_rejects_duplicate_prediction_match_indices(self):
+        zones = [_zone(), _zone(x_start=0.3, x_end=0.7)]
+        baseline = self._report(
+            "baseline",
+            [{**zones[0], "draw_overlay": True}, {**zones[1], "draw_overlay": True}],
+            reference=zones,
+        )
+        candidate = self._report(
+            "candidate",
+            [{**zones[0], "draw_overlay": True}, {**zones[1], "draw_overlay": True}],
+            reference=zones,
+        )
+        candidate["fixtures"][0]["matches"][1]["prediction_index"] = 0
+
+        with self.assertRaisesRegex(ValueError, "duplicate matched prediction_index"):
+            compare_benchmark_reports(baseline, candidate)
+
+    def test_rejects_price_summary_that_disagrees_with_matched_zone_errors(self):
+        anchors = [
+            {"y": 0.2, "price": 120},
+            {"y": 0.5, "price": 90},
+            {"y": 0.8, "price": 60},
+        ]
+        baseline = self._report(
+            "baseline", [{**_zone(), "draw_overlay": True}], anchors=anchors
+        )
+        candidate = self._report(
+            "candidate", [{**_zone(y_top=0.42), "draw_overlay": True}], anchors=anchors
+        )
+        candidate["fixtures"][0]["price_accuracy"]["mean_boundary_abs_error"] = 999
+
+        with self.assertRaisesRegex(ValueError, "mean_boundary_abs_error does not match"):
+            compare_benchmark_reports(baseline, candidate)
+
+    def test_rejects_tampered_report_level_aggregate(self):
+        baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
+        candidate = self._report("candidate", [])
+        candidate["overall"]["recall"] = 0.9
+
+        with self.assertRaisesRegex(ValueError, "overall metrics do not match"):
+            compare_benchmark_reports(baseline, candidate)
+
     def test_rejects_duplicate_fixture_ids(self):
         baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
         candidate = self._report("candidate", [])

@@ -10,6 +10,9 @@ from .zone_benchmark import (
     _aggregate_by_context,
     _aggregate_metrics,
     _aggregate_price_accuracy,
+    _validate_annotation_metadata,
+    _validate_market_context,
+    _validate_prediction_metadata,
 )
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -36,7 +39,9 @@ def _validate_metrics(row, label):
     if row["reference"] != row["true_positive"] + row["false_negative"]:
         raise ValueError(f"{label} reference count does not equal TP + FN")
     for field in _METRIC_FIELDS[len(_COUNT_FIELDS):]:
-        value = row.get(field)
+        if field not in row:
+            raise ValueError(f"{label}.{field} is missing")
+        value = row[field]
         if value is not None and not _finite(value):
             raise ValueError(f"{label}.{field} must be finite or null")
     for field in ("precision", "recall", "f1", "mean_iou"):
@@ -46,6 +51,164 @@ def _validate_metrics(row, label):
     value = row.get("mean_center_error_normalized")
     if value is not None and value < 0:
         raise ValueError(f"{label}.mean_center_error_normalized cannot be negative")
+
+
+def _same_metric(actual, expected):
+    if expected is None:
+        return actual is None
+    return _finite(actual) and math.isclose(
+        float(actual), float(expected), rel_tol=1e-9, abs_tol=1e-12
+    )
+
+
+def _validate_metric_consistency(row, matches, label):
+    """Recompute every reported metric from its counts and matched-zone rows."""
+    predicted = row["predicted"]
+    reference = row["reference"]
+    true_positive = row["true_positive"]
+    false_positive = row["false_positive"]
+    false_negative = row["false_negative"]
+    denominator = 2 * true_positive + false_positive + false_negative
+    expected = {
+        "precision": true_positive / predicted if predicted else None,
+        "recall": true_positive / reference if reference else None,
+        "f1": 2 * true_positive / denominator if denominator else None,
+        "mean_iou": sum(match["iou"] for match in matches) / len(matches) if matches else None,
+        "mean_center_error_normalized": (
+            sum(match["center_error_normalized"] for match in matches) / len(matches)
+            if matches else None
+        ),
+    }
+    for field, value in expected.items():
+        if not _same_metric(row[field], value):
+            raise ValueError(f"{label}.{field} does not agree with its counts and matches")
+
+
+def _validate_price_accuracy(price, matches, label):
+    """Validate per-match price errors and their fixture-level summary."""
+    if price is None:
+        if any(match.get("price_comparison") is not None for match in matches):
+            raise ValueError(f"{label} omits price_accuracy but contains price comparisons")
+        return
+
+    if not isinstance(price, dict):
+        raise ValueError(f"{label} must be an object or null")
+    required = {
+        "scale", "anchor_count", "max_anchor_relative_error_pct",
+        "scored_match_count", "unscored_match_count",
+        "mean_boundary_abs_error", "max_boundary_abs_error",
+        "mean_boundary_error_pct",
+    }
+    missing = sorted(required - set(price))
+    if missing:
+        raise ValueError(f"{label} is missing fields: {', '.join(missing)}")
+    if price["scale"] not in {"linear", "log"}:
+        raise ValueError(f"{label}.scale must be linear or log")
+    anchor_count = price["anchor_count"]
+    if isinstance(anchor_count, bool) or not isinstance(anchor_count, int) or not 3 <= anchor_count <= 20:
+        raise ValueError(f"{label}.anchor_count must be an integer from 3 to 20")
+    residual = price["max_anchor_relative_error_pct"]
+    if not _finite(residual) or not 0 <= residual <= 10:
+        raise ValueError(f"{label}.max_anchor_relative_error_pct must be between 0 and 10")
+    for field in ("scored_match_count", "unscored_match_count"):
+        value = price[field]
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"{label}.{field} must be a non-negative integer")
+    if price["scored_match_count"] + price["unscored_match_count"] != len(matches):
+        raise ValueError(f"{label} scored and unscored counts do not equal matched zones")
+
+    absolute_errors = []
+    percentage_errors = []
+    scored_count = 0
+    unscored_count = 0
+    for index, match in enumerate(matches):
+        comparison = match.get("price_comparison")
+        if not isinstance(comparison, dict):
+            raise ValueError(f"{label} match {index} is missing its price comparison")
+        status = comparison.get("status")
+        if status == "unscored":
+            if not isinstance(comparison.get("reason"), str) or not comparison["reason"].strip():
+                raise ValueError(f"{label} match {index} has no unscored reason")
+            unscored_count += 1
+            continue
+        if status != "scored":
+            raise ValueError(f"{label} match {index} has an invalid price-comparison status")
+
+        bounds = {}
+        for side in ("predicted_price_bounds", "reference_price_bounds"):
+            value = comparison.get(side)
+            if not isinstance(value, dict):
+                raise ValueError(f"{label} match {index}.{side} must be an object")
+            high, low = value.get("price_high"), value.get("price_low")
+            if not _finite(high) or not _finite(low) or low <= 0 or high < low:
+                raise ValueError(f"{label} match {index}.{side} has invalid positive price bounds")
+            bounds[side] = (float(high), float(low))
+
+        predicted_high, predicted_low = bounds["predicted_price_bounds"]
+        reference_high, reference_low = bounds["reference_price_bounds"]
+        expected_errors = {
+            "price_high_abs_error": abs(predicted_high - reference_high),
+            "price_low_abs_error": abs(predicted_low - reference_low),
+            "price_high_error_pct": 100 * abs(predicted_high - reference_high) / reference_high,
+            "price_low_error_pct": 100 * abs(predicted_low - reference_low) / reference_low,
+        }
+        for field, expected in expected_errors.items():
+            if not _same_metric(comparison.get(field), expected):
+                raise ValueError(f"{label} match {index}.{field} does not match its price bounds")
+        absolute_errors.extend((
+            expected_errors["price_high_abs_error"],
+            expected_errors["price_low_abs_error"],
+        ))
+        percentage_errors.extend((
+            expected_errors["price_high_error_pct"],
+            expected_errors["price_low_error_pct"],
+        ))
+        scored_count += 1
+
+    if scored_count != price["scored_match_count"] or unscored_count != price["unscored_match_count"]:
+        raise ValueError(f"{label} scored/unscored counts do not match per-zone results")
+    expected_summary = {
+        "mean_boundary_abs_error": sum(absolute_errors) / len(absolute_errors) if absolute_errors else None,
+        "max_boundary_abs_error": max(absolute_errors) if absolute_errors else None,
+        "mean_boundary_error_pct": sum(percentage_errors) / len(percentage_errors) if percentage_errors else None,
+    }
+    for field, expected in expected_summary.items():
+        if not _same_metric(price[field], expected):
+            raise ValueError(f"{label}.{field} does not match per-zone price errors")
+
+
+def _validate_aggregate_report(report, fixtures, label):
+    """Ensure report-level aggregates are derived from the included fixtures."""
+    all_matches = [match for fixture in fixtures for match in fixture["matches"]]
+    expected_overall = _aggregate_metrics(
+        [fixture["overall"] for fixture in fixtures], all_matches
+    )
+    if report.get("overall") != expected_overall:
+        raise ValueError(f"{label} overall metrics do not match its fixture results")
+
+    expected_by_type = {}
+    for zone_type in ("supply", "demand"):
+        rows = [fixture["by_zone_type"][zone_type] for fixture in fixtures]
+        matches = [match for match in all_matches if match["zone_type"] == zone_type]
+        expected_by_type[zone_type] = _aggregate_metrics(rows, matches)
+    if report.get("by_zone_type") != expected_by_type:
+        raise ValueError(f"{label} by_zone_type metrics do not match its fixture results")
+
+    expected_ignored = sum(fixture["ignored_prediction_count"] for fixture in fixtures)
+    if report.get("ignored_prediction_count") != expected_ignored:
+        raise ValueError(f"{label} ignored_prediction_count does not match its fixtures")
+
+    if report.get("price_accuracy") != _aggregate_price_accuracy(fixtures):
+        raise ValueError(f"{label} price_accuracy does not match its fixture results")
+
+    for field, key in (
+        ("asset_class", "by_asset_class"),
+        ("symbol", "by_symbol"),
+        ("exchange", "by_exchange"),
+        ("timeframe", "by_timeframe"),
+    ):
+        if report.get(key) != _aggregate_by_context(fixtures, field):
+            raise ValueError(f"{label} {key} does not match its fixture results")
 
 
 def _validate_report(report, label):
@@ -93,24 +256,26 @@ def _validate_report(report, label):
             not isinstance(calibration_hash, str) or not _SHA256_RE.fullmatch(calibration_hash)
         ):
             raise ValueError(f"{prefix} has an invalid price_axis_calibration_sha256")
-        prediction_metadata = fixture.get("prediction_metadata")
-        if not isinstance(prediction_metadata, dict):
-            raise ValueError(f"{prefix} prediction_metadata must be a JSON object")
-        profile_fields = (
-            "provider", "model", "requested_model", "prompt_version",
-            "prompt_sha256", "system_fingerprint", "settings"
-        )
-        fixture_profile = {field: prediction_metadata.get(field) for field in profile_fields}
+        try:
+            _, fixture_profile, _ = _validate_prediction_metadata(
+                fixture.get("prediction_metadata"), index + 1, fixture_id
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{prefix} has invalid prediction provenance: {exc}") from exc
         if fixture_profile != profile:
             raise ValueError(f"{prefix} prediction_metadata does not match report prediction_profile")
-        annotation = fixture.get("annotation_metadata")
-        if not isinstance(annotation, dict):
-            raise ValueError(f"{prefix} annotation_metadata must be a JSON object")
-        if annotation.get("guideline_version") != guideline:
+        try:
+            annotation = _validate_annotation_metadata(
+                fixture.get("annotation_metadata"), index + 1, fixture_id
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{prefix} has invalid annotation provenance: {exc}") from exc
+        if annotation["guideline_version"] != guideline:
             raise ValueError(f"{prefix} annotation guideline does not match report")
-        context = fixture.get("market_context")
-        if not isinstance(context, dict) or set(context) != set(_CONTEXT_FIELDS):
-            raise ValueError(f"{prefix} market_context has an invalid shape")
+        try:
+            _validate_market_context(fixture.get("market_context"), index + 1, fixture_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{prefix} has invalid market_context: {exc}") from exc
         threshold = fixture.get("iou_threshold")
         if not _finite(threshold) or not 0 < threshold <= 1:
             raise ValueError(f"{prefix} has an invalid iou_threshold")
@@ -126,21 +291,46 @@ def _validate_report(report, label):
             raise ValueError(f"{prefix} matches must be an array")
         if len(matches) != fixture["overall"]["true_positive"]:
             raise ValueError(f"{prefix} match count does not equal true_positive")
+        prediction_indices = set()
+        reference_indices = set()
         for match_index, match in enumerate(matches):
             if not isinstance(match, dict) or match.get("zone_type") not in {"supply", "demand"}:
                 raise ValueError(f"{prefix} match {match_index} has an invalid shape or zone_type")
+            for field, seen in (
+                ("prediction_index", prediction_indices),
+                ("reference_index", reference_indices),
+            ):
+                value = match.get(field)
+                if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                    raise ValueError(f"{prefix} match {match_index}.{field} must be a non-negative integer")
+                if value in seen:
+                    raise ValueError(f"{prefix} contains duplicate matched {field} {value}")
+                seen.add(value)
             for field in ("iou", "center_error_normalized"):
                 value = match.get(field)
                 if not _finite(value) or value < 0:
                     raise ValueError(f"{prefix} match {match_index}.{field} is invalid")
             if match["iou"] > 1:
                 raise ValueError(f"{prefix} match {match_index}.iou cannot exceed 1")
+
+        _validate_metric_consistency(fixture["overall"], matches, f"{prefix}.overall")
+        for zone_type in ("supply", "demand"):
+            type_matches = [match for match in matches if match["zone_type"] == zone_type]
+            _validate_metric_consistency(
+                by_type[zone_type], type_matches, f"{prefix}.by_zone_type.{zone_type}"
+            )
+        for field in _COUNT_FIELDS:
+            if by_type["supply"][field] + by_type["demand"][field] != fixture["overall"][field]:
+                raise ValueError(f"{prefix} by_zone_type counts do not reconcile with overall")
         ignored = fixture.get("ignored_prediction_count")
         if isinstance(ignored, bool) or not isinstance(ignored, int) or ignored < 0:
             raise ValueError(f"{prefix} ignored_prediction_count must be non-negative")
-        if fixture.get("price_accuracy") is not None and not isinstance(fixture["price_accuracy"], dict):
-            raise ValueError(f"{prefix} price_accuracy must be an object or null")
+        _validate_price_accuracy(
+            fixture.get("price_accuracy"), matches, f"{prefix}.price_accuracy"
+        )
         indexed[fixture_id] = fixture
+
+    _validate_aggregate_report(report, list(indexed.values()), label)
     return indexed
 
 

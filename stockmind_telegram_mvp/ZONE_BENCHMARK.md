@@ -149,6 +149,8 @@ python -m stockmind_telegram_mvp.app.zone_benchmark_compare baseline-report.json
 
 The comparison is paired by `fixture_id`. It refuses to compare reports unless they contain exactly the same fixture IDs and, for every fixture, the same screenshot SHA-256, reference-zone fingerprint, annotation provenance, market context, IoU threshold and price-axis calibration fingerprint. Both reports must use the same annotation guideline version. Missing, extra or altered fixtures fail closed rather than creating a misleading comparison.
 
+Before comparing, the comparator revalidates report provenance, annotation metadata, normalized market context, confusion-matrix arithmetic, precision/recall/F1, match uniqueness, IoU and center-error averages, supply/demand reconciliation, per-zone price calculations, fixture-level price summaries and report-level aggregates. A report whose summary fields do not agree with its included fixture evidence is rejected rather than trusted.
+
 The JSON output includes both prediction profiles, candidate-minus-baseline deltas for overall and supply/demand metrics, per-fixture changes, market-context breakdowns, ignored prediction counts and price-boundary summaries. Positive precision/recall/F1/IoU deltas indicate higher values; negative center-error and price-error deltas indicate lower errors. A `null` delta means one side has no defined metric; it is not treated as zero. The comparator does not declare a trading winner or infer structural quality.
 
 ## Optional price-axis scoring
