@@ -400,6 +400,7 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
                 ],
                 price_axis_scale="linear",
                 price_axis_plot_bounds={"x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9},
+                predicted_plot_bounds={"x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9},
             )
         )
 
@@ -432,8 +433,14 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         bounds_a = {"x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9}
         bounds_b = {"x_start": 0.1, "x_end": 0.9, "y_top": 0.15, "y_bottom": 0.9}
         self._write(
-            self._record("plot-a", price_axis_anchors=anchors, price_axis_plot_bounds=bounds_a),
-            self._record("plot-b", price_axis_anchors=anchors, price_axis_plot_bounds=bounds_b),
+            self._record(
+                "plot-a", price_axis_anchors=anchors,
+                price_axis_plot_bounds=bounds_a, predicted_plot_bounds=bounds_a,
+            ),
+            self._record(
+                "plot-b", price_axis_anchors=anchors,
+                price_axis_plot_bounds=bounds_b, predicted_plot_bounds=bounds_b,
+            ),
         )
         result = evaluate_benchmark_manifest(self.manifest)
         hashes = [fixture["price_axis_calibration_sha256"] for fixture in result["fixtures"]]
