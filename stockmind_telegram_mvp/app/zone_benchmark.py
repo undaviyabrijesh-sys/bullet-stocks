@@ -16,6 +16,7 @@ from PIL import Image
 
 from .overlay_engine import validate_chart_image
 from .zone_evaluation import evaluate_zone_predictions
+from .plot_evaluation import aggregate_plot_boundary_accuracy
 
 
 _REQUIRED_FIELDS = {
@@ -371,6 +372,11 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
             f"line {line_number} ({fixture_id}): price_axis_plot_bounds requires price_axis_anchors"
         )
 
+    reference_plot_bounds = record.get("reference_plot_bounds")
+    if reference_plot_bounds is None and axis_plot_bounds is not None:
+        reference_plot_bounds = axis_plot_bounds
+    predicted_plot_bounds = record.get("predicted_plot_bounds")
+
     try:
         result = evaluate_zone_predictions(
             record["predicted_zones"],
@@ -382,12 +388,18 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
             price_axis_plot_bounds=axis_plot_bounds,
             price_axis_scale=scale or "linear",
             max_axis_relative_error=record.get("max_axis_relative_error", 0.02),
+            predicted_plot_bounds=predicted_plot_bounds,
+            reference_plot_bounds=reference_plot_bounds,
         )
     except (TypeError, ValueError) as exc:
         raise ValueError(f"line {line_number} ({fixture_id}): {exc}") from exc
 
     try:
         reference_zones_sha256 = _canonical_json_sha256(record["reference_zones"])
+        reference_plot_bounds_sha256 = (
+            _canonical_json_sha256(reference_plot_bounds)
+            if reference_plot_bounds is not None else None
+        )
         price_axis_calibration_sha256 = (
             _canonical_json_sha256({
                 "anchors": anchors,
@@ -406,7 +418,12 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
     return {
         "fixture_id": fixture_id,
         "image_sha256": image_hash,
+        "image_width": record["image_width"],
+        "image_height": record["image_height"],
         "reference_zones_sha256": reference_zones_sha256,
+        "reference_plot_bounds": reference_plot_bounds,
+        "predicted_plot_bounds": predicted_plot_bounds,
+        "reference_plot_bounds_sha256": reference_plot_bounds_sha256,
         "price_axis_calibration_sha256": price_axis_calibration_sha256,
         "iou_threshold": result["iou_threshold"],
         "prediction_metadata": prediction_metadata,
@@ -419,6 +436,7 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
         "ignored_prediction_count": result["ignored_prediction_count"],
         "matches": result["matches"],
         "price_accuracy": result["price_accuracy"],
+        "plot_boundary_accuracy": result["plot_boundary_accuracy"],
     }
 
 
@@ -597,6 +615,7 @@ def evaluate_benchmark_manifest(manifest_path, *, max_image_bytes=DEFAULT_MAX_IM
         "by_exchange": _aggregate_by_context(fixtures, "exchange"),
         "by_timeframe": _aggregate_by_context(fixtures, "timeframe"),
         "price_accuracy": _aggregate_price_accuracy(fixtures),
+        "plot_boundary_accuracy": aggregate_plot_boundary_accuracy(fixtures),
         "fixtures": fixtures,
     }
 

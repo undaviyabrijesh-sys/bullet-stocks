@@ -524,6 +524,45 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "requires price_axis_anchors"):
             evaluate_benchmark_manifest(self.manifest)
 
+    def test_reports_plot_boundary_iou_and_zone_containment(self):
+        plot = {
+            "x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9
+        }
+        self._write(self._record(
+            reference_plot_bounds=plot,
+            predicted_plot_bounds=plot,
+        ))
+
+        result = evaluate_benchmark_manifest(self.manifest)
+        fixture = result["fixtures"][0]
+        self.assertEqual(fixture["plot_boundary_accuracy"]["status"], "scored")
+        self.assertEqual(fixture["plot_boundary_accuracy"]["plot_iou"], 1.0)
+        self.assertEqual(result["plot_boundary_accuracy"]["mean_plot_iou"], 1.0)
+        self.assertEqual(fixture["image_width"], 40)
+        self.assertEqual(len(fixture["reference_plot_bounds_sha256"]), 64)
+
+    def test_missing_predicted_plot_boundary_is_counted_as_missing(self):
+        plot = {
+            "x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9
+        }
+        self._write(self._record(reference_plot_bounds=plot))
+
+        result = evaluate_benchmark_manifest(self.manifest)
+        self.assertEqual(
+            result["fixtures"][0]["plot_boundary_accuracy"]["status"],
+            "missing_prediction",
+        )
+        self.assertEqual(result["plot_boundary_accuracy"]["missing_prediction_count"], 1)
+
+    def test_predicted_plot_boundary_requires_manual_reference(self):
+        plot = {
+            "x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9
+        }
+        self._write(self._record(predicted_plot_bounds=plot))
+
+        with self.assertRaisesRegex(ValueError, "reference_plot_bounds is required"):
+            evaluate_benchmark_manifest(self.manifest)
+
 
 if __name__ == "__main__":
     unittest.main()

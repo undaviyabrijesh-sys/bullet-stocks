@@ -214,6 +214,74 @@ class ZoneEvaluationTests(unittest.TestCase):
                 price_axis_plot_bounds=PLOT_BOUNDS,
             )
 
+    def test_plot_boundary_metrics_measure_edges_and_zone_spill(self):
+        result = evaluate(
+            [prediction(x_start=0.05, x_end=0.95, y_top=0.2, y_bottom=0.95)],
+            [zone()],
+            reference_plot_bounds=PLOT_BOUNDS,
+            predicted_plot_bounds={
+                "x_start": 0.1, "x_end": 0.95, "y_top": 0.1, "y_bottom": 0.95
+            },
+        )
+        accuracy = result["plot_boundary_accuracy"]
+        self.assertEqual(accuracy["status"], "scored")
+        self.assertLess(accuracy["plot_iou"], 1.0)
+        self.assertGreater(accuracy["edge_displacement_px"]["right"], 0)
+        self.assertGreater(accuracy["edge_displacement_px"]["bottom"], 0)
+        self.assertEqual(accuracy["predicted_zone_count"], 1)
+        self.assertEqual(accuracy["zones_outside_reference_plot_count"], 1)
+        self.assertEqual(accuracy["zones_outside_reference_plot_pct"], 100.0)
+        self.assertGreater(accuracy["predicted_zone_area_outside_reference_pct"], 0)
+        self.assertGreater(accuracy["right_margin_zone_area_pct"], 0)
+        self.assertGreater(accuracy["bottom_panel_zone_area_pct"], 0)
+
+    def test_exact_plot_boundary_has_perfect_iou_and_zero_edge_displacement(self):
+        result = evaluate(
+            [prediction()],
+            [zone()],
+            reference_plot_bounds=PLOT_BOUNDS,
+            predicted_plot_bounds=PLOT_BOUNDS,
+        )
+        accuracy = result["plot_boundary_accuracy"]
+        self.assertEqual(accuracy["plot_iou"], 1.0)
+        self.assertEqual(
+            accuracy["edge_displacement_px"],
+            {"left": 0, "right": 0, "top": 0, "bottom": 0},
+        )
+        self.assertEqual(accuracy["zones_outside_reference_plot_count"], 0)
+
+    def test_missing_and_invalid_plot_estimates_are_not_scored_as_perfect(self):
+        missing = evaluate(
+            [prediction()], [zone()], reference_plot_bounds=PLOT_BOUNDS
+        )["plot_boundary_accuracy"]
+        self.assertEqual(missing["status"], "missing_prediction")
+        self.assertIsNone(missing["plot_iou"])
+
+        invalid = evaluate(
+            [prediction()],
+            [zone()],
+            reference_plot_bounds=PLOT_BOUNDS,
+            predicted_plot_bounds={
+                "x_start": 0.8, "x_end": 0.2, "y_top": 0.1, "y_bottom": 0.9
+            },
+        )["plot_boundary_accuracy"]
+        self.assertEqual(invalid["status"], "invalid_prediction")
+        self.assertIsNone(invalid["plot_iou"])
+
+    def test_predicted_plot_requires_independent_manual_reference(self):
+        with self.assertRaisesRegex(ValueError, "reference_plot_bounds is required"):
+            evaluate([prediction()], [zone()], predicted_plot_bounds=PLOT_BOUNDS)
+
+    def test_invalid_manual_reference_plot_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "reference_plot_bounds must be valid"):
+            evaluate(
+                [prediction()],
+                [zone()],
+                reference_plot_bounds={
+                    "x_start": 0.8, "x_end": 0.2, "y_top": 0.1, "y_bottom": 0.9
+                },
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

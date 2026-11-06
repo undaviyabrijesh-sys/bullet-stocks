@@ -14,6 +14,11 @@ from .zone_benchmark import (
     _validate_market_context,
     _validate_prediction_metadata,
 )
+from .plot_evaluation import (
+    aggregate_plot_boundary_accuracy,
+    compare_plot_boundary_accuracy,
+    validate_plot_boundary_accuracy,
+)
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _COUNT_FIELDS = ("predicted", "reference", "true_positive", "false_positive", "false_negative")
@@ -206,6 +211,9 @@ def _validate_aggregate_report(report, fixtures, label):
     if report.get("price_accuracy") != _aggregate_price_accuracy(fixtures):
         raise ValueError(f"{label} price_accuracy does not match its fixture results")
 
+    if report.get("plot_boundary_accuracy") != aggregate_plot_boundary_accuracy(fixtures):
+        raise ValueError(f"{label} plot_boundary_accuracy does not match its fixture results")
+
     for field, key in (
         ("asset_class", "by_asset_class"),
         ("symbol", "by_symbol"),
@@ -284,6 +292,55 @@ def _validate_report(report, label):
         threshold = fixture.get("iou_threshold")
         if not _finite(threshold) or not 0 < threshold <= 1:
             raise ValueError(f"{prefix} has an invalid iou_threshold")
+
+        plot_fields = (
+            "image_width", "image_height", "reference_plot_bounds",
+            "predicted_plot_bounds", "reference_plot_bounds_sha256",
+            "plot_boundary_accuracy",
+        )
+        if not any(field in fixture for field in plot_fields):
+            # Preserve compatibility with reports created before plot-boundary scoring.
+            fixture.update({
+                "image_width": None,
+                "image_height": None,
+                "reference_plot_bounds": None,
+                "predicted_plot_bounds": None,
+                "reference_plot_bounds_sha256": None,
+                "plot_boundary_accuracy": None,
+            })
+        else:
+            for dimension in ("image_width", "image_height"):
+                value = fixture.get(dimension)
+                if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                    raise ValueError(f"{prefix}.{dimension} must be a positive integer")
+            reference_bounds = fixture.get("reference_plot_bounds")
+            predicted_bounds = fixture.get("predicted_plot_bounds")
+            reference_hash = fixture.get("reference_plot_bounds_sha256")
+            if reference_bounds is None:
+                if reference_hash is not None:
+                    raise ValueError(f"{prefix} has a reference plot hash without reference bounds")
+            else:
+                if not isinstance(reference_hash, str) or not _SHA256_RE.fullmatch(reference_hash):
+                    raise ValueError(f"{prefix} has an invalid reference_plot_bounds_sha256")
+                try:
+                    canonical_reference = json.dumps(
+                        reference_bounds, sort_keys=True, separators=(",", ":"), allow_nan=False
+                    ).encode("utf-8")
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"{prefix} reference_plot_bounds must contain finite JSON values") from exc
+                if hashlib.sha256(canonical_reference).hexdigest() != reference_hash:
+                    raise ValueError(f"{prefix} reference_plot_bounds_sha256 does not match reference_plot_bounds")
+            try:
+                validate_plot_boundary_accuracy(
+                    fixture.get("plot_boundary_accuracy"),
+                    reference_bounds,
+                    predicted_bounds,
+                    fixture["image_width"],
+                    fixture["image_height"],
+                    f"{prefix}.plot_boundary_accuracy",
+                )
+            except (TypeError, ValueError) as exc:
+                raise ValueError(str(exc)) from exc
 
         _validate_metrics(fixture.get("overall"), f"{prefix}.overall")
         by_type = fixture.get("by_zone_type")
@@ -416,10 +473,12 @@ def compare_benchmark_reports(baseline_report, candidate_report):
     for fixture_id in sorted(base_ids):
         base, cand = baseline[fixture_id], candidate[fixture_id]
         for field in (
-            "image_sha256", "reference_zones_sha256", "price_axis_calibration_sha256",
-            "iou_threshold", "annotation_metadata", "market_context"
+            "image_sha256", "image_width", "image_height",
+            "reference_zones_sha256", "reference_plot_bounds_sha256",
+            "price_axis_calibration_sha256", "iou_threshold",
+            "annotation_metadata", "market_context"
         ):
-            if base[field] != cand[field]:
+            if base.get(field) != cand.get(field):
                 raise ValueError(f"paired reports differ for fixture {fixture_id!r}: {field}")
 
     base_fixtures = [baseline[key] for key in sorted(baseline)]
@@ -455,6 +514,9 @@ def compare_benchmark_reports(baseline_report, candidate_report):
                 "delta": cand["ignored_prediction_count"] - base["ignored_prediction_count"],
             },
             "price_accuracy": _compare_price(base["price_accuracy"], cand["price_accuracy"]),
+            "plot_boundary_accuracy": compare_plot_boundary_accuracy(
+                base["plot_boundary_accuracy"], cand["plot_boundary_accuracy"]
+            ),
         })
 
     base_ignored = sum(f["ignored_prediction_count"] for f in base_fixtures)
@@ -480,6 +542,10 @@ def compare_benchmark_reports(baseline_report, candidate_report):
         "price_accuracy": _compare_price(
             _aggregate_price_accuracy(base_fixtures),
             _aggregate_price_accuracy(candidate_fixtures),
+        ),
+        "plot_boundary_accuracy": compare_plot_boundary_accuracy(
+            aggregate_plot_boundary_accuracy(base_fixtures),
+            aggregate_plot_boundary_accuracy(candidate_fixtures),
         ),
         "fixtures": fixture_results,
     }

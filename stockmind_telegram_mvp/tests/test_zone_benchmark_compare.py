@@ -50,7 +50,8 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         self.temp.cleanup()
 
     def _report(self, model, predicted, *, fixture_id="btc-1h-001",
-                reference=None, context=None, anchors=None, threshold=0.5):
+                reference=None, context=None, anchors=None, threshold=0.5,
+                reference_plot_bounds=None, predicted_plot_bounds=None):
         metadata = {
             "provider": "openai", "model": model, "requested_model": model,
             "prompt_version": "dns-chart-v1", "prompt_sha256": "a" * 64,
@@ -66,6 +67,10 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
             "market_context": context if context is not None else self.context,
             "iou_threshold": threshold
         }
+        if reference_plot_bounds is not None:
+            record["reference_plot_bounds"] = reference_plot_bounds
+        if predicted_plot_bounds is not None:
+            record["predicted_plot_bounds"] = predicted_plot_bounds
         if anchors is not None:
             record["price_axis_anchors"] = anchors
             record["price_axis_plot_bounds"] = {
@@ -249,6 +254,69 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         candidate["fixtures"].append(dict(candidate["fixtures"][0]))
         candidate["fixture_count"] = 2
         with self.assertRaisesRegex(ValueError, "duplicate fixture_id"):
+            compare_benchmark_reports(baseline, candidate)
+
+    def test_compares_plot_boundary_accuracy_on_identical_manual_plot(self):
+        reference_plot = {
+            "x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9
+        }
+        wider_candidate = {
+            "x_start": 0.1, "x_end": 0.95, "y_top": 0.1, "y_bottom": 0.95
+        }
+        baseline = self._report(
+            "baseline", [{**_zone(), "draw_overlay": True}],
+            reference_plot_bounds=reference_plot,
+            predicted_plot_bounds=reference_plot,
+        )
+        candidate = self._report(
+            "candidate", [{**_zone(), "draw_overlay": True}],
+            reference_plot_bounds=reference_plot,
+            predicted_plot_bounds=wider_candidate,
+        )
+
+        result = compare_benchmark_reports(baseline, candidate)
+        plot_delta = result["plot_boundary_accuracy"]["delta"]
+        self.assertLess(plot_delta["mean_plot_iou"], 0)
+        self.assertGreater(
+            plot_delta["mean_predicted_plot_outside_reference_pct"], 0
+        )
+        self.assertLess(
+            result["fixtures"][0]["plot_boundary_accuracy"]["delta"]["mean_plot_iou"],
+            0,
+        )
+
+    def test_rejects_different_manual_plot_boundaries(self):
+        reference_a = {
+            "x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9
+        }
+        reference_b = {
+            "x_start": 0.12, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9
+        }
+        baseline = self._report(
+            "baseline", [{**_zone(), "draw_overlay": True}],
+            reference_plot_bounds=reference_a, predicted_plot_bounds=reference_a,
+        )
+        candidate = self._report(
+            "candidate", [{**_zone(), "draw_overlay": True}],
+            reference_plot_bounds=reference_b, predicted_plot_bounds=reference_b,
+        )
+        with self.assertRaisesRegex(ValueError, "reference_plot_bounds_sha256"):
+            compare_benchmark_reports(baseline, candidate)
+
+    def test_rejects_tampered_plot_boundary_metrics(self):
+        plot = {
+            "x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9
+        }
+        baseline = self._report(
+            "baseline", [{**_zone(), "draw_overlay": True}],
+            reference_plot_bounds=plot, predicted_plot_bounds=plot,
+        )
+        candidate = self._report(
+            "candidate", [{**_zone(), "draw_overlay": True}],
+            reference_plot_bounds=plot, predicted_plot_bounds=plot,
+        )
+        candidate["fixtures"][0]["plot_boundary_accuracy"]["plot_iou"] = 0.25
+        with self.assertRaisesRegex(ValueError, "does not agree with its plot bounds"):
             compare_benchmark_reports(baseline, candidate)
 
 

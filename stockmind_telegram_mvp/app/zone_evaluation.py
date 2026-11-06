@@ -9,6 +9,7 @@ import math
 
 from .overlay_engine import normalized_plot_bounds_to_pixel_box, normalized_zone_to_pixel_box
 from .price_axis import calibrate_price_axis, zone_price_bounds
+from .plot_evaluation import build_plot_boundary_accuracy
 
 MAX_EVALUATED_ZONES = 8
 ZONE_TYPES = {"supply", "demand"}
@@ -175,6 +176,8 @@ def evaluate_zone_predictions(
     price_axis_plot_bounds=None,
     price_axis_scale="linear",
     max_axis_relative_error=0.02,
+    predicted_plot_bounds=None,
+    reference_plot_bounds=None,
     image_width,
     image_height,
 ):
@@ -252,6 +255,12 @@ def evaluate_zone_predictions(
             "index": index,
             "zone_type": zone["zone_type"],
             "box": box,
+            "box_px": [
+                round(box[0] * image_width),
+                round(box[1] * image_height),
+                round(box[2] * image_width),
+                round(box[3] * image_height),
+            ],
             "zone": pixel_aligned_zone,
         })
 
@@ -296,8 +305,38 @@ def evaluate_zone_predictions(
         by_type[zone_type] = _metrics(predictions, references, matches)
 
     overall = _metrics(valid_predictions, valid_references, all_matches)
+
+    if reference_plot_bounds is None and price_axis_plot_bounds is not None:
+        reference_plot_bounds = price_axis_plot_bounds
+    if predicted_plot_bounds is not None and reference_plot_bounds is None:
+        raise ValueError("reference_plot_bounds is required with predicted_plot_bounds")
+    if reference_plot_bounds is not None and price_axis_plot_bounds is not None:
+        reference_box = normalized_plot_bounds_to_pixel_box(
+            reference_plot_bounds, image_width, image_height
+        )
+        axis_box = normalized_plot_bounds_to_pixel_box(
+            price_axis_plot_bounds, image_width, image_height
+        )
+        if reference_box is None or reference_box != axis_box:
+            raise ValueError(
+                "reference_plot_bounds must match price_axis_plot_bounds when both are supplied"
+            )
+    plot_boundary_accuracy = None
+    if reference_plot_bounds is not None:
+        plot_boundary_accuracy = build_plot_boundary_accuracy(
+            reference_plot_bounds,
+            predicted_plot_bounds,
+            [
+                {"prediction_index": zone["index"], "box_px": zone["box_px"]}
+                for zone in valid_predictions
+            ],
+            image_width,
+            image_height,
+        )
+
     return {
         "iou_threshold": iou_threshold,
+        "plot_boundary_accuracy": plot_boundary_accuracy,
         "overall": overall,
         "by_zone_type": by_type,
         "ignored_prediction_count": ignored_predictions,

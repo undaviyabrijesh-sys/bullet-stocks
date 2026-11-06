@@ -139,6 +139,48 @@ The JSON report is written to standard output and can be redirected to a version
 
 Aggregate precision/recall/F1 are micro-averaged from total TP/FP/FN counts. Mean IoU and center displacement are averaged across matched zones, not across screenshots. Price errors are averaged across scored zone boundaries; zones outside the calibrated y-range are counted as unscored rather than extrapolated.
 
+
+## Plot-boundary and overlay containment scoring
+
+A fixture may optionally include both `reference_plot_bounds` (manually reviewed) and
+`predicted_plot_bounds` (returned by the AI), each using normalized full-screenshot
+coordinates. If only the manual reference is present, the report records a missing
+model boundary rather than a perfect score. A predicted boundary without an independent
+manual reference is rejected. When `price_axis_plot_bounds` is already supplied for
+price-axis calibration, it can serve as the manual plot reference; if both manual
+fields are supplied, they must resolve to the same pixel rectangle.
+
+For every fixture with a manual plot reference, the evaluator reports:
+
+- plot-boundary IoU and left/right/top/bottom edge displacement in pixels and normalized units;
+- the percentage of the predicted plot rectangle outside the manual plot;
+- right-margin and bottom-panel overlap percentages. These are geometric side-region
+  proxies only: the evaluator does not prove that the right margin is a price scale or
+  that the lower region is an indicator panel;
+- the number and percentage of drawable predicted zones that are not fully contained
+  in the manual plot, plus the percentage of predicted zone area outside it;
+- right-margin and bottom-panel overlap of predicted zone area, separately from the
+  total outside-area measure.
+
+Invalid or missing model plot bounds have no IoU or edge score. Zone-containment
+measurements remain available when the manual plot boundary is valid. Paired comparison
+requires the exact same manual plot-boundary fingerprint for each screenshot and
+revalidates the per-fixture pixel evidence before calculating deltas.
+
+Example optional manifest fields:
+
+~~~json
+{
+  "reference_plot_bounds": {
+    "x_start": 0.08, "x_end": 0.92, "y_top": 0.12, "y_bottom": 0.90
+  },
+  "predicted_plot_bounds": {
+    "x_start": 0.08, "x_end": 0.91, "y_top": 0.12, "y_bottom": 0.90
+  }
+}
+~~~
+
+
 ## Paired model comparison
 
 Generate one benchmark JSON report per model using the same reviewed screenshot fixtures and reference annotations. Save each command's standard output to a separate report file, then run:
