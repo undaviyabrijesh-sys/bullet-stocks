@@ -105,7 +105,7 @@ Use this response structure:
 The user may ask in English, Hinglish, Hindi, Gujarati or mixed language. Reply in their style.
 """
 
-CHART_PROMPT_VERSION = "dns-chart-v2"
+CHART_PROMPT_VERSION = "dns-chart-v3"
 CHART_IMAGE_INSTRUCTIONS = """
 Return structured JSON. The zone coordinates are normalized to the full image (0 to 1),
 with x from left to right and y from top to bottom. Mark only clearly visible chart zones.
@@ -185,6 +185,9 @@ CHART_RESPONSE_FORMAT = {
 }
 
 
+CHART_CONTEXT_POLICY = "caption_only"
+
+
 CHART_PROMPT_SHA256 = hashlib.sha256(
     json.dumps(
         [
@@ -192,6 +195,7 @@ CHART_PROMPT_SHA256 = hashlib.sha256(
             CHART_IMAGE_PROMPT,
             CHART_IMAGE_INSTRUCTIONS,
             CHART_RESPONSE_FORMAT,
+            CHART_CONTEXT_POLICY,
         ],
         ensure_ascii=False,
         sort_keys=True,
@@ -437,7 +441,7 @@ class ResearchAI:
         self.crypto_data = crypto_data
 
     async def analyze_chart_image(self, history, user_text, image_bytes, image_mime_type="image/jpeg"):
-        """Analyse the screenshot and return normalized locations for visible zones."""
+        """Analyse one screenshot without carrying unrelated conversation turns into vision."""
         if image_mime_type not in {"image/jpeg", "image/png", "image/webp"}:
             raise ValueError("Unsupported image type.")
         data_url = f"data:{image_mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
@@ -447,7 +451,9 @@ class ResearchAI:
                 "role": "system",
                 "content": CHART_IMAGE_PROMPT + CHART_IMAGE_INSTRUCTIONS,
             },
-            *history[-8:],
+            # Chart analysis is deliberately stateless: previous turns can contain stale
+            # levels or user-supplied prompt injection, and add image-request token cost.
+            # Keep the parameter for caller compatibility; only the current caption is sent.
             {"role": "user", "content": [
                 {"type": "text", "text": user_text or "Analyse DNS zones."},
                 {"type": "image_url", "image_url": {"url": data_url, "detail": "high"}}
@@ -457,6 +463,7 @@ class ResearchAI:
             "temperature": 0.1,
             "image_detail": "high",
             "response_format": "json_schema:chart_zone_map",
+            "conversation_context": CHART_CONTEXT_POLICY,
         }
         request_options = {
             "model": self.vision_model,
