@@ -201,6 +201,81 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
             "Conversation context cleared. Ask a new research question."
         )
 
+    async def test_concurrent_start_requests_respect_beta_capacity(self):
+        first = SimpleNamespace(
+            from_user=SimpleNamespace(id=self.user_id),
+            answer=AsyncMock(),
+        )
+        second = SimpleNamespace(
+            from_user=SimpleNamespace(id=self.user_id + 1),
+            answer=AsyncMock(),
+        )
+
+        with patch.object(bot_module, "BETA_USER_LIMIT", 1):
+            await asyncio.gather(bot_module.start(first), bot_module.start(second))
+
+        self.assertEqual(len(bot_module.beta_users), 1)
+        replies = [first.answer.await_args.args[0], second.answer.await_args.args[0]]
+        self.assertEqual(replies.count(bot_module.WELCOME), 1)
+        self.assertEqual(
+            replies.count("The 10-person beta is currently full. Please try again later."),
+            1,
+        )
+
+    async def test_research_and_start_share_the_same_beta_capacity(self):
+        research = self.use_research(answer=AsyncMock(return_value="should not run"))
+        admitted = SimpleNamespace(
+            from_user=SimpleNamespace(id=self.user_id),
+            answer=AsyncMock(),
+        )
+        rejected = SimpleNamespace(
+            from_user=SimpleNamespace(id=self.user_id + 1),
+            answer=AsyncMock(),
+            answer_photo=AsyncMock(),
+        )
+
+        with patch.object(bot_module, "BETA_USER_LIMIT", 1):
+            await bot_module.start(admitted)
+            await bot_module.run_research(rejected, "Analyse BTC")
+
+        research.answer.assert_not_awaited()
+        rejected.answer.assert_awaited_once_with(
+            "The 10-person beta is currently full. Please try again later."
+        )
+        self.assertNotIn(self.user_id + 1, bot_module.usage)
+
+    async def test_concurrent_same_user_requests_cannot_exceed_daily_limit(self):
+        research = self.use_research(answer=AsyncMock(return_value="Research completed."))
+
+        with patch.object(bot_module, "DAILY_QUERY_LIMIT", 1):
+            await asyncio.wait_for(
+                asyncio.gather(
+                    bot_module.run_research(self.message, "first request"),
+                    bot_module.run_research(self.message, "second request"),
+                ),
+                timeout=2,
+            )
+
+        research.answer.assert_awaited_once()
+        self.assertEqual(bot_module.usage[self.user_id], 1)
+        self.assertTrue(
+            any(
+                call.args == ("You've reached today's beta research limit. It resets at midnight IST.",)
+                for call in self.message.answer.await_args_list
+            )
+        )
+
+    async def test_daily_usage_resets_for_a_new_ist_date(self):
+        user_id = self.user_id + 2
+        with patch.object(bot_module, "DAILY_QUERY_LIMIT", 2):
+            self.assertTrue(bot_module._consume_daily_query(user_id, "2026-11-06"))
+            self.assertTrue(bot_module._consume_daily_query(user_id, "2026-11-06"))
+            self.assertFalse(bot_module._consume_daily_query(user_id, "2026-11-06"))
+            self.assertTrue(bot_module._consume_daily_query(user_id, "2026-11-07"))
+
+        self.assertEqual(bot_module.usage_day[user_id], "2026-11-07")
+        self.assertEqual(bot_module.usage[user_id], 1)
+
 
 class BotModuleResourceCleanup(unittest.TestCase):
     @classmethod
