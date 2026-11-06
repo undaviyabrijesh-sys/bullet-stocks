@@ -13,6 +13,7 @@ from .crypto import BinanceMarketData
 from .overlay_engine import render_overlay, validate_chart_image
 from .image_upload import BoundedBytesIO, UploadTooLargeError
 from .telegram_delivery import send_analysis_text, send_overlay_photo
+from .user_locks import UserLockRegistry
 from .config import (
     BETA_USER_LIMIT,
     DAILY_QUERY_LIMIT,
@@ -40,7 +41,7 @@ research = ResearchAI(
 # Prototype-only in-memory state. Persist this before external beta testing.
 histories = defaultdict(lambda: deque(maxlen=MAX_HISTORY_MESSAGES))
 # Serialize requests per user so concurrent turns cannot race on shared history.
-user_locks = defaultdict(asyncio.Lock)
+user_locks = UserLockRegistry()
 usage = defaultdict(int)
 usage_day = {}
 beta_users = set()
@@ -77,7 +78,7 @@ async def run_research(
     if user is None:
         return
 
-    async with user_locks[user.id]:
+    async with user_locks.hold(user.id):
         await _run_research_locked(message, user_text, image_bytes, image_mime_type)
 
 
@@ -196,8 +197,10 @@ async def start(message: Message):
 async def reset(message: Message):
     user_id = message.from_user.id
     # Wait for an active turn to finish before clearing its conversation context.
-    async with user_locks[user_id]:
-        histories[user_id].clear()
+    async with user_locks.hold(user_id):
+        history = histories.get(user_id)
+        if history is not None:
+            history.clear()
     await message.answer("Conversation context cleared. Ask a new research question.")
 
 

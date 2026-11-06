@@ -186,6 +186,21 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("couldn't complete this analysis", self.status.edit_text.await_args.args[0])
         self.assertEqual(list(bot_module.histories[self.user_id]), [])
 
+    async def test_reset_for_unknown_user_does_not_allocate_history_or_keep_lock(self):
+        unknown_user_id = self.user_id + 1
+        reset_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=unknown_user_id),
+            answer=AsyncMock(),
+        )
+
+        await bot_module.reset(reset_message)
+
+        self.assertNotIn(unknown_user_id, bot_module.histories)
+        self.assertEqual(len(bot_module.user_locks), 0)
+        reset_message.answer.assert_awaited_once_with(
+            "Conversation context cleared. Ask a new research question."
+        )
+
 
 class BotModuleResourceCleanup(unittest.TestCase):
     @classmethod
