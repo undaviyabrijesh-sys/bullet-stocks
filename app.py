@@ -773,6 +773,15 @@ def dashboard():
     symbols = [x.get("symbol") for x in watchlist] + [t["symbol"] for t in open_trades] + list(scanner_positions)
     quotes = get_live_quotes(sorted(set(symbols)))
     scanner_closed = scanner_state.get("closed", []) if isinstance(scanner_state.get("closed", []), list) else []
+    # A symbol that has already triggered this month must not be advertised again
+    # as a potential near-trigger signal, even if price later pulls back below trigger.
+    current_month_key = pd.Timestamp.now(tz=IST).strftime("%Y-%m")
+    triggered_by_month = scanner_state.get("triggered", {})
+    current_month_triggered = set(
+        triggered_by_month.get(current_month_key, [])
+        if isinstance(triggered_by_month, dict) else []
+    )
+    already_triggered_symbols = current_month_triggered | set(scanner_positions)
     scanner_rows = scanner_position_rows(scanner_positions, quotes, ticket)
 
     # Use fresh quotes for displayed equity even when paper processing is paused.
@@ -912,6 +921,8 @@ def dashboard():
             near = []
             for item in sorted(watchlist, key=lambda x: float(x.get("static_score", 0)), reverse=True):
                 symbol = item.get("symbol")
+                if not symbol or symbol in already_triggered_symbols:
+                    continue
                 q = quotes.get(symbol, {})
                 if not q:
                     continue
@@ -946,7 +957,9 @@ def dashboard():
             ltp = q.get("ltp")
             trigger = float(item.get("trigger", 0) or 0)
             distance = ((trigger / ltp) - 1) * 100 if ltp and trigger else None
-            if distance is None:
+            if symbol in already_triggered_symbols:
+                signal = "ALREADY TRIGGERED"
+            elif distance is None:
                 signal = "NO QUOTE"
             elif distance <= 0:
                 signal = "TRIGGER CROSSED"
@@ -958,9 +971,11 @@ def dashboard():
                 signal = "WATCH"
             if status_filter == "TRIGGER CROSSED" and signal != status_filter:
                 continue
-            if status_filter == "WITHIN 2%" and signal not in ("TRIGGER CROSSED", "WITHIN 2%"):
+            # Near-trigger filters are strictly for not-yet-triggered candidates.
+            # Do not include crossed/previously triggered symbols in the 2% or 5% buckets.
+            if status_filter == "WITHIN 2%" and signal != "WITHIN 2%":
                 continue
-            if status_filter == "WITHIN 5%" and signal not in ("TRIGGER CROSSED", "WITHIN 2%", "WITHIN 5%"):
+            if status_filter == "WITHIN 5%" and signal not in ("WITHIN 2%", "WITHIN 5%"):
                 continue
             rows.append({
                 "SYMBOL": symbol, "SIGNAL": signal, "LTP ₹": ltp,
