@@ -60,7 +60,7 @@ The bot now returns a second image with translucent supply (red) and demand (gre
 - Indian cash-market session reference: 09:15–15:30 IST. Crypto markets trade 24/7.
 
 ## Important prototype limitations
-- User membership, daily usage and chat history are in memory. They reset on restart and are not suitable for a public beta until moved to persistent storage.
+- User membership, daily usage and chat history are in memory. They reset on restart and are not suitable for a public beta until moved to persistent storage. Requests from the same Telegram user are serialized within one bot process so concurrent messages cannot read or append overlapping conversation turns; `/reset` waits for that user's active request. This is process-local protection only—multiple bot workers require shared persistence and a distributed per-user lock.
 - Tapetide's free quota is limited and shared across REST and MCP. One AI query may trigger multiple data requests; add quota-aware budgeting before onboarding testers.
 - Do not assume a free API plan permits redistribution. Obtain written provider permission for any external beta or paid service.
 - Paid stock research/recommendations can raise Indian regulatory obligations. Get qualified compliance advice before monetisation.
@@ -80,7 +80,7 @@ python -m compileall -q stockmind_telegram_mvp/app
 python -m unittest discover -s stockmind_telegram_mvp/tests -v
 ```
 
-The research-to-Telegram flow tests import the bot with disposable dummy configuration and mock the research provider and Telegram message methods. They cover successful text/chart delivery, progress-message failure, ambiguous final-message delivery, optional overlay-photo failure, and provider failure. These tests do not contact OpenAI, Tapetide, Binance or Telegram and do not validate live service credentials.
+The research-to-Telegram flow tests import the bot with disposable dummy configuration and mock the research provider and Telegram message methods. They cover successful text/chart delivery, progress-message failure, ambiguous final-message delivery, optional overlay-photo failure, and provider failure. These tests do not contact OpenAI, Tapetide, Binance or Telegram and do not validate live service credentials. Additional concurrency tests verify that same-user requests run in order, later turns receive the preceding completed context, and `/reset` waits for an active turn before clearing history.
 
 ### Offline DNS benchmark and price-axis calibration
 
