@@ -134,6 +134,9 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
             "2026-11-05T20:24:00Z",
         )
         self.assertEqual(result["annotation_guideline_version"], "dns-manual-v1")
+        self.assertEqual(len(result["fixtures"][0]["reference_zones_sha256"]), 64)
+        self.assertIsNone(result["fixtures"][0]["price_axis_calibration_sha256"])
+        self.assertEqual(result["fixtures"][0]["iou_threshold"], 0.5)
         self.assertEqual(
             result["fixtures"][0]["annotation_metadata"]["reviewer_id"], "rev-002"
         )

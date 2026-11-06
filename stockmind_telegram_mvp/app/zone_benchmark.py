@@ -275,6 +275,14 @@ def _load_and_verify_image(record, manifest_dir, line_number, max_image_bytes):
     return actual_hash.lower()
 
 
+def _canonical_json_sha256(value):
+    """Hash finite JSON with stable key ordering for paired benchmark checks."""
+    encoded = json.dumps(
+        value, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _validate_market_context(context, line_number, fixture_id):
     """Validate optional chart identity fields used for stratified metrics."""
     prefix = f"line {line_number} ({fixture_id}): market_context"
@@ -368,9 +376,28 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
     except (TypeError, ValueError) as exc:
         raise ValueError(f"line {line_number} ({fixture_id}): {exc}") from exc
 
+    try:
+        reference_zones_sha256 = _canonical_json_sha256(record["reference_zones"])
+        price_axis_calibration_sha256 = (
+            _canonical_json_sha256({
+                "anchors": anchors,
+                "scale": scale or "linear",
+                "max_axis_relative_error": record.get("max_axis_relative_error", 0.02),
+            })
+            if anchors is not None else None
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"line {line_number} ({fixture_id}): reference zones or price-axis "
+            "calibration must contain finite JSON values"
+        ) from exc
+
     return {
         "fixture_id": fixture_id,
         "image_sha256": image_hash,
+        "reference_zones_sha256": reference_zones_sha256,
+        "price_axis_calibration_sha256": price_axis_calibration_sha256,
+        "iou_threshold": result["iou_threshold"],
         "prediction_metadata": prediction_metadata,
         "annotation_metadata": annotation_metadata,
         "market_context": market_context,
