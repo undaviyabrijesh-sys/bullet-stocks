@@ -102,15 +102,23 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
             "annotation_metadata": _annotation_metadata(),
         }
         record.update(overrides)
-        # The standard fixture represents a fully known plot. Tests that need
-        # missing-boundary behaviour override either field with None.
-        if "reference_plot_bounds" not in record:
-            record["reference_plot_bounds"] = (
-                record.get("price_axis_plot_bounds")
-                or {"x_start": 0.0, "x_end": 1.0, "y_top": 0.0, "y_bottom": 1.0}
-            )
-        if "predicted_plot_bounds" not in record:
-            record["predicted_plot_bounds"] = record["reference_plot_bounds"]
+        # Only ordinary fixtures get a convenient full-image plot. Preserve
+        # one-sided explicit bounds so tests can exercise missing-model and
+        # missing-manual-reference validation paths.
+        explicit_plot_fields = {
+            "reference_plot_bounds", "predicted_plot_bounds", "price_axis_plot_bounds"
+        }
+        if not explicit_plot_fields.intersection(overrides):
+            full_image = {
+                "x_start": 0.0, "x_end": 1.0, "y_top": 0.0, "y_bottom": 1.0
+            }
+            record["reference_plot_bounds"] = full_image
+            record["predicted_plot_bounds"] = full_image
+        elif (
+            "reference_plot_bounds" not in record
+            and "price_axis_plot_bounds" in record
+        ):
+            record["reference_plot_bounds"] = record["price_axis_plot_bounds"]
         return record
 
     def _write(self, *records):
