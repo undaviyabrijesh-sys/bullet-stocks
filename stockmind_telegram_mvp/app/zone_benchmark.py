@@ -295,7 +295,28 @@ def _validate_market_context(context, line_number, fixture_id):
         elif not isinstance(value, str) or not value.strip():
             raise ValueError(f"{prefix}.{field} must be a non-empty string or null")
         else:
-            normalized[field] = value.strip()
+            cleaned = value.strip()
+            max_length = {
+                "asset_class": 32,
+                "symbol": 64,
+                "exchange": 64,
+                "timeframe": 16,
+            }[field]
+            if len(cleaned) > max_length:
+                raise ValueError(
+                    f"{prefix}.{field} cannot exceed {max_length} characters"
+                )
+            if any(not character.isprintable() for character in cleaned):
+                raise ValueError(
+                    f"{prefix}.{field} cannot contain control characters"
+                )
+            # Canonicalize case so BTCUSDT/btcusdt, Binance/BINANCE and 1H/1h
+            # do not split one real-world chart category into separate groups.
+            if field == "symbol":
+                cleaned = cleaned.upper()
+            else:
+                cleaned = cleaned.casefold()
+            normalized[field] = cleaned
     return normalized
 
 

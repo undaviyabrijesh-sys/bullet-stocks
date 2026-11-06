@@ -338,6 +338,43 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         self.assertIsNone(result["by_symbol"][0]["value"])
         self.assertEqual(result["by_symbol"][0]["fixture_count"], 1)
 
+    def test_normalizes_market_context_case_before_grouping(self):
+        self._write(
+            self._record(
+                "mixed-case",
+                market_context=_market_context(
+                    asset_class=" Crypto ",
+                    symbol=" btcusdt ",
+                    exchange=" Binance ",
+                    timeframe="1H",
+                ),
+            ),
+            self._record("canonical-case", market_context=_market_context()),
+        )
+
+        result = evaluate_benchmark_manifest(self.manifest)
+
+        for field in ("by_asset_class", "by_symbol", "by_exchange", "by_timeframe"):
+            self.assertEqual(len(result[field]), 1)
+            self.assertEqual(result[field][0]["fixture_count"], 2)
+        self.assertEqual(result["by_symbol"][0]["value"], "BTCUSDT")
+        self.assertEqual(result["by_exchange"][0]["value"], "binance")
+        self.assertEqual(result["by_timeframe"][0]["value"], "1h")
+
+    def test_rejects_oversized_or_control_character_market_context(self):
+        cases = (
+            ({"asset_class": "x" * 33}, "asset_class cannot exceed 32"),
+            ({"symbol": "x" * 65}, "symbol cannot exceed 64"),
+            ({"exchange": "x" * 65}, "exchange cannot exceed 64"),
+            ({"timeframe": "x" * 17}, "timeframe cannot exceed 16"),
+            ({"symbol": "BTC" + chr(10) + "USDT"}, "symbol cannot contain control characters"),
+        )
+        for context, expected in cases:
+            with self.subTest(context=context):
+                self._write(self._record(market_context=context))
+                with self.assertRaisesRegex(ValueError, expected):
+                    evaluate_benchmark_manifest(self.manifest)
+
     def test_rejects_invalid_market_context_shape_and_values(self):
         cases = (
             ([], "must be a JSON object"),
