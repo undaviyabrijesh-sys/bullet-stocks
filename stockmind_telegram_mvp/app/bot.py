@@ -39,6 +39,8 @@ research = ResearchAI(
 
 # Prototype-only in-memory state. Persist this before external beta testing.
 histories = defaultdict(lambda: deque(maxlen=MAX_HISTORY_MESSAGES))
+# Serialize requests per user so concurrent turns cannot race on shared history.
+user_locks = defaultdict(asyncio.Lock)
 usage = defaultdict(int)
 usage_day = {}
 beta_users = set()
@@ -66,6 +68,20 @@ WELCOME = (
 
 
 async def run_research(
+    message: Message,
+    user_text: str,
+    image_bytes: bytes | None = None,
+    image_mime_type: str = "image/jpeg",
+):
+    user = message.from_user
+    if user is None:
+        return
+
+    async with user_locks[user.id]:
+        await _run_research_locked(message, user_text, image_bytes, image_mime_type)
+
+
+async def _run_research_locked(
     message: Message,
     user_text: str,
     image_bytes: bytes | None = None,
@@ -178,7 +194,10 @@ async def start(message: Message):
 
 @dp.message(Command("reset"))
 async def reset(message: Message):
-    histories[message.from_user.id].clear()
+    user_id = message.from_user.id
+    # Wait for an active turn to finish before clearing its conversation context.
+    async with user_locks[user_id]:
+        histories[user_id].clear()
     await message.answer("Conversation context cleared. Ask a new research question.")
 
 
