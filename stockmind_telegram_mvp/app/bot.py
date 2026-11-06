@@ -46,6 +46,33 @@ usage = defaultdict(int)
 usage_day = {}
 beta_users = set()
 
+
+def _admit_beta_user(user_id: int) -> bool:
+    """Admit a user once without exceeding the process-local beta cap.
+
+    Keep the check and set mutation synchronous: with one asyncio event loop,
+    there is no task switch between these operations. Multi-worker deployments
+    need shared atomic storage instead of this in-memory guard.
+    """
+    if user_id in beta_users:
+        return True
+    if len(beta_users) >= BETA_USER_LIMIT:
+        return False
+    beta_users.add(user_id)
+    return True
+
+
+def _consume_daily_query(user_id: int, today: str) -> bool:
+    """Consume one admitted request slot for the supplied Asia/Kolkata date."""
+    if usage_day.get(user_id) != today:
+        usage_day[user_id] = today
+        usage[user_id] = 0
+    if usage[user_id] >= DAILY_QUERY_LIMIT:
+        return False
+    usage[user_id] += 1
+    return True
+
+
 bot = Bot(TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
@@ -101,21 +128,14 @@ async def _run_research_locked(
             return
 
     user_id = user.id
-    if user_id not in beta_users and len(beta_users) >= BETA_USER_LIMIT:
+    if not _admit_beta_user(user_id):
         await message.answer("The 10-person beta is currently full. Please try again later.")
         return
-    beta_users.add(user_id)
 
     today = datetime.now(IST).date().isoformat()
-    if usage_day.get(user_id) != today:
-        usage_day[user_id] = today
-        usage[user_id] = 0
-
-    if usage[user_id] >= DAILY_QUERY_LIMIT:
+    if not _consume_daily_query(user_id, today):
         await message.answer("You've reached today's beta research limit. It resets at midnight IST.")
         return
-
-    usage[user_id] += 1
     try:
         status = await message.answer(
             "🖼️ Reading the chart and mapping visible structure…"
@@ -186,10 +206,9 @@ async def _run_research_locked(
 @dp.message(CommandStart())
 async def start(message: Message):
     user_id = message.from_user.id
-    if user_id not in beta_users and len(beta_users) >= BETA_USER_LIMIT:
+    if not _admit_beta_user(user_id):
         await message.answer("The 10-person beta is currently full. Please try again later.")
         return
-    beta_users.add(user_id)
     await message.answer(WELCOME)
 
 
