@@ -485,10 +485,7 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         self.assertEqual(result["overall"]["true_positive"], 0)
         self.assertEqual(result["overall"]["false_negative"], 1)
         self.assertEqual(result["ignored_prediction_count"], 1)
-        self.assertEqual(
-            result["fixtures"][0]["plot_boundary_accuracy"]["status"],
-            "missing_prediction",
-        )
+        self.assertIsNone(result["fixtures"][0]["plot_boundary_accuracy"])
 
     def test_prediction_below_renderer_pixel_minimum_is_a_missed_zone(self):
         self._write(
