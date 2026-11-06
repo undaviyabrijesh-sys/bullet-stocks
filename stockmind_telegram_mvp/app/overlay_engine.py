@@ -118,6 +118,37 @@ def normalized_zone_to_pixel_box(
     return left, top, right, bottom
 
 
+def normalized_plot_bounds_to_pixel_box(
+    bounds: dict,
+    width: int,
+    height: int,
+) -> tuple[int, int, int, int] | None:
+    """Convert a normalized main-price-panel rectangle to half-open pixel bounds."""
+    if not isinstance(bounds, dict):
+        return None
+    if (
+        isinstance(width, bool) or not isinstance(width, int) or width <= 0
+        or isinstance(height, bool) or not isinstance(height, int) or height <= 0
+    ):
+        return None
+    values = [bounds.get(key) for key in ("x_start", "x_end", "y_top", "y_bottom")]
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in values):
+        return None
+    try:
+        x0, x1, y0, y1 = (float(value) for value in values)
+    except (OverflowError, TypeError, ValueError):
+        return None
+    if not all(math.isfinite(value) and 0 <= value <= 1 for value in (x0, x1, y0, y1)):
+        return None
+    if x1 <= x0 or y1 <= y0:
+        return None
+    left, right = round(x0 * width), round(x1 * width)
+    top, bottom = round(y0 * height), round(y1 * height)
+    if right - left < 3 or bottom - top < 2:
+        return None
+    return left, top, right, bottom
+
+
 def _pillow_rectangle_bounds(pixel_box: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
     """Convert half-open pixel bounds to Pillow's inclusive rectangle endpoints.
 
@@ -131,7 +162,12 @@ def _pillow_rectangle_bounds(pixel_box: tuple[int, int, int, int]) -> tuple[int,
 
 
 def render_overlay(
-    image_bytes: bytes, zones: list[dict], *, validated: bool = False
+    image_bytes: bytes,
+    zones: list[dict],
+    *,
+    validated: bool = False,
+    plot_bounds: dict | None = None,
+    require_plot_bounds: bool = False,
 ) -> tuple[bytes | None, int]:
     """Draw validated, normalized rectangles onto a copy of the uploaded chart.
 
@@ -145,6 +181,19 @@ def render_overlay(
 
     image = Image.open(BytesIO(image_bytes)).convert("RGBA")
     width, height = image.size
+    plot_box = (
+        normalized_plot_bounds_to_pixel_box(plot_bounds, width, height)
+        if plot_bounds is not None
+        else None
+    )
+    if require_plot_bounds and plot_box is None:
+        return None, 0
+    if plot_bounds is not None and plot_box is None:
+        return None, 0
+    if plot_box is None:
+        plot_box = (0, 0, width, height)
+    plot_left, plot_top, plot_right, plot_bottom = plot_box
+
     layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
     count = 0
@@ -157,12 +206,23 @@ def render_overlay(
         if pixel_box is None:
             continue
         left, top, right, bottom = pixel_box
+        if left < plot_left or top < plot_top or right > plot_right or bottom > plot_bottom:
+            continue
 
         color = (220, 65, 65, 60) if zone_type == "supply" else (30, 170, 100, 60)
         edge = (235, 65, 65, 230) if zone_type == "supply" else (25, 185, 110, 230)
         draw.rectangle(_pillow_rectangle_bounds((left, top, right, bottom)), fill=color, outline=edge, width=max(2, width // 600))
         title = _zone_overlay_label(zone, zone_type)
-        draw.text((left + 5, max(0, top - 18)), title, fill=edge[:3] + (255,))
+        text_box = draw.textbbox((0, 0), title)
+        text_width = text_box[2] - text_box[0]
+        text_height = text_box[3] - text_box[1]
+        if (
+            text_width <= plot_right - plot_left - 4
+            and text_height <= plot_bottom - plot_top - 4
+        ):
+            label_x = min(left + 5, max(plot_left + 2, plot_right - text_width - 2))
+            label_y = min(max(plot_top, top - 18), plot_bottom - text_height - 2)
+            draw.text((label_x, label_y), title, fill=edge[:3] + (255,))
         count += 1
 
     if not count:

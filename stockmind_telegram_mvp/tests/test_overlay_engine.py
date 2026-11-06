@@ -7,6 +7,7 @@ from PIL import Image
 from stockmind_telegram_mvp.app import overlay_engine
 from stockmind_telegram_mvp.app.overlay_engine import (
     _zone_overlay_label,
+    normalized_plot_bounds_to_pixel_box,
     normalized_zone_to_pixel_box,
     render_overlay,
     validate_chart_image,
@@ -61,6 +62,75 @@ class OverlayRendererTests(unittest.TestCase):
         with Image.open(BytesIO(result)) as rendered:
             self.assertEqual(rendered.format, "JPEG")
             self.assertEqual(rendered.size, (640, 360))
+
+    def test_plot_bounds_convert_to_half_open_pixel_coordinates(self):
+        self.assertEqual(
+            normalized_plot_bounds_to_pixel_box(
+                {"x_start": 0.05, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9},
+                640, 360,
+            ),
+            (32, 36, 576, 324),
+        )
+        self.assertIsNone(normalized_plot_bounds_to_pixel_box(
+            {"x_start": 0.8, "x_end": 0.2, "y_top": 0.1, "y_bottom": 0.9},
+            640, 360,
+        ))
+
+    def test_required_plot_bounds_suppress_overlays_when_missing(self):
+        zone = {
+            "zone_type": "demand", "draw_overlay": True,
+            "x_start": 0.2, "x_end": 0.8, "y_top": 0.3, "y_bottom": 0.5,
+        }
+        result, count = render_overlay(sample_image(), [zone], require_plot_bounds=True)
+        self.assertIsNone(result)
+        self.assertEqual(count, 0)
+
+    def test_zone_outside_price_plot_is_not_drawn(self):
+        zone = {
+            "zone_type": "demand", "draw_overlay": True,
+            "x_start": 0.2, "x_end": 0.95, "y_top": 0.3, "y_bottom": 0.5,
+        }
+        bounds = {"x_start": 0.05, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9}
+        result, count = render_overlay(
+            sample_image(), [zone], plot_bounds=bounds, require_plot_bounds=True
+        )
+        self.assertIsNone(result)
+        self.assertEqual(count, 0)
+
+    def test_zone_and_label_are_constrained_to_price_plot(self):
+        zone = {
+            "zone_type": "supply", "label": "AI SUPPLY", "draw_overlay": True,
+            "x_start": 0.2, "x_end": 0.8, "y_top": 0.3, "y_bottom": 0.5,
+        }
+        bounds = {"x_start": 0.05, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9}
+        with patch.object(overlay_engine.ImageDraw.ImageDraw, "rectangle", autospec=True) as rect, patch.object(
+            overlay_engine.ImageDraw.ImageDraw, "text", autospec=True
+        ) as text_draw:
+            result, count = render_overlay(
+                sample_image(), [zone], plot_bounds=bounds, require_plot_bounds=True
+            )
+        self.assertIsNotNone(result)
+        self.assertEqual(count, 1)
+        self.assertEqual(rect.call_args.args[1], (128, 108, 511, 179))
+        label_x, label_y = text_draw.call_args.args[1]
+        self.assertGreaterEqual(label_x, 32)
+        self.assertLess(label_x, 576)
+        self.assertGreaterEqual(label_y, 36)
+        self.assertLess(label_y, 324)
+
+    def test_long_label_is_omitted_when_it_cannot_fit_inside_plot(self):
+        zone = {
+            "zone_type": "demand", "label": "X" * 32, "draw_overlay": True,
+            "x_start": 0.22, "x_end": 0.28, "y_top": 0.3, "y_bottom": 0.5,
+        }
+        bounds = {"x_start": 0.2, "x_end": 0.3, "y_top": 0.1, "y_bottom": 0.9}
+        with patch.object(overlay_engine.ImageDraw.ImageDraw, "text", autospec=True) as text_draw:
+            result, count = render_overlay(
+                sample_image(), [zone], plot_bounds=bounds, require_plot_bounds=True
+            )
+        self.assertIsNotNone(result)
+        self.assertEqual(count, 1)
+        text_draw.assert_not_called()
 
     def test_skips_unapproved_invalid_and_non_numeric_zones(self):
         zones = [

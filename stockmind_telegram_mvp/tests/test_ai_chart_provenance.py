@@ -31,7 +31,7 @@ class ChartPredictionProvenanceTests(unittest.IsolatedAsyncioTestCase):
             choices=[
                 SimpleNamespace(
                     message=SimpleNamespace(
-                        content=json.dumps({"analysis": "Visible structure only.", "zones": []})
+                        content=json.dumps({"analysis": "Visible structure only.", "plot_bounds": {"x_start": 0.08, "x_end": 0.94, "y_top": 0.12, "y_bottom": 0.9}, "zones": []})
                     )
                 )
             ],
@@ -51,6 +51,7 @@ class ChartPredictionProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(metadata["settings"]["temperature"], 0.1)
         self.assertEqual(metadata["settings"]["image_detail"], "high")
         self.assertEqual(metadata["settings"]["conversation_context"], "caption_only")
+        self.assertEqual(metadata["settings"]["plot_bounds_policy"], "required_for_overlay")
         self.assertEqual(metadata["settings"]["reasoning_effort"], "none")
         self.assertEqual(create.await_args.kwargs["reasoning_effort"], "none")
         messages = create.await_args.kwargs["messages"]
@@ -71,7 +72,7 @@ class ChartPredictionProvenanceTests(unittest.IsolatedAsyncioTestCase):
             choices=[
                 SimpleNamespace(
                     message=SimpleNamespace(
-                        content=json.dumps({"analysis": "Current screenshot only.", "zones": []})
+                        content=json.dumps({"analysis": "Current screenshot only.", "plot_bounds": None, "zones": []})
                     )
                 )
             ],
@@ -103,7 +104,7 @@ class ChartPredictionProvenanceTests(unittest.IsolatedAsyncioTestCase):
             choices=[
                 SimpleNamespace(
                     message=SimpleNamespace(
-                        content=json.dumps({"analysis": "Uncertain metadata.", "zones": []})
+                        content=json.dumps({"analysis": "Uncertain metadata.", "plot_bounds": None, "zones": []})
                     )
                 )
             ],
@@ -116,7 +117,7 @@ class ChartPredictionProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result["prediction_metadata"]["generated_at"])
 
     def test_prompt_version_and_static_prompt_hash_are_present(self):
-        self.assertEqual(CHART_PROMPT_VERSION, "dns-chart-v3")
+        self.assertEqual(CHART_PROMPT_VERSION, "dns-chart-v4")
         self.assertRegex(CHART_PROMPT_SHA256, re.compile(r"^[0-9a-f]{64}$"))
 
 

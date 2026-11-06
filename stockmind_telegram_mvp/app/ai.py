@@ -93,6 +93,10 @@ Analyse in this order:
    scale, and do not give guaranteed buy/sell calls.
 7. State limitations: screenshot timestamp may be unknown, cropped history can hide prior tests,
    and chart patterns need confirmation from OHLC/live feed before an alert or trade decision.
+8. Locate the MAIN PRICE-PLOT rectangle before mapping zones. Exclude the right price scale,
+   left toolbar, top/bottom controls, legends and separate volume/indicator panels. Use the
+   full-image normalized coordinate frame. If the price plot boundary is ambiguous, return
+   plot_bounds=null and do not request any overlay rectangles.
 
 Use this response structure:
 - Chart read
@@ -105,14 +109,22 @@ Use this response structure:
 The user may ask in English, Hinglish, Hindi, Gujarati or mixed language. Reply in their style.
 """
 
-CHART_PROMPT_VERSION = "dns-chart-v3"
+CHART_PROMPT_VERSION = "dns-chart-v4"
 CHART_IMAGE_INSTRUCTIONS = """
-Return structured JSON. The zone coordinates are normalized to the full image (0 to 1),
-with x from left to right and y from top to bottom. Mark only clearly visible chart zones.
-Extend boxes to the right within the plot, not over the price scale. If geometry is unclear,
-set draw_overlay=false and all coordinates to zero. Never invent a box position. Set price
-bounds to null if the scale cannot be read. Return at most 8 distinct zones. The text analysis
-must explain that the overlay is an estimate and needs visual verification.
+Return structured JSON. First identify plot_bounds: the visible main price-candle plotting
+rectangle, excluding the price scale, toolbars, legends and separate indicator/volume panels.
+All coordinates are normalized to the full image (0 to 1), x left-to-right and y top-to-bottom.
+Return plot_bounds=null if its edges cannot be identified confidently; in that case every zone
+must have draw_overlay=false and zero coordinates.
+
+Every drawable zone rectangle must be fully inside plot_bounds. Do not extend a rectangle
+into the price scale, toolbar, legend or another panel. If a zone crosses the plot boundary,
+its geometry is ambiguous, or it is too small to locate reliably, set draw_overlay=false and
+all four coordinates to zero. Never clip or invent a box position to make it fit.
+
+Mark only clearly visible chart zones. Set price bounds to null if the scale cannot be read.
+Return at most 8 distinct zones. The text analysis must explain that the overlay is an estimate
+and needs visual verification.
 """
 def build_chart_prediction_metadata(response, requested_model, settings):
     """Capture provider-returned model/time metadata without guessing missing values."""
@@ -156,9 +168,20 @@ CHART_RESPONSE_FORMAT = {
         "schema": {
             "type": "object",
             "additionalProperties": False,
-            "required": ["analysis", "zones"],
+            "required": ["analysis", "plot_bounds", "zones"],
             "properties": {
                 "analysis": {"type": "string"},
+                "plot_bounds": {
+                    "type": ["object", "null"],
+                    "additionalProperties": False,
+                    "required": ["x_start", "x_end", "y_top", "y_bottom"],
+                    "properties": {
+                        "x_start": {"type": "number", "minimum": 0, "maximum": 1},
+                        "x_end": {"type": "number", "minimum": 0, "maximum": 1},
+                        "y_top": {"type": "number", "minimum": 0, "maximum": 1},
+                        "y_bottom": {"type": "number", "minimum": 0, "maximum": 1},
+                    },
+                },
                 "zones": {
                     "type": "array",
                     "maxItems": 8,
@@ -242,6 +265,21 @@ def sanitize_chart_analysis(data: dict) -> dict:
     if not isinstance(zones, list):
         raise ValueError("Chart analysis did not contain a zone list.")
 
+    raw_plot_bounds = data.get("plot_bounds")
+    plot_bounds = None
+    if isinstance(raw_plot_bounds, dict):
+        plot_coordinates = [
+            raw_plot_bounds.get(key)
+            for key in ("x_start", "x_end", "y_top", "y_bottom")
+        ]
+        if all(_is_normalized_coordinate(value) for value in plot_coordinates):
+            px0, px1, py0, py1 = map(float, plot_coordinates)
+            if px1 > px0 and py1 > py0:
+                plot_bounds = {
+                    "x_start": px0, "x_end": px1,
+                    "y_top": py0, "y_bottom": py1,
+                }
+
     safe_zones = []
     for zone in zones[:MAX_CHART_ZONES]:
         if not isinstance(zone, dict):
@@ -269,9 +307,14 @@ def sanitize_chart_analysis(data: dict) -> dict:
         if draw_overlay:
             x_start, x_end, y_top, y_bottom = map(float, raw_coordinates)
             draw_overlay = (
-                x_end > x_start
+                plot_bounds is not None
+                and x_end > x_start
                 and y_bottom > y_top
                 and y_bottom - y_top <= 0.45
+                and x_start >= plot_bounds["x_start"]
+                and x_end <= plot_bounds["x_end"]
+                and y_top >= plot_bounds["y_top"]
+                and y_bottom <= plot_bounds["y_bottom"]
             )
 
         if not draw_overlay:
@@ -291,7 +334,7 @@ def sanitize_chart_analysis(data: dict) -> dict:
             "draw_overlay": draw_overlay,
         })
 
-    return {"analysis": analysis.strip(), "zones": safe_zones}
+    return {"analysis": analysis.strip(), "plot_bounds": plot_bounds, "zones": safe_zones}
 
 
 TOOLS = [
@@ -464,6 +507,7 @@ class ResearchAI:
             "image_detail": "high",
             "response_format": "json_schema:chart_zone_map",
             "conversation_context": CHART_CONTEXT_POLICY,
+            "plot_bounds_policy": "required_for_overlay",
         }
         request_options = {
             "model": self.vision_model,

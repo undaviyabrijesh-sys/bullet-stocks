@@ -108,7 +108,13 @@ async def run_research(
             )
             answer = chart_result.get("analysis") or "I could not read the chart reliably."
             try:
-                overlay_image, drawn_count = render_overlay(image_bytes, chart_result.get("zones", []), validated=True)
+                overlay_image, drawn_count = render_overlay(
+                image_bytes,
+                chart_result.get("zones", []),
+                validated=True,
+                plot_bounds=chart_result.get("plot_bounds"),
+                require_plot_bounds=True,
+            )
             except Exception:
                 overlay_image, drawn_count = None, 0
             if not drawn_count:
