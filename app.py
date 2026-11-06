@@ -929,6 +929,8 @@ def dashboard():
                 trigger = float(item.get("trigger", 0) or 0)
                 ltp = q["ltp"]
                 gap = ((trigger / ltp) - 1) * 100 if ltp else None
+                if gap is None or gap <= 0:
+                    continue
                 near.append({"SYMBOL": symbol, "LTP": ltp, "TRIGGER": trigger,
                              "TO TRIGGER %": gap, "SCORE": item.get("static_score"),
                              "DAY %": q.get("change_pct")})
@@ -957,12 +959,12 @@ def dashboard():
             ltp = q.get("ltp")
             trigger = float(item.get("trigger", 0) or 0)
             distance = ((trigger / ltp) - 1) * 100 if ltp and trigger else None
-            if symbol in already_triggered_symbols:
-                signal = "ALREADY TRIGGERED"
-            elif distance is None:
+            if distance is None:
                 signal = "NO QUOTE"
             elif distance <= 0:
                 signal = "TRIGGER CROSSED"
+            elif symbol in already_triggered_symbols:
+                signal = "ALREADY TRIGGERED"
             elif distance <= 2:
                 signal = "WITHIN 2%"
             elif distance <= 5:
