@@ -9,6 +9,7 @@
    "KRISHANA",
    "NITINSPIN",
    "PHOENIXLTD",
+   "SBC",
    "SHREEPUSHK",
    "SHYAMMETL"
   ]
@@ -56,7 +57,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-06T13:25:00+05:30"
+   "last_processed_bar": "2026-11-06T14:18:00+05:30"
   },
   "KINGFA": {
    "entry": 6733.02,
@@ -78,7 +79,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-06T13:25:00+05:30"
+   "last_processed_bar": "2026-11-06T14:18:00+05:30"
   },
   "SONACOMS": {
    "entry": 853.74,
@@ -100,7 +101,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-06T13:25:00+05:30"
+   "last_processed_bar": "2026-11-06T14:18:00+05:30"
   },
   "KRISHANA": {
    "entry": 234.6,
@@ -122,7 +123,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-06T13:25:00+05:30"
+   "last_processed_bar": "2026-11-06T14:18:00+05:30"
   },
   "SHREEPUSHK": {
    "entry": 635.7999877929688,
@@ -144,7 +145,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-06T13:25:00+05:30"
+   "last_processed_bar": "2026-11-06T14:18:00+05:30"
   },
   "NITINSPIN": {
    "entry": 690.25,
@@ -166,7 +167,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-06T13:25:00+05:30"
+   "last_processed_bar": "2026-11-06T14:18:00+05:30"
   },
   "PHOENIXLTD": {
    "entry": 2044.0,
@@ -187,7 +188,7 @@
    "trailing": false,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-06T13:25:00+05:30"
+   "last_processed_bar": "2026-11-06T14:18:00+05:30"
   },
   "ADANIPORTS": {
    "entry": 1915.0,
@@ -208,7 +209,7 @@
    "trailing": false,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-06T13:25:00+05:30"
+   "last_processed_bar": "2026-11-06T14:18:00+05:30"
   },
   "DIVISLAB": {
    "entry": 10074.5,
@@ -231,7 +232,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-06T13:25:00+05:30"
+   "last_processed_bar": "2026-11-06T14:18:00+05:30"
   },
   "ANANDRATHI": {
    "entry": 2347.0,
@@ -254,7 +255,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-06T13:25:00+05:30"
+   "last_processed_bar": "2026-11-06T14:18:00+05:30"
   },
   "ETERNAL": {
    "entry": 354.20001220703125,
@@ -277,7 +278,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-06T13:25:00+05:30"
+   "last_processed_bar": "2026-11-06T14:18:00+05:30"
   },
   "SHYAMMETL": {
    "entry": 1274.5999755859375,
@@ -300,7 +301,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-06T13:25:00+05:30"
+   "last_processed_bar": "2026-11-06T14:18:00+05:30"
   },
   "KOTAKBANK": {
    "entry": 473.75,
@@ -323,7 +324,30 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-06T13:25:00+05:30"
+   "last_processed_bar": "2026-11-06T14:18:00+05:30"
+  },
+  "SBC": {
+   "entry": 68.72000122070312,
+   "initial_sl": 51.540000915527344,
+   "sl": 51.540000915527344,
+   "level": 67.25,
+   "opened": "2026-11-06T14:20:15+05:30",
+   "setup_month": "Oct'26",
+   "monthly_sma20": 30.324500274658202,
+   "monthly_sma10": 41.42900047302246,
+   "t1": 85.9000015258789,
+   "t2": 96.20800170898437,
+   "t3": 103.08000183105469,
+   "t4": 137.44000244140625,
+   "strategy_version": 3,
+   "t1_done": false,
+   "t2_done": false,
+   "t3_done": false,
+   "trailing": false,
+   "trail_activation_date": null,
+   "remaining_fraction": 1.0,
+   "realised_pnl_fraction": 0.0,
+   "last_processed_bar": "2026-11-06T14:20:15+05:30"
   }
  },
  "closed": [
