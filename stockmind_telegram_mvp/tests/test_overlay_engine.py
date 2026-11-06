@@ -109,6 +109,34 @@ class OverlayRendererTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertEqual(count, 0)
 
+    def test_pillow_rectangle_uses_half_open_pixel_bounds(self):
+        zones = [
+            {
+                "zone_type": "demand", "draw_overlay": True,
+                "x_start": 0.2, "x_end": 0.4,
+                "y_top": 0.2, "y_bottom": 0.4,
+            },
+            {
+                "zone_type": "supply", "draw_overlay": True,
+                "x_start": 0.0, "x_end": 1.0,
+                "y_top": 0.0, "y_bottom": 0.45,
+            },
+        ]
+
+        with patch.object(
+            overlay_engine.ImageDraw.ImageDraw, "rectangle", autospec=True
+        ) as draw_rectangle:
+            _, count = render_overlay(sample_image(), zones)
+
+        self.assertEqual(count, 2)
+        self.assertEqual(
+            [call.args[1] for call in draw_rectangle.call_args_list],
+            [
+                (128, 72, 255, 143),
+                (0, 0, 639, 161),
+            ],
+        )
+
     def test_renderer_pixel_geometry_is_shared_and_rejects_subminimum_boxes(self):
         zone = {
             "zone_type": "demand",
