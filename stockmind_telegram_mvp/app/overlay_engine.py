@@ -14,10 +14,11 @@ SUPPORTED_IMAGE_MIME_TYPES = {
 
 
 def validate_chart_image(image_bytes: bytes) -> str:
-    """Validate an uploaded static chart image and return its detected MIME type.
+    """Fully decode and integrity-check a static chart image before any AI request.
 
     The declared Telegram MIME type is not trusted: the encoded file format is
-    inspected before any bytes are sent to the vision provider.
+    inspected, every pixel is decoded, and the container integrity check is run
+    on a fresh decoder before the bytes are sent to the vision provider.
     """
     if not isinstance(image_bytes, bytes) or not image_bytes:
         raise ValueError("Please send a non-empty JPEG, PNG or WEBP chart image.")
@@ -37,7 +38,16 @@ def validate_chart_image(image_bytes: bytes) -> str:
                     )
                 if frame_count != 1:
                     raise ValueError("Animated images are not supported. Please send a single chart frame.")
-                image.verify()
+                # Image.verify() checks file structure but does not fully decode
+                # pixel data. In particular, a truncated JPEG can pass verify().
+                # Force the decoder to read every pixel before spending vision tokens.
+                image.load()
+
+            # verify() must run on a fresh Image object (Pillow invalidates the
+            # decoder after load()). Keep both checks so pixel truncation and
+            # malformed container structure are rejected before the API call.
+            with Image.open(BytesIO(image_bytes)) as verification_image:
+                verification_image.verify()
     except ValueError:
         raise
     except (
