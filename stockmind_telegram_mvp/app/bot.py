@@ -1,16 +1,18 @@
 import asyncio
+import logging
 from collections import defaultdict, deque
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
-from aiogram.types import BufferedInputFile, Message
+from aiogram.types import Message
 
 from .ai import ResearchAI
 from .crypto import BinanceMarketData
 from .overlay_engine import render_overlay, validate_chart_image
 from .image_upload import BoundedBytesIO, UploadTooLargeError
+from .telegram_delivery import send_overlay_photo
 from .config import (
     BETA_USER_LIMIT,
     DAILY_QUERY_LIMIT,
@@ -23,6 +25,8 @@ from .config import (
     TELEGRAM_BOT_TOKEN,
 )
 from .tapetide import TapetideClient
+
+logger = logging.getLogger(__name__)
 
 IST = ZoneInfo("Asia/Kolkata")
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
@@ -128,17 +132,29 @@ async def run_research(
         histories[user_id].append({"role": "user", "content": history_text})
         histories[user_id].append({"role": "assistant", "content": answer})
         await status.edit_text(answer[:4000])
-        if overlay_image is not None:
-            await message.answer_photo(
-                BufferedInputFile(overlay_image, filename="stockmind-chart-zones.jpg"),
-                caption="StockMind AI visual zone overlay — estimated from this screenshot; verify against the chart price scale.",
-            )
     except Exception:
+        logger.exception("StockMind research request failed")
         await status.edit_text(
             "I couldn't complete this analysis right now. For screenshots, check that "
             "OPENAI_VISION_MODEL is set to a vision-capable model and try again. "
             "No missing price level or market figure has been guessed."
         )
+        return
+
+    # Deliver the overlay after the written analysis has been committed to chat.
+    # A Telegram photo-send failure must not turn a successful AI analysis into
+    # a failed research response or overwrite the user's readable answer.
+    if overlay_image is not None:
+        delivered = await send_overlay_photo(
+            message,
+            overlay_image,
+            caption=(
+                "StockMind AI visual zone overlay — estimated from this screenshot; "
+                "verify against the chart price scale."
+            ),
+        )
+        if not delivered:
+            logger.warning("Chart analysis succeeded, but Telegram overlay delivery failed")
 
 
 @dp.message(CommandStart())
