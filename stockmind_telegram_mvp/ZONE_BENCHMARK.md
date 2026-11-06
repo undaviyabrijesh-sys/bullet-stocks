@@ -36,6 +36,7 @@ Every fixture must include an `annotation_metadata` object. Only annotations tha
 - Keep the original screenshot unchanged and record its SHA-256, width and height.
 - Mark each visible reference zone as supply or demand.
 - Express each rectangle relative to the full screenshot: x_start, x_end, y_top and y_bottom are normalized to 0..1.
+- When `reference_plot_bounds` or `price_axis_plot_bounds` is supplied, every manual reference zone must fit completely inside that independently reviewed main price-plot rectangle after pixel rounding. If a zone is clipped by the screenshot edge, annotate only its visible portion; do not extrapolate it beyond the plot. The evaluator rejects manual zones outside the supplied plot so off-panel annotations cannot silently distort precision/recall.
 - Use the same full-image coordinate frame for the AI prediction and manual annotation. Do not crop one side or score against a different screenshot.
 - Keep no more than eight reference zones, matching the current overlay cap.
 - Do not infer unreadable price values. Geometry-only fixtures need no price-axis data.

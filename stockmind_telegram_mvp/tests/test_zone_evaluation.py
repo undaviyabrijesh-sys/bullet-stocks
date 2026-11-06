@@ -309,6 +309,45 @@ class ZoneEvaluationTests(unittest.TestCase):
                 },
             )
 
+    def test_manual_reference_zones_outside_reference_plot_are_rejected(self):
+        outside_zones = (
+            zone(x_start=0.05),
+            zone(x_end=0.95),
+            zone(y_top=0.05),
+            zone(y_bottom=0.95),
+        )
+        for reference in outside_zones:
+            with self.subTest(reference=reference):
+                with self.assertRaisesRegex(
+                    ValueError, "falls outside the manually marked main price plot"
+                ):
+                    evaluate(
+                        [prediction()],
+                        [reference],
+                        reference_plot_bounds=PLOT_BOUNDS,
+                    )
+
+    def test_manual_reference_zone_touching_plot_edge_is_allowed(self):
+        edge_zone = zone(x_start=PLOT_BOUNDS["x_start"])
+        result = evaluate(
+            [prediction(x_start=PLOT_BOUNDS["x_start"])],
+            [edge_zone],
+            reference_plot_bounds=PLOT_BOUNDS,
+            predicted_plot_bounds=PLOT_BOUNDS,
+        )
+        self.assertEqual(result["overall"]["true_positive"], 1)
+
+    def test_price_axis_plot_also_constrains_manual_reference_zones(self):
+        with self.assertRaisesRegex(
+            ValueError, "falls outside the manually marked main price plot"
+        ):
+            evaluate(
+                [prediction()],
+                [zone(x_start=0.05)],
+                price_axis_anchors=AXIS_ANCHORS,
+                price_axis_plot_bounds=PLOT_BOUNDS,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

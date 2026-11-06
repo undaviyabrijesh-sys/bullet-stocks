@@ -185,7 +185,8 @@ def evaluate_zone_predictions(
 
     Predictions without draw_overlay=True or with invalid geometry are counted
     as ignored (not as drawn false positives). Invalid manual reference
-    annotations raise ValueError so a broken fixture cannot silently skew scores.
+    annotations, including zones outside a supplied manual plot boundary, raise
+    ValueError so a broken fixture cannot silently skew scores.
     Only the first eight predictions are considered because the overlay renderer
     draws at most eight. image_width and image_height must be the original
     screenshot dimensions; predictions too small to pass the renderer's pixel
@@ -274,6 +275,12 @@ def evaluate_zone_predictions(
             "index": index,
             "zone_type": zone["zone_type"],
             "box": box,
+            "box_px": [
+                round(box[0] * image_width),
+                round(box[1] * image_height),
+                round(box[2] * image_width),
+                round(box[3] * image_height),
+            ],
             "zone": pixel_aligned_zone,
         })
 
@@ -282,14 +289,37 @@ def evaluate_zone_predictions(
         reference_plot_bounds = price_axis_plot_bounds
     if predicted_plot_bounds is not None and reference_plot_bounds is None:
         raise ValueError("reference_plot_bounds is required with predicted_plot_bounds")
-    if reference_plot_bounds is not None and price_axis_plot_bounds is not None:
-        reference_box = normalized_plot_bounds_to_pixel_box(
+    reference_plot_box = None
+    if reference_plot_bounds is not None:
+        reference_plot_box = normalized_plot_bounds_to_pixel_box(
             reference_plot_bounds, image_width, image_height
         )
+        if reference_plot_box is None:
+            raise ValueError(
+                "reference_plot_bounds must be a valid normalized plot rectangle"
+            )
+
+        # Manual reference zones are ground truth for the main price chart.
+        # Reject annotations outside that independently reviewed plot instead
+        # of allowing off-panel rectangles to distort precision/recall.
+        for zone in valid_references:
+            left, top, right, bottom = zone["box_px"]
+            if (
+                left < reference_plot_box[0]
+                or top < reference_plot_box[1]
+                or right > reference_plot_box[2]
+                or bottom > reference_plot_box[3]
+            ):
+                raise ValueError(
+                    "manual reference zone at index "
+                    f"{zone['index']} falls outside the manually marked main price plot"
+                )
+
+    if reference_plot_bounds is not None and price_axis_plot_bounds is not None:
         axis_box = normalized_plot_bounds_to_pixel_box(
             price_axis_plot_bounds, image_width, image_height
         )
-        if reference_box is None or reference_box != axis_box:
+        if reference_plot_box != axis_box:
             raise ValueError(
                 "reference_plot_bounds must match price_axis_plot_bounds when both are supplied"
             )
