@@ -42,7 +42,7 @@ Every fixture must include an `annotation_metadata` object. Only annotations tha
 - For price-level scoring, manually record at least three legible price-axis anchors from the same screenshot. Each anchor is an object with y normalized to the full screenshot and a positive numeric price. Record anchors at distinct vertical positions and in top-to-bottom order with descending prices.
 - Choose linear for a standard arithmetic price axis or log for a logarithmic axis. Do not use the logarithmic option merely because price values are large.
 
-A fixture record should contain a stable fixture_id, image_file, image_sha256, image_width, image_height, reference_zones, predicted_zones, prediction_metadata and approved annotation_metadata. The image_file must be a relative path contained within the manifest directory. Each reference zone needs zone_type and the four normalized coordinates. Predicted zones should be the structured AI zones, including draw_overlay. Optional price_axis_anchors and price_axis_scale fields enable price-unit scoring. Additional descriptive metadata fields may be included.
+A fixture record should contain a stable fixture_id, image_file, image_sha256, image_width, image_height, reference_zones, predicted_zones, prediction_metadata and approved annotation_metadata. The image_file must be a relative path contained within the manifest directory. Optional `market_context` can record `asset_class`, `symbol`, `exchange` and `timeframe` as non-empty strings; omitted dimensions are reported in a `null` group rather than silently excluded. Each reference zone needs zone_type and the four normalized coordinates. Predicted zones should be the structured AI zones, including draw_overlay. Optional price_axis_anchors and price_axis_scale fields enable price-unit scoring. Additional descriptive metadata fields may be included.
 
 ## Geometry scoring
 
@@ -95,6 +95,12 @@ Create a UTF-8 JSONL file with one fixture object per line. The following is the
       "draw_overlay": true
     }
   ],
+  "market_context": {
+    "asset_class": "crypto",
+    "symbol": "BTCUSDT",
+    "exchange": "binance",
+    "timeframe": "1h"
+  },
   "annotation_metadata": {
     "source": "manual",
     "annotator_id": "ann-001",
@@ -129,7 +135,7 @@ python -m stockmind_telegram_mvp.app.zone_benchmark stockmind_telegram_mvp/bench
 python -m stockmind_telegram_mvp.app.zone_benchmark stockmind_telegram_mvp/benchmark/fixtures.jsonl --max-image-bytes 10485760
 ~~~
 
-The JSON report is written to standard output and can be redirected to a versioned report file. A missing/empty manifest, malformed record, missing/invalid provenance, mixed prediction profiles, mixed annotation guideline versions, missing or unapproved annotation provenance, hash mismatch, changed dimensions, unsupported image or invalid manual annotation fails the run instead of emitting misleading aggregate metrics. The runner performs no AI request; predictions must be captured separately and paired with the exact source screenshot.
+The JSON report is written to standard output and can be redirected to a versioned report file. In addition to overall and supply/demand metrics, it includes micro-aggregated breakdowns by asset class, symbol, exchange and timeframe. Missing context is retained as a `null` group so incomplete metadata is visible. Price-boundary errors are also aggregated within each context group when calibrated fixtures are available. A missing/empty manifest, malformed record, missing/invalid provenance, invalid market context, mixed prediction profiles, mixed annotation guideline versions, missing or unapproved annotation provenance, hash mismatch, changed dimensions, unsupported image or invalid manual annotation fails the run instead of emitting misleading aggregate metrics. The runner performs no AI request; predictions must be captured separately and paired with the exact source screenshot.
 
 Aggregate precision/recall/F1 are micro-averaged from total TP/FP/FN counts. Mean IoU and center displacement are averaged across matched zones, not across screenshots. Price errors are averaged across scored zone boundaries; zones outside the calibrated y-range are counted as unscored rather than extrapolated.
 

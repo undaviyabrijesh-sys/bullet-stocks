@@ -34,6 +34,7 @@ _ANNOTATOR_ID_RE = re.compile(r"^ann-[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 _REVIEWER_ID_RE = re.compile(r"^rev-[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 _GUIDELINE_VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024
+_MARKET_CONTEXT_FIELDS = ("asset_class", "symbol", "exchange", "timeframe")
 
 
 def _positive_integer(value, field):
@@ -274,6 +275,30 @@ def _load_and_verify_image(record, manifest_dir, line_number, max_image_bytes):
     return actual_hash.lower()
 
 
+def _validate_market_context(context, line_number, fixture_id):
+    """Validate optional chart identity fields used for stratified metrics."""
+    prefix = f"line {line_number} ({fixture_id}): market_context"
+    if context is None:
+        context = {}
+    if not isinstance(context, dict):
+        raise ValueError(f"{prefix} must be a JSON object")
+
+    extra = sorted(set(context) - set(_MARKET_CONTEXT_FIELDS))
+    if extra:
+        raise ValueError(f"{prefix} contains unsupported fields: {', '.join(extra)}")
+
+    normalized = {}
+    for field in _MARKET_CONTEXT_FIELDS:
+        value = context.get(field)
+        if value is None:
+            normalized[field] = None
+        elif not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{prefix}.{field} must be a non-empty string or null")
+        else:
+            normalized[field] = value.strip()
+    return normalized
+
+
 def _validate_record(record, manifest_dir, line_number, max_image_bytes):
     if not isinstance(record, dict):
         raise ValueError(f"line {line_number}: each fixture record must be a JSON object")
@@ -289,6 +314,9 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
     )
     annotation_metadata = _validate_annotation_metadata(
         record["annotation_metadata"], line_number, fixture_id
+    )
+    market_context = _validate_market_context(
+        record.get("market_context"), line_number, fixture_id
     )
     image_hash = _load_and_verify_image(record, manifest_dir, line_number, max_image_bytes)
 
@@ -324,6 +352,7 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
         "image_sha256": image_hash,
         "prediction_metadata": prediction_metadata,
         "annotation_metadata": annotation_metadata,
+        "market_context": market_context,
         "_prediction_profile": prediction_profile,
         "_prediction_profile_sha256": prediction_profile_sha256,
         "overall": result["overall"],
@@ -396,6 +425,33 @@ def _aggregate_price_accuracy(fixtures):
             sum(percentage_errors) / len(percentage_errors) if percentage_errors else None
         ),
     }
+
+
+def _aggregate_by_context(fixtures, field):
+    """Return micro-aggregated metrics grouped by one chart-context dimension.
+
+    Missing context is retained as a null group rather than silently dropped.
+    """
+    groups = {}
+    for fixture in fixtures:
+        value = fixture["market_context"][field]
+        groups.setdefault(value, []).append(fixture)
+
+    ordered_groups = sorted(
+        groups.items(),
+        key=lambda item: (item[0] is not None, (item[0] or "").casefold()),
+    )
+    output = []
+    for value, group in ordered_groups:
+        matches = [match for fixture in group for match in fixture["matches"]]
+        rows = [fixture["overall"] for fixture in group]
+        output.append({
+            "value": value,
+            "fixture_count": len(group),
+            "metrics": _aggregate_metrics(rows, matches),
+            "price_accuracy": _aggregate_price_accuracy(group),
+        })
+    return output
 
 
 def evaluate_benchmark_manifest(manifest_path, *, max_image_bytes=DEFAULT_MAX_IMAGE_BYTES):
@@ -477,6 +533,10 @@ def evaluate_benchmark_manifest(manifest_path, *, max_image_bytes=DEFAULT_MAX_IM
         ),
         "overall": _aggregate_metrics(overall_rows, all_matches),
         "by_zone_type": by_zone_type,
+        "by_asset_class": _aggregate_by_context(fixtures, "asset_class"),
+        "by_symbol": _aggregate_by_context(fixtures, "symbol"),
+        "by_exchange": _aggregate_by_context(fixtures, "exchange"),
+        "by_timeframe": _aggregate_by_context(fixtures, "timeframe"),
         "price_accuracy": _aggregate_price_accuracy(fixtures),
         "fixtures": fixtures,
     }

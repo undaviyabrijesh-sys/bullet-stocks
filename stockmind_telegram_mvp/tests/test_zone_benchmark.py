@@ -61,6 +61,17 @@ def _annotation_metadata(**overrides):
     return value
 
 
+def _market_context(**overrides):
+    value = {
+        "asset_class": "crypto",
+        "symbol": "BTCUSDT",
+        "exchange": "binance",
+        "timeframe": "1h",
+    }
+    value.update(overrides)
+    return value
+
+
 def _prediction(zone_type="demand", **overrides):
     value = _zone(zone_type, **overrides)
     value["draw_overlay"] = True
@@ -286,6 +297,58 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "annotation_metadata"):
             evaluate_benchmark_manifest(self.manifest)
+
+    def test_aggregates_metrics_by_asset_symbol_exchange_and_timeframe(self):
+        self._write(
+            self._record("btc-exact", market_context=_market_context()),
+            self._record(
+                "nifty-missed",
+                predicted_zones=[],
+                market_context=_market_context(
+                    asset_class="index", symbol="NIFTY", exchange="nse",
+                    timeframe="15m"
+                ),
+            ),
+        )
+
+        result = evaluate_benchmark_manifest(self.manifest)
+
+        symbols = {item["value"]: item for item in result["by_symbol"]}
+        self.assertEqual(symbols["BTCUSDT"]["fixture_count"], 1)
+        self.assertEqual(symbols["BTCUSDT"]["metrics"]["recall"], 1.0)
+        self.assertEqual(symbols["NIFTY"]["metrics"]["recall"], 0.0)
+        self.assertEqual(
+            {item["value"] for item in result["by_asset_class"]},
+            {"crypto", "index"},
+        )
+        self.assertEqual(
+            {item["value"] for item in result["by_exchange"]},
+            {"binance", "nse"},
+        )
+        self.assertEqual(
+            {item["value"] for item in result["by_timeframe"]},
+            {"1h", "15m"},
+        )
+
+    def test_missing_market_context_is_kept_in_null_group(self):
+        self._write(self._record())
+
+        result = evaluate_benchmark_manifest(self.manifest)
+
+        self.assertIsNone(result["by_symbol"][0]["value"])
+        self.assertEqual(result["by_symbol"][0]["fixture_count"], 1)
+
+    def test_rejects_invalid_market_context_shape_and_values(self):
+        cases = (
+            ([], "must be a JSON object"),
+            ({"symbol": 42}, "symbol must be a non-empty string or null"),
+            ({"symbol": "BTC", "account_id": "private"}, "unsupported fields"),
+        )
+        for context, expected in cases:
+            with self.subTest(context=context):
+                self._write(self._record(market_context=context))
+                with self.assertRaisesRegex(ValueError, expected):
+                    evaluate_benchmark_manifest(self.manifest)
 
     def test_price_axis_metrics_are_aggregated_without_inventing_missing_values(self):
         self._write(
