@@ -12,7 +12,7 @@ from .ai import ResearchAI
 from .crypto import BinanceMarketData
 from .overlay_engine import render_overlay, validate_chart_image
 from .image_upload import BoundedBytesIO, UploadTooLargeError
-from .telegram_delivery import send_overlay_photo
+from .telegram_delivery import send_analysis_text, send_overlay_photo
 from .config import (
     BETA_USER_LIMIT,
     DAILY_QUERY_LIMIT,
@@ -99,11 +99,16 @@ async def run_research(
         return
 
     usage[user_id] += 1
-    status = await message.answer(
-        "🖼️ Reading the chart and mapping visible structure…"
-        if image_bytes is not None
-        else "🔎 Understanding your question and checking market data…"
-    )
+    try:
+        status = await message.answer(
+            "🖼️ Reading the chart and mapping visible structure…"
+            if image_bytes is not None
+            else "🔎 Understanding your question and checking market data…"
+        )
+    except Exception:
+        # A progress-message failure should not prevent the research itself.
+        logger.exception("Could not send StockMind progress status")
+        status = None
     try:
         overlay_image = None
         if image_bytes is not None:
@@ -131,15 +136,19 @@ async def run_research(
             history_text += "\n[Chart screenshot attached; visual analysis was performed.]"
         histories[user_id].append({"role": "user", "content": history_text})
         histories[user_id].append({"role": "assistant", "content": answer})
-        await status.edit_text(answer[:4000])
     except Exception:
         logger.exception("StockMind research request failed")
-        await status.edit_text(
+        failure_message = (
             "I couldn't complete this analysis right now. For screenshots, check that "
             "OPENAI_VISION_MODEL is set to a vision-capable model and try again. "
             "No missing price level or market figure has been guessed."
         )
+        if not await send_analysis_text(message, status, failure_message):
+            logger.warning("StockMind research failed and Telegram could not deliver the error message")
         return
+
+    if not await send_analysis_text(message, status, answer[:4000]):
+        logger.warning("StockMind analysis succeeded, but Telegram text delivery failed")
 
     # Deliver the overlay after the written analysis has been committed to chat.
     # A Telegram photo-send failure must not turn a successful AI analysis into
