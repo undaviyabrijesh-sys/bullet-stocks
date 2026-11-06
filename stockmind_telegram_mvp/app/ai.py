@@ -3,7 +3,11 @@ import hashlib
 import json
 import math
 from datetime import datetime, timezone
+
+import httpx
 from openai import AsyncOpenAI
+
+from .tapetide import TapetideAPIError
 
 SYSTEM_PROMPT = """
 You are StockMind AI, a multilingual market research assistant for Indian equities and crypto.
@@ -242,6 +246,34 @@ def _parse_tool_arguments(raw_arguments) -> dict:
     if not isinstance(arguments, dict):
         raise ValueError("Tool arguments must be a JSON object.")
     return arguments
+
+
+def _tool_error_payload(exc: Exception) -> dict:
+    """Return bounded, credential-safe errors for the model's tool-recovery turn."""
+    if isinstance(exc, TapetideAPIError):
+        return {
+            "error": "Tapetide rejected the market-data request.",
+            "type": "TapetideAPIError",
+            "code": exc.code,
+            "status_code": exc.status_code,
+        }
+    if isinstance(exc, httpx.TimeoutException):
+        return {"error": "The market-data provider timed out.", "type": "ProviderTimeout"}
+    if isinstance(exc, httpx.HTTPStatusError):
+        status_code = exc.response.status_code if exc.response is not None else None
+        return {
+            "error": "The market-data provider returned an HTTP error.",
+            "type": "ProviderHTTPError",
+            "status_code": status_code,
+        }
+    if isinstance(exc, httpx.RequestError):
+        return {"error": "The market-data provider could not be reached.", "type": "ProviderConnectionError"}
+    if isinstance(exc, (ValueError, TypeError, KeyError)):
+        return {"error": str(exc)[:240], "type": type(exc).__name__}
+    return {
+        "error": "The market-data tool failed unexpectedly. Treat its data as unavailable and do not infer missing values.",
+        "type": "ToolExecutionError",
+    }
 
 
 def _is_normalized_coordinate(value) -> bool:
@@ -598,7 +630,7 @@ class ResearchAI:
                         else:
                             result = {"error": "Unsupported tool"}
                     except Exception as exc:
-                        result = {"error": str(exc), "type": type(exc).__name__}
+                        result = _tool_error_payload(exc)
 
                 messages.append(
                     {
