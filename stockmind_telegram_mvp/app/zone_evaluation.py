@@ -277,6 +277,57 @@ def evaluate_zone_predictions(
             "zone": pixel_aligned_zone,
         })
 
+    # Resolve the independently reviewed main plot before scoring overlays.
+    if reference_plot_bounds is None and price_axis_plot_bounds is not None:
+        reference_plot_bounds = price_axis_plot_bounds
+    if predicted_plot_bounds is not None and reference_plot_bounds is None:
+        raise ValueError("reference_plot_bounds is required with predicted_plot_bounds")
+    if reference_plot_bounds is not None and price_axis_plot_bounds is not None:
+        reference_box = normalized_plot_bounds_to_pixel_box(
+            reference_plot_bounds, image_width, image_height
+        )
+        axis_box = normalized_plot_bounds_to_pixel_box(
+            price_axis_plot_bounds, image_width, image_height
+        )
+        if reference_box is None or reference_box != axis_box:
+            raise ValueError(
+                "reference_plot_bounds must match price_axis_plot_bounds when both are supplied"
+            )
+
+    plot_boundary_accuracy = None
+    if reference_plot_bounds is not None:
+        # Production rendering requires a valid model plot frame and rejects
+        # any zone not fully contained by that frame. Benchmark zone metrics
+        # must score the same drawable set, not raw boxes the renderer skips.
+        predicted_plot_box = normalized_plot_bounds_to_pixel_box(
+            predicted_plot_bounds, image_width, image_height
+        )
+        drawable_predictions = []
+        for zone in valid_predictions:
+            left, top, right, bottom = zone["box_px"]
+            if (
+                predicted_plot_box is None
+                or left < predicted_plot_box[0]
+                or top < predicted_plot_box[1]
+                or right > predicted_plot_box[2]
+                or bottom > predicted_plot_box[3]
+            ):
+                ignored_predictions += 1
+                continue
+            drawable_predictions.append(zone)
+        valid_predictions = drawable_predictions
+
+        plot_boundary_accuracy = build_plot_boundary_accuracy(
+            reference_plot_bounds,
+            predicted_plot_bounds,
+            [
+                {"prediction_index": zone["index"], "box_px": zone["box_px"]}
+                for zone in valid_predictions
+            ],
+            image_width,
+            image_height,
+        )
+
     by_type = {}
     all_matches = []
     for zone_type in ("supply", "demand"):
@@ -305,34 +356,6 @@ def evaluate_zone_predictions(
         by_type[zone_type] = _metrics(predictions, references, matches)
 
     overall = _metrics(valid_predictions, valid_references, all_matches)
-
-    if reference_plot_bounds is None and price_axis_plot_bounds is not None:
-        reference_plot_bounds = price_axis_plot_bounds
-    if predicted_plot_bounds is not None and reference_plot_bounds is None:
-        raise ValueError("reference_plot_bounds is required with predicted_plot_bounds")
-    if reference_plot_bounds is not None and price_axis_plot_bounds is not None:
-        reference_box = normalized_plot_bounds_to_pixel_box(
-            reference_plot_bounds, image_width, image_height
-        )
-        axis_box = normalized_plot_bounds_to_pixel_box(
-            price_axis_plot_bounds, image_width, image_height
-        )
-        if reference_box is None or reference_box != axis_box:
-            raise ValueError(
-                "reference_plot_bounds must match price_axis_plot_bounds when both are supplied"
-            )
-    plot_boundary_accuracy = None
-    if reference_plot_bounds is not None:
-        plot_boundary_accuracy = build_plot_boundary_accuracy(
-            reference_plot_bounds,
-            predicted_plot_bounds,
-            [
-                {"prediction_index": zone["index"], "box_px": zone["box_px"]}
-                for zone in valid_predictions
-            ],
-            image_width,
-            image_height,
-        )
 
     return {
         "iou_threshold": iou_threshold,

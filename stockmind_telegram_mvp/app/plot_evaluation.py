@@ -101,6 +101,23 @@ def build_plot_boundary_accuracy(
         normalized_zone_boxes.append({"prediction_index": index, "box_px": box})
     normalized_zone_boxes.sort(key=lambda item: item["prediction_index"])
 
+    # This evidence represents boxes the production renderer actually draws:
+    # every zone must fit within the model's valid plot frame.
+    if normalized_zone_boxes:
+        if predicted_box is None:
+            raise ValueError("drawable zone boxes require valid predicted plot bounds")
+        for item in normalized_zone_boxes:
+            left, top, right, bottom = item["box_px"]
+            if (
+                left < predicted_box[0]
+                or top < predicted_box[1]
+                or right > predicted_box[2]
+                or bottom > predicted_box[3]
+            ):
+                raise ValueError(
+                    "zone_boxes_px contains a zone outside predicted plot bounds"
+                )
+
     reference_area = _area(reference_box)
     plot_iou = None
     edge_px = None

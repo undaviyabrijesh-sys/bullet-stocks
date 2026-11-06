@@ -156,6 +156,7 @@ class ZoneEvaluationTests(unittest.TestCase):
             [zone()],
             price_axis_anchors=AXIS_ANCHORS,
             price_axis_plot_bounds=PLOT_BOUNDS,
+            predicted_plot_bounds=PLOT_BOUNDS,
         )
         self.assertEqual(result["overall"]["true_positive"], 1)
         self.assertGreater(result["overall"]["mean_iou"], 0.8)
@@ -173,6 +174,7 @@ class ZoneEvaluationTests(unittest.TestCase):
             [zone(y_top=0.2, y_bottom=0.4)],
             price_axis_anchors=AXIS_ANCHORS,
             price_axis_plot_bounds=PLOT_BOUNDS,
+            predicted_plot_bounds=PLOT_BOUNDS,
         )
         self.assertEqual(result["overall"]["true_positive"], 1)
         self.assertEqual(result["price_accuracy"]["scored_match_count"], 0)
@@ -195,6 +197,7 @@ class ZoneEvaluationTests(unittest.TestCase):
                     {"y": 0.8, "price": 60},
                 ],
                 price_axis_plot_bounds=PLOT_BOUNDS,
+            predicted_plot_bounds=PLOT_BOUNDS,
             )
 
     def test_plot_bounds_without_price_anchors_are_rejected(self):
@@ -212,6 +215,7 @@ class ZoneEvaluationTests(unittest.TestCase):
                     {"y": 0.9, "price": 20},
                 ],
                 price_axis_plot_bounds=PLOT_BOUNDS,
+            predicted_plot_bounds=PLOT_BOUNDS,
             )
 
     def test_plot_boundary_metrics_measure_edges_and_zone_spill(self):
@@ -220,7 +224,7 @@ class ZoneEvaluationTests(unittest.TestCase):
             [zone()],
             reference_plot_bounds=PLOT_BOUNDS,
             predicted_plot_bounds={
-                "x_start": 0.1, "x_end": 0.95, "y_top": 0.1, "y_bottom": 0.95
+                "x_start": 0.04, "x_end": 0.96, "y_top": 0.08, "y_bottom": 0.96
             },
         )
         accuracy = result["plot_boundary_accuracy"]
@@ -251,22 +255,45 @@ class ZoneEvaluationTests(unittest.TestCase):
         self.assertEqual(accuracy["zones_outside_reference_plot_count"], 0)
 
     def test_missing_and_invalid_plot_estimates_are_not_scored_as_perfect(self):
-        missing = evaluate(
+        missing_result = evaluate(
             [prediction()], [zone()], reference_plot_bounds=PLOT_BOUNDS
-        )["plot_boundary_accuracy"]
+        )
+        missing = missing_result["plot_boundary_accuracy"]
         self.assertEqual(missing["status"], "missing_prediction")
         self.assertIsNone(missing["plot_iou"])
+        self.assertEqual(missing_result["ignored_prediction_count"], 1)
+        self.assertEqual(missing_result["overall"]["predicted"], 0)
+        self.assertEqual(missing_result["overall"]["false_negative"], 1)
 
-        invalid = evaluate(
+        invalid_result = evaluate(
             [prediction()],
             [zone()],
             reference_plot_bounds=PLOT_BOUNDS,
             predicted_plot_bounds={
                 "x_start": 0.8, "x_end": 0.2, "y_top": 0.1, "y_bottom": 0.9
             },
-        )["plot_boundary_accuracy"]
+        )
+        invalid = invalid_result["plot_boundary_accuracy"]
         self.assertEqual(invalid["status"], "invalid_prediction")
         self.assertIsNone(invalid["plot_iou"])
+        self.assertEqual(invalid_result["ignored_prediction_count"], 1)
+        self.assertEqual(invalid_result["overall"]["predicted"], 0)
+        self.assertEqual(invalid_result["overall"]["false_negative"], 1)
+
+    def test_zone_outside_model_plot_is_ignored_like_production_renderer(self):
+        result = evaluate(
+            [prediction(x_start=0.05, x_end=0.6)],
+            [zone()],
+            reference_plot_bounds=PLOT_BOUNDS,
+            predicted_plot_bounds=PLOT_BOUNDS,
+        )
+        self.assertEqual(result["ignored_prediction_count"], 1)
+        self.assertEqual(result["overall"]["predicted"], 0)
+        self.assertEqual(result["overall"]["false_positive"], 0)
+        self.assertEqual(result["overall"]["false_negative"], 1)
+        self.assertEqual(
+            result["plot_boundary_accuracy"]["predicted_zone_count"], 0
+        )
 
     def test_predicted_plot_requires_independent_manual_reference(self):
         with self.assertRaisesRegex(ValueError, "reference_plot_bounds is required"):

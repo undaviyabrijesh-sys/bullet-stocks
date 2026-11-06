@@ -91,6 +91,20 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         self.assertEqual(result["overall"]["false_negative"]["delta"], 1)
         self.assertEqual(result["by_symbol"][0]["value"], "BTCUSDT")
 
+    def test_rejects_drawn_zone_evidence_outside_model_plot_bounds(self):
+        bounds = {
+            "x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9
+        }
+        report = self._report(
+            "baseline",
+            [{**_zone(), "draw_overlay": True}],
+            reference_plot_bounds=bounds,
+            predicted_plot_bounds=bounds,
+        )
+        report["fixtures"][0]["plot_boundary_accuracy"]["zone_boxes_px"][0]["box_px"][0] = 0
+        with self.assertRaisesRegex(ValueError, "zone_boxes_px contains a zone outside predicted plot bounds"):
+            compare_benchmark_reports(report, report)
+
     def test_rejects_profile_hash_that_does_not_match_profile(self):
         baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
         candidate = self._report("candidate", [])

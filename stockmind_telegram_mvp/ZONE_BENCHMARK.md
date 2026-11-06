@@ -150,6 +150,16 @@ manual reference is rejected. When `price_axis_plot_bounds` is already supplied 
 price-axis calibration, it can serve as the manual plot reference; if both manual
 fields are supplied, they must resolve to the same pixel rectangle.
 
+When a manual plot reference is supplied, DNS scoring mirrors the production
+renderer: a prediction is counted as drawable only when its model-estimated plot
+bounds are valid and the pixel-rounded zone rectangle fits completely inside that
+model plot. If the model plot boundary is missing or invalid, all candidate
+overlays are withheld; if an individual zone crosses the model plot boundary,
+that zone is counted as ignored and its matching manual reference remains a false
+negative. This prevents benchmark precision/recall from crediting rectangles
+that Telegram would never display. The report's pixel evidence is also checked
+against the model plot bounds during paired comparison.
+
 For every fixture with a manual plot reference, the evaluator reports:
 
 - plot-boundary IoU and left/right/top/bottom edge displacement in pixels and normalized units;
