@@ -157,10 +157,10 @@ class ZoneEvaluationTests(unittest.TestCase):
         self.assertGreater(result["overall"]["mean_iou"], 0.8)
         accuracy = result["price_accuracy"]
         self.assertEqual(accuracy["scored_match_count"], 1)
-        self.assertAlmostEqual(accuracy["mean_boundary_abs_error"], 10 / 9)
-        self.assertAlmostEqual(accuracy["mean_boundary_error_pct"], 1.25)
+        self.assertAlmostEqual(accuracy["mean_boundary_abs_error"], 1.0)
+        self.assertAlmostEqual(accuracy["mean_boundary_error_pct"], 1.125)
         comparison = result["matches"][0]["price_comparison"]
-        self.assertAlmostEqual(comparison["predicted_price_bounds"]["price_high"], 98.8888888889)
+        self.assertAlmostEqual(comparison["predicted_price_bounds"]["price_high"], 99)
         self.assertAlmostEqual(comparison["reference_price_bounds"]["price_low"], 80)
 
     def test_price_comparison_is_unscored_instead_of_extrapolating(self):

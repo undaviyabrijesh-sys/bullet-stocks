@@ -81,8 +81,7 @@ def normalized_zone_to_pixel_box(
     """
     if not isinstance(zone, dict):
         return None
-    zone_type = zone.get("zone_type")
-    if not isinstance(zone_type, str) or zone_type not in {"supply", "demand"}:
+    if zone.get("zone_type") not in {"supply", "demand"}:
         return None
     if require_draw_overlay and zone.get("draw_overlay") is not True:
         return None

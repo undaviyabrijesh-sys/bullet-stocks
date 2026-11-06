@@ -27,12 +27,22 @@ def _valid_box(zone, *, prediction, image_width, image_height):
     if pixel_box is None:
         return None
     left, top, right, bottom = pixel_box
-    return (
+    normalized_box = (
         left / image_width,
         top / image_height,
         right / image_width,
         bottom / image_height,
     )
+    # Price-axis scoring must use the same quantized boundaries as the image
+    # renderer, not the model's higher-precision coordinates.
+    pixel_aligned_zone = dict(zone)
+    pixel_aligned_zone.update({
+        "x_start": normalized_box[0],
+        "y_top": normalized_box[1],
+        "x_end": normalized_box[2],
+        "y_bottom": normalized_box[3],
+    })
+    return normalized_box, pixel_aligned_zone
 
 
 def _iou(a, b):
@@ -208,27 +218,29 @@ def evaluate_zone_predictions(
     valid_predictions = []
     ignored_predictions = max(0, len(predicted_zones) - MAX_EVALUATED_ZONES)
     for index, zone in enumerate(predicted_zones[:MAX_EVALUATED_ZONES]):
-        box = _valid_box(zone, prediction=True, image_width=image_width, image_height=image_height)
-        if box is None:
+        validated = _valid_box(zone, prediction=True, image_width=image_width, image_height=image_height)
+        if validated is None:
             ignored_predictions += 1
             continue
+        box, pixel_aligned_zone = validated
         valid_predictions.append({
             "index": index,
             "zone_type": zone["zone_type"],
             "box": box,
-            "zone": zone,
+            "zone": pixel_aligned_zone,
         })
 
     valid_references = []
     for index, zone in enumerate(reference_zones):
-        box = _valid_box(zone, prediction=False, image_width=image_width, image_height=image_height)
-        if box is None:
+        validated = _valid_box(zone, prediction=False, image_width=image_width, image_height=image_height)
+        if validated is None:
             raise ValueError(f"Invalid manual reference zone at index {index}")
+        box, pixel_aligned_zone = validated
         valid_references.append({
             "index": index,
             "zone_type": zone["zone_type"],
             "box": box,
-            "zone": zone,
+            "zone": pixel_aligned_zone,
         })
 
     by_type = {}
