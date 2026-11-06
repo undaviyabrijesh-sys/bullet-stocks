@@ -64,6 +64,59 @@ def _zone_overlay_label(zone: dict, zone_type: str) -> str:
     return label[:32].strip().upper() or fallback
 
 
+def normalized_zone_to_pixel_box(
+    zone: dict,
+    width: int,
+    height: int,
+    *,
+    require_draw_overlay: bool = True,
+    min_width: int = 3,
+    min_height: int = 2,
+) -> tuple[int, int, int, int] | None:
+    """Return the renderer's rounded pixel bounds, or None for undrawable geometry.
+
+    The defaults are the exact production overlay rules. Evaluators may lower
+    the minimum size for manual reference annotations, but predictions must
+    use these defaults so benchmark scores reflect rectangles actually drawn.
+    """
+    if not isinstance(zone, dict):
+        return None
+    if zone.get("zone_type") not in {"supply", "demand"}:
+        return None
+    if require_draw_overlay and zone.get("draw_overlay") is not True:
+        return None
+    if (
+        isinstance(width, bool) or not isinstance(width, int) or width <= 0
+        or isinstance(height, bool) or not isinstance(height, int) or height <= 0
+        or isinstance(min_width, bool) or not isinstance(min_width, int) or min_width < 1
+        or isinstance(min_height, bool) or not isinstance(min_height, int) or min_height < 1
+    ):
+        return None
+
+    raw_coordinates = [
+        zone.get(key) for key in ("x_start", "x_end", "y_top", "y_bottom")
+    ]
+    if any(
+        isinstance(value, bool) or not isinstance(value, (int, float))
+        for value in raw_coordinates
+    ):
+        return None
+    try:
+        x0, x1, y0, y1 = (float(value) for value in raw_coordinates)
+    except (OverflowError, TypeError, ValueError):
+        return None
+    if not all(math.isfinite(value) and 0 <= value <= 1 for value in (x0, x1, y0, y1)):
+        return None
+    if x1 <= x0 or y1 <= y0 or y1 - y0 > 0.45:
+        return None
+
+    left, right = round(x0 * width), round(x1 * width)
+    top, bottom = round(y0 * height), round(y1 * height)
+    if right - left < min_width or bottom - top < min_height:
+        return None
+    return left, top, right, bottom
+
+
 def render_overlay(
     image_bytes: bytes, zones: list[dict], *, validated: bool = False
 ) -> tuple[bytes | None, int]:
@@ -87,30 +140,10 @@ def render_overlay(
         if not isinstance(zone, dict) or zone.get("draw_overlay") is not True:
             continue
         zone_type = zone.get("zone_type")
-        if zone_type not in {"supply", "demand"}:
+        pixel_box = normalized_zone_to_pixel_box(zone, width, height)
+        if pixel_box is None:
             continue
-
-        raw_coordinates = [zone.get(key) for key in ("x_start", "x_end", "y_top", "y_bottom")]
-        if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in raw_coordinates):
-            continue
-        try:
-            coordinates = [float(value) for value in raw_coordinates]
-        except (OverflowError, ValueError):
-            # JSON can contain arbitrarily large integers; skip malformed model
-            # geometry rather than letting float conversion abort the whole render.
-            continue
-        if not all(math.isfinite(value) and 0 <= value <= 1 for value in coordinates):
-            continue
-
-        x0, x1, y0, y1 = coordinates
-        if x1 <= x0 or y1 <= y0 or y1 - y0 > 0.45:
-            continue
-
-        left, right = round(x0 * width), round(x1 * width)
-        top, bottom = round(y0 * height), round(y1 * height)
-        # Avoid rendering sub-pixel or hairline boxes as if they were precise zones.
-        if right - left < 3 or bottom - top < 2:
-            continue
+        left, top, right, bottom = pixel_box
 
         color = (220, 65, 65, 60) if zone_type == "supply" else (30, 170, 100, 60)
         edge = (235, 65, 65, 230) if zone_type == "supply" else (25, 185, 110, 230)

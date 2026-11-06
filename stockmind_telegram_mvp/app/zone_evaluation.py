@@ -7,33 +7,32 @@ Optional price-axis scoring requires manually verified axis anchors.
 from functools import lru_cache
 import math
 
+from .overlay_engine import normalized_zone_to_pixel_box
 from .price_axis import calibrate_price_axis, zone_price_bounds
 
 MAX_EVALUATED_ZONES = 8
 ZONE_TYPES = {"supply", "demand"}
 
 
-def _valid_box(zone, *, prediction):
-    if not isinstance(zone, dict):
+def _valid_box(zone, *, prediction, image_width, image_height):
+    """Return pixel-rounded geometry normalized back to the screenshot frame."""
+    pixel_box = normalized_zone_to_pixel_box(
+        zone,
+        image_width,
+        image_height,
+        require_draw_overlay=prediction,
+        min_width=3 if prediction else 1,
+        min_height=2 if prediction else 1,
+    )
+    if pixel_box is None:
         return None
-    zone_type = zone.get("zone_type")
-    if not isinstance(zone_type, str) or zone_type not in ZONE_TYPES:
-        return None
-    if prediction and zone.get("draw_overlay") is not True:
-        return None
-
-    raw = [zone.get(key) for key in ("x_start", "x_end", "y_top", "y_bottom")]
-    if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in raw):
-        return None
-    try:
-        x0, x1, y0, y1 = (float(value) for value in raw)
-    except (OverflowError, TypeError, ValueError):
-        return None
-    if not all(math.isfinite(value) and 0 <= value <= 1 for value in (x0, x1, y0, y1)):
-        return None
-    if x1 <= x0 or y1 <= y0 or y1 - y0 > 0.45:
-        return None
-    return (x0, y0, x1, y1)
+    left, top, right, bottom = pixel_box
+    return (
+        left / image_width,
+        top / image_height,
+        right / image_width,
+        bottom / image_height,
+    )
 
 
 def _iou(a, b):
@@ -165,6 +164,8 @@ def evaluate_zone_predictions(
     price_axis_anchors=None,
     price_axis_scale="linear",
     max_axis_relative_error=0.02,
+    image_width,
+    image_height,
 ):
     """Compare AI rectangles with manual annotations, optionally in price units.
 
@@ -172,13 +173,18 @@ def evaluate_zone_predictions(
     as ignored (not as drawn false positives). Invalid manual reference
     annotations raise ValueError so a broken fixture cannot silently skew scores.
     Only the first eight predictions are considered because the overlay renderer
-    draws at most eight.
+    draws at most eight. image_width and image_height must be the original
+    screenshot dimensions; predictions too small to pass the renderer's pixel
+    threshold are ignored and their reference zones remain false negatives.
 
     When price_axis_anchors are supplied, they must be 3..20 manually verified
     {"y": normalized_full_image_y, "price": positive_price} points from the
     same screenshot. Price errors are reported only for matched zones wholly
     inside the calibrated y range. No OCR or price-axis extrapolation is done.
     """
+    for dimension, value in (("image_width", image_width), ("image_height", image_height)):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{dimension} must be a positive integer")
     if isinstance(iou_threshold, bool) or not isinstance(iou_threshold, (int, float)):
         raise ValueError("iou_threshold must be a number greater than 0 and at most 1")
     iou_threshold = float(iou_threshold)
@@ -202,7 +208,7 @@ def evaluate_zone_predictions(
     valid_predictions = []
     ignored_predictions = max(0, len(predicted_zones) - MAX_EVALUATED_ZONES)
     for index, zone in enumerate(predicted_zones[:MAX_EVALUATED_ZONES]):
-        box = _valid_box(zone, prediction=True)
+        box = _valid_box(zone, prediction=True, image_width=image_width, image_height=image_height)
         if box is None:
             ignored_predictions += 1
             continue
@@ -215,7 +221,7 @@ def evaluate_zone_predictions(
 
     valid_references = []
     for index, zone in enumerate(reference_zones):
-        box = _valid_box(zone, prediction=False)
+        box = _valid_box(zone, prediction=False, image_width=image_width, image_height=image_height)
         if box is None:
             raise ValueError(f"Invalid manual reference zone at index {index}")
         valid_references.append({

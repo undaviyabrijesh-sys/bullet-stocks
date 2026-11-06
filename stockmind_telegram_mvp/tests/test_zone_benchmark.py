@@ -190,6 +190,22 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         self.assertEqual(result["price_accuracy"]["unscored_zone_count"], 0)
         self.assertEqual(result["price_accuracy"]["mean_boundary_abs_error"], 0.0)
 
+    def test_prediction_below_renderer_pixel_minimum_is_a_missed_zone(self):
+        self._write(
+            self._record(
+                predicted_zones=[
+                    _prediction(x_start=0.2, x_end=0.25)
+                ]
+            )
+        )
+
+        result = evaluate_benchmark_manifest(self.manifest)
+
+        self.assertEqual(result["overall"]["predicted"], 0)
+        self.assertEqual(result["overall"]["true_positive"], 0)
+        self.assertEqual(result["overall"]["false_negative"], 1)
+        self.assertEqual(result["ignored_prediction_count"], 1)
+
     def test_rejects_screenshot_larger_than_configured_byte_limit(self):
         self._write(self._record())
 

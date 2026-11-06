@@ -25,13 +25,15 @@ A fixture record should contain a stable fixture_id, image_file, image_sha256, i
 
 ## Geometry scoring
 
-Call evaluate_zone_predictions(predicted_zones, reference_zones, iou_threshold=0.5) from app.zone_evaluation.
+Call evaluate_zone_predictions(predicted_zones, reference_zones, image_width=1600, image_height=900, iou_threshold=0.5) from app.zone_evaluation. Always pass the original screenshot dimensions.
 
 The evaluator:
 - matches only zones with the same type (supply-to-supply, demand-to-demand);
 - performs one-to-one matching, maximizing the number of qualifying matches before maximizing total IoU;
 - reports precision, recall, F1, false positives, false negatives, mean matched intersection-over-union (IoU), and normalized center displacement;
-- reports invalid or disabled AI rectangles separately as ignored predictions;
+- uses the same pixel rounding as the Telegram renderer and ignores predictions narrower than 3 px or shorter than 2 px, exactly as the renderer does;
+- converts pixel-rounded boxes back to normalized screenshot coordinates before IoU and center-error scoring;
+- reports invalid, disabled or sub-minimum AI rectangles separately as ignored predictions; a sub-minimum prediction leaves its manual reference as a false negative;
 - treats a disabled/invalid AI rectangle as no drawn prediction, so a missed reference zone remains a false negative;
 - rejects malformed manual annotations rather than silently corrupting the benchmark;
 - scores only the first eight AI zones because that is the renderer's current limit.

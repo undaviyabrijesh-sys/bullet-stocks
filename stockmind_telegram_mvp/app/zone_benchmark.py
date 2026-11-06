@@ -218,6 +218,8 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
         result = evaluate_zone_predictions(
             record["predicted_zones"],
             record["reference_zones"],
+            image_width=record["image_width"],
+            image_height=record["image_height"],
             iou_threshold=record.get("iou_threshold", 0.5),
             price_axis_anchors=anchors,
             price_axis_scale=scale or "linear",

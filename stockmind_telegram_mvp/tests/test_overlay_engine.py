@@ -7,6 +7,7 @@ from PIL import Image
 from stockmind_telegram_mvp.app import overlay_engine
 from stockmind_telegram_mvp.app.overlay_engine import (
     _zone_overlay_label,
+    normalized_zone_to_pixel_box,
     render_overlay,
     validate_chart_image,
 )
@@ -105,6 +106,25 @@ class OverlayRendererTests(unittest.TestCase):
 
         result, count = render_overlay(sample_image(), zones)
 
+        self.assertIsNone(result)
+        self.assertEqual(count, 0)
+
+    def test_renderer_pixel_geometry_is_shared_and_rejects_subminimum_boxes(self):
+        zone = {
+            "zone_type": "demand",
+            "draw_overlay": True,
+            "x_start": 0.2,
+            "x_end": 0.4,
+            "y_top": 0.2,
+            "y_bottom": 0.4,
+        }
+        self.assertEqual(
+            normalized_zone_to_pixel_box(zone, 640, 360),
+            (128, 72, 256, 144),
+        )
+        self.assertIsNone(normalized_zone_to_pixel_box(zone, 10, 10))
+
+        result, count = render_overlay(sample_image(size=(10, 10)), [zone])
         self.assertIsNone(result)
         self.assertEqual(count, 0)
 
