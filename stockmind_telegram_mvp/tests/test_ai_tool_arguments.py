@@ -1,9 +1,14 @@
 import json
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
-from stockmind_telegram_mvp.app.ai import ResearchAI, _parse_tool_arguments
+from stockmind_telegram_mvp.app.ai import (
+    MAX_TOOL_CALLS_PER_TURN,
+    ResearchAI,
+    _parse_tool_arguments,
+    _serialize_tool_result,
+)
 
 
 class ToolArgumentParsingTests(unittest.IsolatedAsyncioTestCase):
@@ -65,6 +70,160 @@ class ToolArgumentParsingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tool_message["role"], "tool")
         self.assertEqual(tool_message["tool_call_id"], "call-malformed")
         self.assertEqual(json.loads(tool_message["content"])["type"], "InvalidToolArguments")
+
+
+class ToolResultSerializationTests(unittest.TestCase):
+    def test_time_series_sampling_keeps_provider_order_tail_and_marks_partial_data(self):
+        rows = [{"open_time": index} for index in range(10)]
+        with patch("stockmind_telegram_mvp.app.ai.MAX_TOOL_DATA_ITEMS", 3):
+            serialized = _serialize_tool_result(
+                {"source": "Binance", "data": rows},
+                "get_crypto_klines",
+                max_bytes=4096,
+            )
+
+        result = json.loads(serialized)
+        self.assertEqual([row["open_time"] for row in result["data"]], [7, 8, 9])
+        self.assertEqual(result["truncation"]["data_items_total"], 10)
+        self.assertEqual(result["truncation"]["data_items_returned"], 3)
+        self.assertEqual(result["truncation"]["selection"], "last_in_provider_order")
+        self.assertIn("Partial result", result["truncation"]["warning"])
+
+    def test_stock_search_sampling_keeps_first_matches(self):
+        rows = [{"symbol": f"STOCK{index}"} for index in range(5)]
+        with patch("stockmind_telegram_mvp.app.ai.MAX_TOOL_DATA_ITEMS", 2):
+            serialized = _serialize_tool_result(
+                {"data": rows}, "search_stocks", max_bytes=4096
+            )
+
+        result = json.loads(serialized)
+        self.assertEqual(
+            [row["symbol"] for row in result["data"]], ["STOCK0", "STOCK1"]
+        )
+        self.assertEqual(
+            result["truncation"]["selection"], "first_in_provider_order"
+        )
+
+    def test_oversized_non_list_payload_is_withheld_not_partially_forwarded(self):
+        sensitive_value = "x" * 2048
+        serialized = _serialize_tool_result(
+            {"data": {"statement": sensitive_value}},
+            "get_financials",
+            max_bytes=512,
+        )
+
+        result = json.loads(serialized)
+        self.assertEqual(result["type"], "ToolResultTooLarge")
+        self.assertNotIn(sensitive_value, serialized)
+
+    def test_serialized_market_data_never_exceeds_the_requested_byte_cap(self):
+        rows = [{"value": "x" * 160} for _ in range(50)]
+        serialized = _serialize_tool_result(
+            {"data": rows}, "get_crypto_klines", max_bytes=512
+        )
+
+        self.assertLessEqual(len(serialized.encode("utf-8")), 512)
+        self.assertIn("truncation", json.loads(serialized))
+
+
+class ToolBudgetExecutionTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def make_call(index):
+        return SimpleNamespace(
+            id=f"call-{index}",
+            function=SimpleNamespace(
+                name="get_quote",
+                arguments='{"symbol":"RELIANCE"}',
+            ),
+        )
+
+    @staticmethod
+    def make_response(message):
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    @staticmethod
+    def assistant_dump(calls):
+        return {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": call.id,
+                    "type": "function",
+                    "function": {
+                        "name": call.function.name,
+                        "arguments": call.function.arguments,
+                    },
+                }
+                for call in calls
+            ],
+        }
+
+    def make_research(self, create, market_data):
+        research = object.__new__(ResearchAI)
+        research.model = "gpt-4o-mini"
+        research.client = SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        )
+        research.market_data = market_data
+        research.crypto_data = None
+        return research
+
+    async def test_rejects_tool_batch_above_per_turn_call_limit_before_provider_calls(self):
+        calls = [self.make_call(index) for index in range(MAX_TOOL_CALLS_PER_TURN + 1)]
+        message = SimpleNamespace(
+            tool_calls=calls,
+            content=None,
+            model_dump=lambda **kwargs: self.assistant_dump(calls),
+        )
+        create = AsyncMock(return_value=self.make_response(message))
+        quote = AsyncMock(return_value={"data": []})
+        research = self.make_research(create, SimpleNamespace(quote=quote))
+
+        answer = await research.answer([], "Compare several stocks")
+
+        self.assertIn(str(MAX_TOOL_CALLS_PER_TURN), answer)
+        self.assertEqual(create.await_count, 1)
+        quote.assert_not_awaited()
+
+    async def test_turn_wide_byte_budget_skips_later_market_data_request(self):
+        calls = [self.make_call(1), self.make_call(2)]
+        first_message = SimpleNamespace(
+            tool_calls=calls,
+            content=None,
+            model_dump=lambda **kwargs: self.assistant_dump(calls),
+        )
+        final_message = SimpleNamespace(
+            tool_calls=[],
+            content="I used only the market data available within the context budget.",
+        )
+        create = AsyncMock(
+            side_effect=[
+                self.make_response(first_message),
+                self.make_response(final_message),
+            ]
+        )
+        quote = AsyncMock(
+            return_value={
+                "data": [{"value": "x" * 160} for _ in range(20)]
+            }
+        )
+        research = self.make_research(create, SimpleNamespace(quote=quote))
+
+        with patch("stockmind_telegram_mvp.app.ai.MAX_TOOL_RESULT_BYTES", 300), patch(
+            "stockmind_telegram_mvp.app.ai.MAX_TOOL_RESULT_BYTES_PER_TURN", 300
+        ):
+            answer = await research.answer([], "Get two quotes")
+
+        self.assertIn("context budget", answer)
+        self.assertEqual(quote.await_count, 1)
+        tool_messages = [
+            item for item in create.await_args_list[1].kwargs["messages"]
+            if item.get("role") == "tool"
+        ]
+        self.assertEqual(len(tool_messages), 2)
+        self.assertEqual(
+            json.loads(tool_messages[1]["content"])["type"], "ToolBudgetExceeded"
+        )
 
 
 if __name__ == "__main__":
