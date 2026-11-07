@@ -111,15 +111,43 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
             result["macro_overall"]["metrics"]["f1"]["baseline_defined_fixture_count"],
             1,
         )
+        precision = result["macro_overall"]["metrics"]["precision"]
+        self.assertEqual(precision["baseline_coverage"], 1.0)
+        self.assertEqual(precision["candidate_coverage"], 0.0)
+        self.assertEqual(precision["coverage_delta"], -1.0)
         self.assertEqual(
             result["macro_by_zone_type"]["demand"]["metrics"]["recall"]["delta"],
             -1.0,
         )
 
+    def test_accepts_legacy_macro_aggregates_without_coverage_fields(self):
+        baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
+        candidate = self._report("candidate", [])
+        for report in (baseline, candidate):
+            aggregates = [report["macro_overall"], *report["macro_by_zone_type"].values()]
+            for aggregate in aggregates:
+                for key in list(aggregate):
+                    if key.endswith("_coverage"):
+                        del aggregate[key]
+
+        result = compare_benchmark_reports(baseline, candidate)
+        self.assertEqual(result["fixture_count"], 1)
+        precision = result["macro_overall"]["metrics"]["precision"]
+        self.assertEqual(precision["baseline_coverage"], 1.0)
+        self.assertEqual(precision["candidate_coverage"], 0.0)
+
     def test_rejects_tampered_macro_aggregate(self):
         baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
         candidate = self._report("candidate", [])
         candidate["macro_overall"]["recall"] = 0.25
+
+        with self.assertRaisesRegex(ValueError, "macro_overall metrics do not match"):
+            compare_benchmark_reports(baseline, candidate)
+
+    def test_rejects_tampered_macro_coverage(self):
+        baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
+        candidate = self._report("candidate", [])
+        candidate["macro_overall"]["precision_coverage"] = 0.5
 
         with self.assertRaisesRegex(ValueError, "macro_overall metrics do not match"):
             compare_benchmark_reports(baseline, candidate)
