@@ -265,3 +265,26 @@ The command accepts static JPEG, PNG or WEBP images only. It applies the same de
 The output contains `images/<fixture-id>.<ext>` and `<fixture-id>.draft.json`. The draft deliberately has `benchmark_ready: false`, empty reference zones, null plot bounds, pending annotation metadata, and no AI prediction/provenance. **It is not a benchmark JSONL record and must not be passed to the benchmark runner.** A human annotator must add the visible supply/demand rectangles and reviewed main-plot bounds, then a different human must review them and fill pseudonymous annotator/reviewer IDs plus timezone-aware timestamps. Capture the actual AI prediction and provider-returned prediction metadata for the exact same screenshot separately. Only after those steps should a benchmark JSONL fixture be assembled using the schema above.
 
 The intake helper never invents chart levels, zone coordinates, model output, annotator identities or approval times. Its tests use synthetic images only to verify file handling; they are not chart-accuracy fixtures. The inbox path is ignored by Git so private chart screenshots and unfinished drafts are not accidentally committed. Keep the original screenshot and reviewer audit evidence in access-controlled storage; the manifest's pseudonymous IDs alone do not authenticate the humans who approved an annotation.
+
+
+## Offline visual annotation editor
+
+The intake draft can now be annotated and independently reviewed with a local Tk desktop editor. It uses only the screenshot and draft on the selected machine; it does not call a model, market-data provider, Telegram, or a network service. The original screenshot and intake draft are never modified.
+
+Run from the repository root on a desktop Python installation with Tk support:
+
+```bash
+# First pass: draw the main price-plot boundary, then supply/demand rectangles.
+python -m stockmind_telegram_mvp.app.annotation_editor path/to/btc-1h-001.draft.json --mode annotate
+
+# Independent second pass: inspect the saved rectangles and approve or reject.
+python -m stockmind_telegram_mvp.app.annotation_editor path/to/btc-1h-001.draft.annotated.json --mode review
+```
+
+The editor resolves the screenshot path from the draft's relative `image_file` by default. Use `--image path/to/screenshot.png` only when the screenshot is stored elsewhere. Before opening the editor it checks the screenshot format with the same upload validator, enforces the 5 MiB editor limit, and verifies the exact SHA-256 and pixel dimensions recorded in the draft. A mismatch is rejected rather than allowing annotations against a different image.
+
+In annotation mode, select `plot` and drag the main price-plot rectangle first. Then select `demand` or `supply` and draw each visible zone. Coordinates are normalized to the full original screenshot, matching the benchmark schema. Zones must fit completely inside the marked plot, and no more than eight reference zones are accepted. A chart with no visible supply/demand zone may be saved with an empty zone list, provided the plot boundary is marked. Use an anonymized annotator ID such as `ann-001`; do not enter a person's name or contact information.
+
+The annotation pass writes a new `.annotated.json` file with `status: pending_review`, a timezone-aware timestamp and pending review metadata. Review mode is read-only: a separate reviewer enters an ID such as `rev-002` and explicitly approves or rejects the rectangles. The review pass writes a new `.reviewed.json` file. Existing files are never overwritten. Both approved and rejected drafts remain `benchmark_ready: false`; approval alone does not create a benchmark fixture.
+
+The editor records the manually marked main plot rectangle and supply/demand geometry only. Price-axis anchors and linear/log scale calibration remain a separate manual step for price-boundary scoring. After approval, capture the actual AI prediction and provider-returned prediction metadata for the exact same screenshot, then assemble the benchmark JSONL record using the schema above. The benchmark runner remains the final validator. The editor's geometry/state-transition tests run headlessly; an interactive Tk window still needs a manual desktop smoke test on the target operating system.
