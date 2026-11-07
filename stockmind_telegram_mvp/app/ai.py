@@ -694,6 +694,8 @@ class ResearchAI:
         result["prediction_metadata"] = build_chart_prediction_metadata(
             response, self.vision_model, chart_settings
         )
+        # Bind this model output to the exact screenshot bytes submitted to vision.
+        result["source_image_sha256"] = hashlib.sha256(image_bytes).hexdigest()
         return result
 
     async def answer(self, history: list[dict], user_text: str) -> str:

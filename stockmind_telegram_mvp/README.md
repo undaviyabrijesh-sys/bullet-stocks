@@ -87,3 +87,31 @@ The research-to-Telegram flow tests import the bot with disposable dummy configu
 ### Offline DNS benchmark and price-axis calibration
 
 The optional offline benchmark in `app/zone_evaluation.py` scores AI overlay geometry against manually annotated rectangles. It can also report price-boundary error when a fixture supplies at least three manually verified chart-axis anchors (`y` normalized to the full screenshot plus a positive numeric `price`). The calibration supports linear and logarithmic axes, rejects inconsistent/non-monotonic anchors, and refuses to extrapolate beyond the anchor range. This is manual calibration—not automatic OCR—and it does not change the Telegram bot's chart output. See [ZONE_BENCHMARK.md](ZONE_BENCHMARK.md) for the fixture format and scoring rules.
+
+
+## Offline annotation-to-benchmark assembly
+
+After an annotation has been independently approved, save the actual
+ResearchAI.analyze_chart_image result as JSON. The result includes
+source_image_sha256, which binds it to the exact screenshot bytes used by the
+vision request. The offline assembler refuses missing provider-returned model
+or timestamp metadata, a different screenshot hash, unapproved annotations,
+tampered geometry, and output overwrites.
+
+~~~bash
+python -m stockmind_telegram_mvp.app.annotation_fixture capture \
+  benchmark/inbox/btc-1h-001.reviewed.json path/to/actual-chart-result.json
+
+python -m stockmind_telegram_mvp.app.annotation_fixture assemble \
+  benchmark/inbox/btc-1h-001.reviewed.json \
+  benchmark/inbox/btc-1h-001.prediction.json
+
+python -m stockmind_telegram_mvp.app.zone_benchmark \
+  benchmark/inbox/btc-1h-001.fixture.jsonl
+~~~
+
+The current Telegram bot does not automatically persist user screenshots or
+model results. The capture/assembly utility is intended for an explicitly
+controlled local research harness. It does not call providers or store the
+original image. A structurally valid fixture is not evidence of model
+accuracy; real screenshots still require independent manual review.

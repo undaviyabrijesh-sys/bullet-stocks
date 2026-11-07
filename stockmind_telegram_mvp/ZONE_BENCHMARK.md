@@ -290,3 +290,55 @@ For optional price-boundary scoring, select `axis_anchor`, choose `linear` or `l
 The annotation pass writes a new `.annotated.json` file with `status: pending_review`, a timezone-aware timestamp and pending review metadata. Review mode is read-only: a separate reviewer enters an ID such as `rev-002` and explicitly approves or rejects the rectangles. The review pass writes a new `.reviewed.json` file. Existing files are never overwritten. Both approved and rejected drafts remain `benchmark_ready: false`; approval alone does not create a benchmark fixture.
 
 The editor records the manually marked main plot rectangle, supply/demand geometry, and optional manually read price-axis anchors plus the chosen linear/log scale. Before annotation can be saved or reviewed, each reference zone is checked at the original screenshot dimensions using the evaluator's pixel rounding and reference-zone rules: it must remain at least one pixel wide and high and cannot exceed 45% of screenshot height. This prevents approval of boxes that the benchmark would later reject as unscorable. When anchors are present, the saved `price_axis_plot_bounds` must match the reviewed main plot and the 3..20 anchors must pass the calibration fit. The reviewer sees the anchor markers and values in read-only mode and revalidates them before approval. After approval, capture the actual AI prediction and provider-returned prediction metadata for the exact same screenshot, then assemble the benchmark JSONL record using the schema above. The benchmark runner remains the final validator. The editor's geometry/state-transition tests run headlessly; an interactive Tk window still needs a manual desktop smoke test on the target operating system.
+
+
+## Prediction capture and fixture assembly
+
+After a reviewer has approved a .reviewed.json annotation, pair it with the
+actual result returned by ResearchAI.analyze_chart_image. That result now
+includes source_image_sha256, computed from the exact image bytes submitted
+to the vision request. The hash prevents a prediction from another screenshot
+being attached to the reviewed annotation.
+
+The current Telegram bot does not automatically persist user screenshots or
+chart results. For a local development harness, serialize the actual returned
+chart-result dictionary as UTF-8 JSON without editing its geometry or
+prediction_metadata. It must contain the provider-returned model and generation
+timestamp; if either is missing, capture fails rather than substituting a
+configured alias or local clock.
+
+Create a hash-bound prediction capture:
+
+~~~bash
+python -m stockmind_telegram_mvp.app.annotation_fixture capture \
+  stockmind_telegram_mvp/benchmark/inbox/btc-1h-001.reviewed.json \
+  path/to/actual-chart-result.json
+~~~
+
+Then assemble and preflight one JSONL fixture:
+
+~~~bash
+python -m stockmind_telegram_mvp.app.annotation_fixture assemble \
+  stockmind_telegram_mvp/benchmark/inbox/btc-1h-001.reviewed.json \
+  stockmind_telegram_mvp/benchmark/inbox/btc-1h-001.prediction.json
+
+python -m stockmind_telegram_mvp.app.zone_benchmark \
+  stockmind_telegram_mvp/benchmark/inbox/btc-1h-001.fixture.jsonl
+~~~
+
+The capture contains only the screenshot hash/dimensions, fixture ID and
+sanitized model result/provenance; it does not copy the screenshot or store a
+Telegram user/chat ID. The assembler requires an independently approved
+annotation, validates the manual geometry and optional price-axis calibration,
+checks fixture ID/hash/dimensions, rejects altered or non-sanitized model
+geometry, and requires real provider-returned model/time metadata. It writes
+the manifest beside the reviewed draft so the relative image_file remains
+valid. Existing outputs are never overwritten.
+
+Before writing the JSONL file, the assembler runs the exact benchmark manifest
+validator against a temporary one-record manifest. A successful preflight
+means the record is structurally scoreable; it does not establish chart
+accuracy. Each command creates one fixture record. Combine records from the
+same annotation inbox into a separate JSONL manifest to score a dataset.
+There are still no real manually reviewed chart fixtures in this repository;
+the tests use synthetic images and rectangles only.

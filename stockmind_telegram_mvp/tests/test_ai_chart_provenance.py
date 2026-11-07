@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 import unittest
@@ -41,6 +42,10 @@ class ChartPredictionProvenanceTests(unittest.IsolatedAsyncioTestCase):
         result = await research.analyze_chart_image([], "Map DNS", b"image-bytes", "image/png")
 
         metadata = result["prediction_metadata"]
+        self.assertEqual(
+            result["source_image_sha256"],
+            hashlib.sha256(b"image-bytes").hexdigest(),
+        )
         self.assertEqual(metadata["provider"], "openai")
         self.assertEqual(metadata["model"], "vision-model-2026-11-05")
         self.assertEqual(metadata["requested_model"], "gpt-6-luna-test")
