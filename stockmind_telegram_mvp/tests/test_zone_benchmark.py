@@ -89,11 +89,28 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def _fixture_image(self, fixture_id):
+        """Create deterministic, distinct screenshot bytes for each fixture ID."""
+        digest = hashlib.sha256(fixture_id.encode("utf-8")).digest()
+        image = Image.new("RGB", (40, 30), "white")
+        for index, value in enumerate(digest):
+            image.putpixel(
+                (index, 0),
+                (value, (value + 53) % 256, (value + 107) % 256),
+            )
+        output = BytesIO()
+        image.save(output, format="PNG")
+        image_bytes = output.getvalue()
+        image_file = f"chart-{digest.hex()[:12]}.png"
+        (self.root / image_file).write_bytes(image_bytes)
+        return image_file, image_bytes
+
     def _record(self, fixture_id="chart-001", **overrides):
+        image_file, image_bytes = self._fixture_image(fixture_id)
         record = {
             "fixture_id": fixture_id,
-            "image_file": "chart.png",
-            "image_sha256": hashlib.sha256(self.image_bytes).hexdigest(),
+            "image_file": image_file,
+            "image_sha256": hashlib.sha256(image_bytes).hexdigest(),
             "image_width": 40,
             "image_height": 30,
             "reference_zones": [_zone()],
@@ -542,11 +559,17 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
             evaluate_benchmark_manifest(self.manifest)
 
     def test_rejects_duplicate_screenshot_hashes_with_distinct_paths_and_ids(self):
-        (self.root / "chart-copy.png").write_bytes(self.image_bytes)
-        self._write(
-            self._record("chart-copy-a"),
-            self._record("chart-copy-b", image_file="chart-copy.png"),
+        first = self._record("chart-copy-a")
+        first_bytes = (self.root / first["image_file"]).read_bytes()
+        (self.root / "chart-copy.png").write_bytes(first_bytes)
+        second = self._record(
+            "chart-copy-b",
+            image_file="chart-copy.png",
+            image_sha256=first["image_sha256"],
+            image_width=first["image_width"],
+            image_height=first["image_height"],
         )
+        self._write(first, second)
 
         with self.assertRaisesRegex(ValueError, "duplicate screenshot image_sha256"):
             evaluate_benchmark_manifest(self.manifest)
