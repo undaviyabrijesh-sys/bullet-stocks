@@ -247,3 +247,21 @@ This is a manual calibration and scoring tool, not automatic axis OCR. Anchor y-
 There are currently no manually annotated real chart screenshots in this repository. Unit tests use synthetic rectangles, synthetic axis anchors and temporary synthetic PNGs only to verify scoring and file-integrity logic; they are not evidence of model accuracy. Do not publish a zone-detection accuracy or claim improvement until a real, manually reviewed fixture set has been scored.
 
 IoU and normalized center displacement measure screenshot geometry only. Price-boundary error is only as trustworthy as the manually read axis anchors and chosen scale. Neither metric verifies that a zone is structurally meaningful, fresh/unmitigated, or useful for a trading decision.
+
+
+## Screenshot intake drafts
+
+Use the intake helper to preserve an original screenshot and create a **pending annotation draft** before manually marking it. Run from the repository root:
+
+```bash
+python -m stockmind_telegram_mvp.app.annotation_intake path/to/chart.png \
+  --output-dir stockmind_telegram_mvp/benchmark/inbox \
+  --fixture-id btc-1h-001 \
+  --asset-class crypto --symbol BTCUSDT --exchange binance --timeframe 1h
+```
+
+The command accepts static JPEG, PNG or WEBP images only. It applies the same decoded-image validation used by the Telegram upload path, reads at most the configured byte limit plus one byte, copies the original encoded bytes unchanged, and records SHA-256 plus actual pixel dimensions. It refuses path-like fixture IDs, overwrites, output image-directory symlinks that escape the inbox, oversized or malformed files, animated images, and unsupported market-context fields. Context values are normalized using the benchmark's grouping conventions. The draft does not record the source machine's path or any user identity.
+
+The output contains `images/<fixture-id>.<ext>` and `<fixture-id>.draft.json`. The draft deliberately has `benchmark_ready: false`, empty reference zones, null plot bounds, pending annotation metadata, and no AI prediction/provenance. **It is not a benchmark JSONL record and must not be passed to the benchmark runner.** A human annotator must add the visible supply/demand rectangles and reviewed main-plot bounds, then a different human must review them and fill pseudonymous annotator/reviewer IDs plus timezone-aware timestamps. Capture the actual AI prediction and provider-returned prediction metadata for the exact same screenshot separately. Only after those steps should a benchmark JSONL fixture be assembled using the schema above.
+
+The intake helper never invents chart levels, zone coordinates, model output, annotator identities or approval times. Its tests use synthetic images only to verify file handling; they are not chart-accuracy fixtures. The inbox path is ignored by Git so private chart screenshots and unfinished drafts are not accidentally committed. Keep the original screenshot and reviewer audit evidence in access-controlled storage; the manifest's pseudonymous IDs alone do not authenticate the humans who approved an annotation.
