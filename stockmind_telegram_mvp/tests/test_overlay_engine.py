@@ -65,9 +65,15 @@ class OverlayRendererTests(unittest.TestCase):
             prepare_chart_image(original)
 
     def test_rejects_orientation_normalization_that_exceeds_byte_limit(self):
-        original = oriented_sample_image()
+        exif = Image.Exif()
+        exif[274] = 6
+        output = BytesIO()
+        Image.effect_noise((320, 240), 100).convert("RGB").save(
+            output, format="JPEG", quality=20, exif=exif
+        )
+        original = output.getvalue()
         with self.assertRaisesRegex(ValueError, "Orientation-corrected chart exceeds"):
-            prepare_chart_image(original, max_output_bytes=1)
+            prepare_chart_image(original, max_output_bytes=len(original))
 
     def test_rejects_invalid_normalized_output_limit(self):
         original = sample_image()
