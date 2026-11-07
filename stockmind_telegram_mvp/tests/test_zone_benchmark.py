@@ -293,7 +293,7 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
             )
         )
 
-        with self.assertRaisesRegex(ValueError, "finite JSON values"):
+        with self.assertRaisesRegex(ValueError, "non-standard JSON constant"):
             evaluate_benchmark_manifest(self.manifest)
 
     def test_rejects_missing_prediction_metadata(self):
