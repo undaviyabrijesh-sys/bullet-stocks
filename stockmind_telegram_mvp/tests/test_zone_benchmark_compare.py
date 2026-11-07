@@ -461,6 +461,31 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
 
 
 
+    def test_rejects_boolean_substitutions_in_plot_boundary_metrics(self):
+        mutations = (
+            ("plot_iou", lambda metrics: metrics.__setitem__("plot_iou", True)),
+            ("predicted_zone_count", lambda metrics: metrics.__setitem__("predicted_zone_count", True)),
+            ("zones_outside_reference_plot_count", lambda metrics: metrics.__setitem__("zones_outside_reference_plot_count", False)),
+            ("edge_displacement_px.left", lambda metrics: metrics["edge_displacement_px"].__setitem__("left", False)),
+            ("edge_displacement_normalized.left", lambda metrics: metrics["edge_displacement_normalized"].__setitem__("left", False)),
+        )
+        for field, mutate in mutations:
+            with self.subTest(field=field):
+                plot = {
+                    "x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9
+                }
+                report = self._report(
+                    "baseline", [{**_zone(), "draw_overlay": True}],
+                    reference_plot_bounds=plot, predicted_plot_bounds=plot,
+                )
+                metrics = report["fixtures"][0]["plot_boundary_accuracy"]
+                mutate(metrics)
+
+                with self.assertRaisesRegex(
+                    ValueError, "does not agree with its plot bounds"
+                ):
+                    compare_benchmark_reports(report, report)
+
     def test_report_loader_rejects_duplicate_object_keys(self):
         report_path = self.root / "duplicate-report.json"
         report_path.write_text(
