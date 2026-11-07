@@ -442,7 +442,11 @@ def sanitize_chart_analysis(data: dict) -> dict:
                 }
 
     safe_zones = []
-    for zone in zones[:MAX_CHART_ZONES]:
+    # Count accepted zones, not raw response entries: malformed/unknown items
+    # must not consume the overlay quota and hide later valid zones.
+    for zone in zones:
+        if len(safe_zones) >= MAX_CHART_ZONES:
+            break
         if not isinstance(zone, dict):
             continue
         zone_type = zone.get("zone_type")
