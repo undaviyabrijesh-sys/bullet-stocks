@@ -35,6 +35,7 @@ STOCK SEARCH RULES:
 
 For quote questions use get_quote. For financial health use get_financials.
 For historical price context use get_price_history. Do not make more data calls than necessary.
+If a tool result contains truncation metadata, treat it as a partial sample: state that limitation and never infer omitted rows or describe the sample as a complete dataset.
 
 DEMAND AND SUPPLY (DNS) / PRICE-ACTION LANGUAGE:
 - Interpret "DNS" in this trading context as Demand and Supply zones, not Domain Name System.
@@ -232,6 +233,18 @@ CHART_PROMPT_SHA256 = hashlib.sha256(
 
 MAX_CHART_ZONES = 8
 
+# Bound both provider spend and the amount of market data copied into model context.
+MAX_TOOL_CALLS_PER_TURN = 6
+MAX_TOOL_RESULT_BYTES = 12 * 1024
+MAX_TOOL_RESULT_BYTES_PER_TURN = 36 * 1024
+MAX_TOOL_DATA_ITEMS = 120
+MIN_TOOL_RESULT_BUDGET_BYTES = 256
+_TIME_SERIES_TOOL_NAMES = frozenset({
+    "get_price_history",
+    "get_intraday_stock_bars",
+    "get_crypto_klines",
+})
+
 
 def _parse_tool_arguments(raw_arguments) -> dict:
     """Decode model tool arguments without allowing malformed JSON to abort a turn."""
@@ -246,6 +259,83 @@ def _parse_tool_arguments(raw_arguments) -> dict:
     if not isinstance(arguments, dict):
         raise ValueError("Tool arguments must be a JSON object.")
     return arguments
+
+
+def _tool_budget_error(reason: str) -> dict:
+    if reason == "call_limit":
+        return {
+            "error": "This research turn reached its market-data tool-call limit. Use the available results or ask the user to narrow the request.",
+            "type": "ToolBudgetExceeded",
+            "limit": MAX_TOOL_CALLS_PER_TURN,
+        }
+    return {
+        "error": "This research turn reached its market-data context budget. Treat additional market data as unavailable and do not infer missing values.",
+        "type": "ToolBudgetExceeded",
+    }
+
+
+def _serialize_tool_result(result, tool_name: str, max_bytes: int = MAX_TOOL_RESULT_BYTES) -> str:
+    """Serialize provider output within a byte cap and mark any sampled data rows."""
+    max_bytes = max(MIN_TOOL_RESULT_BUDGET_BYTES, int(max_bytes))
+    try:
+        serialized = json.dumps(
+            result, ensure_ascii=False, separators=(",", ":"), default=str
+        )
+    except (TypeError, ValueError, OverflowError):
+        result = {
+            "error": "The market-data result could not be serialized safely.",
+            "type": "ToolResultSerializationError",
+        }
+        serialized = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+
+    rows = result.get("data") if isinstance(result, dict) else None
+    serialized_size = len(serialized.encode("utf-8"))
+    needs_sampling = isinstance(rows, list) and (
+        len(rows) > MAX_TOOL_DATA_ITEMS or serialized_size > max_bytes
+    )
+    if not needs_sampling and serialized_size <= max_bytes:
+        return serialized
+
+    if isinstance(rows, list) and rows:
+        keep_limit = min(len(rows), MAX_TOOL_DATA_ITEMS)
+        keep_tail = tool_name in _TIME_SERIES_TOOL_NAMES
+        low, high = 1, keep_limit
+        best = None
+        while low <= high:
+            keep = (low + high) // 2
+            selected = rows[-keep:] if keep_tail else rows[:keep]
+            candidate = dict(result)
+            candidate["data"] = selected
+            candidate["truncation"] = {
+                "data_items_total": len(rows),
+                "data_items_returned": len(selected),
+                "selection": (
+                    "last_in_provider_order" if keep_tail else "first_in_provider_order"
+                ),
+                "warning": (
+                    "Partial result only; omitted rows are not represented. "
+                    "Do not treat it as a complete dataset."
+                ),
+            }
+            candidate_json = json.dumps(
+                candidate, ensure_ascii=False, separators=(",", ":"), default=str
+            )
+            if len(candidate_json.encode("utf-8")) <= max_bytes:
+                best = candidate_json
+                low = keep + 1
+            else:
+                high = keep - 1
+        if best is not None:
+            return best
+
+    fallback = {
+        "error": (
+            "The market-data result exceeded the safe context budget and was withheld "
+            "rather than passed as incomplete data."
+        ),
+        "type": "ToolResultTooLarge",
+    }
+    return json.dumps(fallback, ensure_ascii=False, separators=(",", ":"))
 
 
 def _tool_error_payload(exc: Exception) -> dict:
@@ -569,6 +659,8 @@ class ResearchAI:
             *history,
             {"role": "user", "content": user_text},
         ]
+        tool_calls_used = 0
+        tool_result_bytes = 0
 
         for _ in range(4):
             request_options = {
@@ -585,58 +677,85 @@ class ResearchAI:
             if not message.tool_calls:
                 return message.content or "I couldn't prepare a reliable answer. Please try again."
 
+            remaining_calls = MAX_TOOL_CALLS_PER_TURN - tool_calls_used
+            if len(message.tool_calls) > remaining_calls:
+                return (
+                    "I stopped this research turn because it requested more than "
+                    f"{MAX_TOOL_CALLS_PER_TURN} separate market-data lookups. "
+                    "Please narrow the question to one instrument or a smaller set of data."
+                )
+
             messages.append(message.model_dump(exclude_none=True))
             for call in message.tool_calls:
-                try:
-                    args = _parse_tool_arguments(call.function.arguments)
-                except ValueError as exc:
-                    result = {"error": str(exc), "type": "InvalidToolArguments"}
+                tool_calls_used += 1
+                remaining_bytes = MAX_TOOL_RESULT_BYTES_PER_TURN - tool_result_bytes
+                budget_exhausted = remaining_bytes < MIN_TOOL_RESULT_BUDGET_BYTES
+
+                if budget_exhausted:
+                    result = _tool_budget_error("result_bytes")
                 else:
                     try:
-                        if call.function.name == "search_stocks":
-                            result = await self.market_data.search_stocks(
-                                args["query"],
-                                limit=args.get("limit", 10),
-                                sector=args.get("sector"),
-                                industry=args.get("industry"),
-                            )
-                        elif call.function.name == "get_quote":
-                            result = await self.market_data.quote(args["symbol"])
-                        elif call.function.name == "get_live_quote":
-                            result = await self.market_data.live_quote(args["symbol"])
-                        elif call.function.name == "get_financials":
-                            result = await self.market_data.financials(
-                                args["symbol"], args.get("section", "annual")
-                            )
-                        elif call.function.name == "get_price_history":
-                            result = await self.market_data.price_history(
-                                args["symbol"], args.get("days", 90)
-                            )
-                        elif call.function.name == "get_intraday_stock_bars":
-                            result = await self.market_data.intraday_bars(
-                                args["symbol"], interval=args.get("interval", 5),
-                                date=args.get("date"), from_date=args.get("from_date"),
-                                to_date=args.get("to_date"), limit=args.get("limit", 375)
-                            )
-                        elif call.function.name == "get_crypto_klines":
-                            result = await self.crypto_data.klines(
-                                args["symbol"], args.get("interval", "15m"),
-                                args.get("market", "spot"), args.get("limit", 100)
-                            )
-                        elif call.function.name == "get_crypto_ticker":
-                            result = await self.crypto_data.ticker(
-                                args["symbol"], args.get("market", "spot")
-                            )
-                        else:
-                            result = {"error": "Unsupported tool"}
-                    except Exception as exc:
-                        result = _tool_error_payload(exc)
+                        args = _parse_tool_arguments(call.function.arguments)
+                    except ValueError as exc:
+                        result = {"error": str(exc), "type": "InvalidToolArguments"}
+                    else:
+                        try:
+                            if call.function.name == "search_stocks":
+                                result = await self.market_data.search_stocks(
+                                    args["query"],
+                                    limit=args.get("limit", 10),
+                                    sector=args.get("sector"),
+                                    industry=args.get("industry"),
+                                )
+                            elif call.function.name == "get_quote":
+                                result = await self.market_data.quote(args["symbol"])
+                            elif call.function.name == "get_live_quote":
+                                result = await self.market_data.live_quote(args["symbol"])
+                            elif call.function.name == "get_financials":
+                                result = await self.market_data.financials(
+                                    args["symbol"], args.get("section", "annual")
+                                )
+                            elif call.function.name == "get_price_history":
+                                result = await self.market_data.price_history(
+                                    args["symbol"], args.get("days", 90)
+                                )
+                            elif call.function.name == "get_intraday_stock_bars":
+                                result = await self.market_data.intraday_bars(
+                                    args["symbol"], interval=args.get("interval", 5),
+                                    date=args.get("date"), from_date=args.get("from_date"),
+                                    to_date=args.get("to_date"), limit=args.get("limit", 375)
+                                )
+                            elif call.function.name == "get_crypto_klines":
+                                result = await self.crypto_data.klines(
+                                    args["symbol"], args.get("interval", "15m"),
+                                    args.get("market", "spot"), args.get("limit", 100)
+                                )
+                            elif call.function.name == "get_crypto_ticker":
+                                result = await self.crypto_data.ticker(
+                                    args["symbol"], args.get("market", "spot")
+                                )
+                            else:
+                                result = {"error": "Unsupported tool"}
+                        except Exception as exc:
+                            result = _tool_error_payload(exc)
+
+                if budget_exhausted:
+                    serialized_result = json.dumps(
+                        result, ensure_ascii=False, separators=(",", ":")
+                    )
+                else:
+                    serialized_result = _serialize_tool_result(
+                        result,
+                        call.function.name,
+                        max_bytes=min(MAX_TOOL_RESULT_BYTES, remaining_bytes),
+                    )
+                    tool_result_bytes += len(serialized_result.encode("utf-8"))
 
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": call.id,
-                        "content": json.dumps(result, ensure_ascii=False, default=str),
+                        "content": serialized_result,
                     }
                 )
 
