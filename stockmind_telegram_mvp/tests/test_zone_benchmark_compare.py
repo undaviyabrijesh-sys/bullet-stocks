@@ -300,6 +300,39 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "mean_boundary_abs_error does not match"):
             compare_benchmark_reports(baseline, candidate)
 
+    def test_rejects_boolean_and_float_report_fixture_counts(self):
+        for invalid_count in (True, 1.0):
+            with self.subTest(invalid_count=invalid_count):
+                report = self._report("baseline", [{**_zone(), "draw_overlay": True}])
+                report["fixture_count"] = invalid_count
+                with self.assertRaisesRegex(ValueError, "fixture_count does not match"):
+                    compare_benchmark_reports(report, report)
+
+    def test_rejects_boolean_values_in_micro_and_context_aggregates(self):
+        mutations = (
+            ("overall", lambda report: report["overall"].__setitem__("precision", True)),
+            ("by_zone_type", lambda report: report["by_zone_type"]["demand"].__setitem__("recall", True)),
+            ("by_symbol", lambda report: report["by_symbol"][0]["metrics"].__setitem__("precision", True)),
+        )
+        for label, mutate in mutations:
+            with self.subTest(aggregate=label):
+                report = self._report("baseline", [{**_zone(), "draw_overlay": True}])
+                mutate(report)
+                with self.assertRaisesRegex(ValueError, "does not match its fixture results"):
+                    compare_benchmark_reports(report, report)
+
+    def test_prediction_profile_settings_use_exact_json_types(self):
+        report = self._report("baseline", [{**_zone(), "draw_overlay": True}])
+        report["prediction_profile"]["settings"]["temperature"] = 1
+        canonical = json.dumps(
+            report["prediction_profile"], sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
+        report["prediction_profile_sha256"] = hashlib.sha256(canonical).hexdigest()
+        report["fixtures"][0]["prediction_metadata"]["settings"]["temperature"] = True
+
+        with self.assertRaisesRegex(ValueError, "does not match report prediction_profile"):
+            compare_benchmark_reports(report, report)
+
     def test_rejects_tampered_report_level_aggregate(self):
         baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
         candidate = self._report("candidate", [])
