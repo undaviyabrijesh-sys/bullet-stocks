@@ -698,7 +698,7 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
             evaluate_benchmark_manifest(self.manifest)
 
 
-def test_rejects_duplicate_object_keys_in_jsonl_manifest(self):
+    def test_rejects_duplicate_object_keys_in_jsonl_manifest(self):
         record = self._record("duplicate-json-key")
         raw = json.dumps(record).replace(
             '"fixture_id": "duplicate-json-key"',

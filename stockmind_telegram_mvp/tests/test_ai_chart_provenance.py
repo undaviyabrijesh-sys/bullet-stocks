@@ -127,7 +127,7 @@ class ChartPredictionProvenanceTests(unittest.IsolatedAsyncioTestCase):
 
 
 
-async def test_rejects_duplicate_keys_in_provider_chart_json(self):
+    async def test_rejects_duplicate_keys_in_provider_chart_json(self):
         response = SimpleNamespace(
             model="vision-model",
             created=1793908800,

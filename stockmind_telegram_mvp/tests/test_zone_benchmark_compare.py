@@ -461,7 +461,7 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
 
 
 
-def test_report_loader_rejects_duplicate_object_keys(self):
+    def test_report_loader_rejects_duplicate_object_keys(self):
         report_path = self.root / "duplicate-report.json"
         report_path.write_text(
             '{"fixture_count":1,"fixture_count":2}', encoding="utf-8"

@@ -250,7 +250,7 @@ class AnnotationFixtureAssemblyTests(unittest.TestCase):
 
 
 
-def test_rejects_duplicate_keys_in_prediction_capture_json(self):
+    def test_rejects_duplicate_keys_in_prediction_capture_json(self):
         capture = build_prediction_capture(self.reviewed_path, self.result)
         capture_path = self.inbox / "duplicate.prediction.json"
         raw = json.dumps(capture)
