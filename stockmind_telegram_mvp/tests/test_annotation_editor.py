@@ -135,6 +135,18 @@ class AnnotationWorkflowTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must not contain"):
             apply_manual_annotations(draft, PLOT, [], "ann-002")
 
+    def test_rejects_intake_draft_with_preexisting_geometry_or_prediction(self):
+        draft_with_geometry = _draft()
+        draft_with_geometry["reference_plot_bounds"] = PLOT
+        with self.assertRaisesRegex(ValueError, "manual geometry"):
+            apply_manual_annotations(draft_with_geometry, PLOT, [], "ann-001")
+
+        draft_with_prediction = _draft()
+        draft_with_prediction["prediction_status"] = "captured"
+        draft_with_prediction["predicted_zones"] = []
+        with self.assertRaisesRegex(ValueError, "AI prediction"):
+            apply_manual_annotations(draft_with_prediction, PLOT, [], "ann-001")
+
     def test_requires_timezone_aware_annotation_timestamp(self):
         for value in ("2026-11-07T12:00:00", "not-a-time"):
             with self.subTest(value=value), self.assertRaises(ValueError):

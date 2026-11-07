@@ -112,9 +112,18 @@ def _validate_draft(draft, expected_status):
         raise ValueError("annotation_metadata.guideline_version is invalid")
     if metadata.get("review_status") != "pending":
         raise ValueError("annotation draft review_status must be 'pending'")
+    if (
+        draft.get("prediction_status") != "not_captured"
+        or draft.get("predicted_plot_bounds") is not None
+        or draft.get("predicted_zones") is not None
+        or draft.get("prediction_metadata") is not None
+    ):
+        raise ValueError("annotation editor accepts drafts without AI prediction data only")
     if expected_status == "pending_annotation":
         if any(metadata.get(key) is not None for key in ("annotator_id", "reviewer_id", "annotated_at", "reviewed_at")):
             raise ValueError("unannotated draft must not contain annotation or review provenance")
+        if draft.get("reference_plot_bounds") is not None or draft.get("reference_zones") != []:
+            raise ValueError("unannotated draft must not contain manual geometry")
     else:
         annotator_id = metadata.get("annotator_id")
         if not isinstance(annotator_id, str) or not _ANNOTATOR_ID_RE.fullmatch(annotator_id):
