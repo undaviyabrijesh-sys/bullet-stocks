@@ -466,6 +466,27 @@ def _aggregate_metrics(rows, matches):
     }
 
 
+def _aggregate_macro_metrics(rows):
+    """Average each defined fixture-level metric with equal chart weight.
+
+    Undefined fixture metrics remain excluded rather than being treated as
+    zero. The per-metric fixture count makes that exclusion explicit.
+    """
+    fields = (
+        "precision",
+        "recall",
+        "f1",
+        "mean_iou",
+        "mean_center_error_normalized",
+    )
+    result = {"fixture_count": len(rows)}
+    for field in fields:
+        values = [row[field] for row in rows if row.get(field) is not None]
+        result[field] = sum(values) / len(values) if values else None
+        result[f"{field}_fixture_count"] = len(values)
+    return result
+
+
 def _aggregate_price_accuracy(fixtures):
     calibrated_fixtures = [
         fixture for fixture in fixtures if fixture["price_accuracy"] is not None
@@ -621,7 +642,14 @@ def evaluate_benchmark_manifest(manifest_path, *, max_image_bytes=DEFAULT_MAX_IM
             fixture["ignored_prediction_count"] for fixture in fixtures
         ),
         "overall": _aggregate_metrics(overall_rows, all_matches),
+        "macro_overall": _aggregate_macro_metrics(overall_rows),
         "by_zone_type": by_zone_type,
+        "macro_by_zone_type": {
+            zone_type: _aggregate_macro_metrics([
+                fixture["by_zone_type"][zone_type] for fixture in fixtures
+            ])
+            for zone_type in ("supply", "demand")
+        },
         "by_asset_class": _aggregate_by_context(fixtures, "asset_class"),
         "by_symbol": _aggregate_by_context(fixtures, "symbol"),
         "by_exchange": _aggregate_by_context(fixtures, "exchange"),

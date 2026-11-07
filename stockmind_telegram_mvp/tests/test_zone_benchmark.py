@@ -175,6 +175,35 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
             result["fixtures"][0]["annotation_metadata"]["reviewer_id"], "rev-002"
         )
 
+    def test_macro_metrics_weight_each_chart_equally_not_each_zone(self):
+        dense_zones = [
+            _zone(x_start=0.05 + index * 0.11, x_end=0.13 + index * 0.11)
+            for index in range(8)
+        ]
+        dense_predictions = [
+            _prediction(x_start=zone["x_start"], x_end=zone["x_end"])
+            for zone in dense_zones
+        ]
+        self._write(
+            self._record(
+                "dense-chart",
+                reference_zones=dense_zones,
+                predicted_zones=dense_predictions,
+            ),
+            self._record("missed-chart", predicted_zones=[]),
+        )
+
+        result = evaluate_benchmark_manifest(self.manifest)
+
+        # Micro recall weights all nine reference zones equally. Macro recall
+        # gives the dense and missed charts equal weight.
+        self.assertAlmostEqual(result["overall"]["recall"], 8 / 9)
+        self.assertAlmostEqual(result["macro_overall"]["recall"], 0.5)
+        self.assertEqual(result["macro_overall"]["fixture_count"], 2)
+        self.assertEqual(result["macro_overall"]["recall_fixture_count"], 2)
+        self.assertAlmostEqual(result["macro_by_zone_type"]["demand"]["recall"], 0.5)
+        self.assertAlmostEqual(result["macro_by_zone_type"]["demand"]["f1"], 0.5)
+
     def test_allows_different_generation_times_for_the_same_profile(self):
         self._write(
             self._record("first"),

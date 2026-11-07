@@ -9,6 +9,7 @@ from pathlib import Path
 from .zone_benchmark import (
     _aggregate_by_context,
     _aggregate_metrics,
+    _aggregate_macro_metrics,
     _aggregate_price_accuracy,
     _validate_annotation_metadata,
     _validate_market_context,
@@ -196,6 +197,12 @@ def _validate_aggregate_report(report, fixtures, label):
     if report.get("overall") != expected_overall:
         raise ValueError(f"{label} overall metrics do not match its fixture results")
 
+    expected_macro_overall = _aggregate_macro_metrics(
+        [fixture["overall"] for fixture in fixtures]
+    )
+    if "macro_overall" in report and report["macro_overall"] != expected_macro_overall:
+        raise ValueError(f"{label} macro_overall metrics do not match its fixture results")
+
     expected_by_type = {}
     for zone_type in ("supply", "demand"):
         rows = [fixture["by_zone_type"][zone_type] for fixture in fixtures]
@@ -203,6 +210,15 @@ def _validate_aggregate_report(report, fixtures, label):
         expected_by_type[zone_type] = _aggregate_metrics(rows, matches)
     if report.get("by_zone_type") != expected_by_type:
         raise ValueError(f"{label} by_zone_type metrics do not match its fixture results")
+
+    expected_macro_by_type = {
+        zone_type: _aggregate_macro_metrics([
+            fixture["by_zone_type"][zone_type] for fixture in fixtures
+        ])
+        for zone_type in ("supply", "demand")
+    }
+    if "macro_by_zone_type" in report and report["macro_by_zone_type"] != expected_macro_by_type:
+        raise ValueError(f"{label} macro_by_zone_type metrics do not match its fixture results")
 
     expected_ignored = sum(fixture["ignored_prediction_count"] for fixture in fixtures)
     if report.get("ignored_prediction_count") != expected_ignored:
@@ -421,6 +437,33 @@ def _compare_metrics(baseline, candidate):
     }
 
 
+def _compare_macro_metrics(baseline, candidate):
+    """Compare equal-weight per-fixture metrics and disclose defined sample sizes."""
+    fields = (
+        "precision",
+        "recall",
+        "f1",
+        "mean_iou",
+        "mean_center_error_normalized",
+    )
+    return {
+        "fixture_count": {
+            "baseline": baseline["fixture_count"],
+            "candidate": candidate["fixture_count"],
+        },
+        "metrics": {
+            field: {
+                "baseline": baseline[field],
+                "candidate": candidate[field],
+                "delta": _delta(baseline[field], candidate[field]),
+                "baseline_defined_fixture_count": baseline[f"{field}_fixture_count"],
+                "candidate_defined_fixture_count": candidate[f"{field}_fixture_count"],
+            }
+            for field in fields
+        },
+    }
+
+
 def _compare_price(baseline, candidate):
     fields = (
         "calibrated_fixture_count", "scored_zone_count", "unscored_zone_count",
@@ -490,6 +533,14 @@ def compare_benchmark_reports(baseline_report, candidate_report):
         [f["overall"] for f in candidate_fixtures], candidate_matches
     )
 
+    base_macro_overall = _aggregate_macro_metrics(
+        [fixture["overall"] for fixture in base_fixtures]
+    )
+    candidate_macro_overall = _aggregate_macro_metrics(
+        [fixture["overall"] for fixture in candidate_fixtures]
+    )
+
+    macro_by_zone_type = {}
     by_zone_type = {}
     for zone_type in ("supply", "demand"):
         base_rows = [f["by_zone_type"][zone_type] for f in base_fixtures]
@@ -499,6 +550,10 @@ def compare_benchmark_reports(baseline_report, candidate_report):
         by_zone_type[zone_type] = _compare_metrics(
             _aggregate_metrics(base_rows, base_type_matches),
             _aggregate_metrics(candidate_rows, candidate_type_matches),
+        )
+        macro_by_zone_type[zone_type] = _compare_macro_metrics(
+            _aggregate_macro_metrics(base_rows),
+            _aggregate_macro_metrics(candidate_rows),
         )
 
     fixture_results = []
@@ -530,7 +585,11 @@ def compare_benchmark_reports(baseline_report, candidate_report):
         "candidate_prediction_profile_sha256": candidate_report["prediction_profile_sha256"],
         "same_prediction_profile": baseline_report["prediction_profile_sha256"] == candidate_report["prediction_profile_sha256"],
         "overall": _compare_metrics(base_overall, candidate_overall),
+        "macro_overall": _compare_macro_metrics(
+            base_macro_overall, candidate_macro_overall
+        ),
         "by_zone_type": by_zone_type,
+        "macro_by_zone_type": macro_by_zone_type,
         "by_asset_class": _compare_context(base_fixtures, candidate_fixtures, "asset_class"),
         "by_symbol": _compare_context(base_fixtures, candidate_fixtures, "symbol"),
         "by_exchange": _compare_context(base_fixtures, candidate_fixtures, "exchange"),

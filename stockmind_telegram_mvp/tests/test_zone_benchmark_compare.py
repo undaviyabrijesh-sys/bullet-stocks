@@ -99,6 +99,31 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         self.assertEqual(result["overall"]["false_negative"]["delta"], 1)
         self.assertEqual(result["by_symbol"][0]["value"], "BTCUSDT")
 
+    def test_comparison_reports_macro_metrics_and_deltas(self):
+        baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
+        candidate = self._report("candidate", [])
+        result = compare_benchmark_reports(baseline, candidate)
+
+        self.assertEqual(
+            result["macro_overall"]["metrics"]["recall"]["delta"], -1.0
+        )
+        self.assertEqual(
+            result["macro_overall"]["metrics"]["f1"]["baseline_defined_fixture_count"],
+            1,
+        )
+        self.assertEqual(
+            result["macro_by_zone_type"]["demand"]["metrics"]["recall"]["delta"],
+            -1.0,
+        )
+
+    def test_rejects_tampered_macro_aggregate(self):
+        baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
+        candidate = self._report("candidate", [])
+        candidate["macro_overall"]["recall"] = 0.25
+
+        with self.assertRaisesRegex(ValueError, "macro_overall metrics do not match"):
+            compare_benchmark_reports(baseline, candidate)
+
     def test_rejects_drawn_zone_evidence_outside_model_plot_bounds(self):
         bounds = {
             "x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9

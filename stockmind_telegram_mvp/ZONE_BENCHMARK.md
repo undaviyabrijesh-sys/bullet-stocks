@@ -141,7 +141,7 @@ The JSON report is written to standard output and can be redirected to a version
 
 Screenshot uniqueness is byte-level: the runner rejects two fixtures with the same SHA-256, but does not attempt perceptual matching of visually identical screenshots that were re-encoded or cropped differently.
 
-Aggregate precision/recall/F1 are micro-averaged from total TP/FP/FN counts. Mean IoU and center displacement are averaged across matched zones, not across screenshots. Price errors are averaged across scored zone boundaries; zones outside the calibrated y-range are counted as unscored rather than extrapolated.
+The report includes both micro- and macro-averaged DNS metrics. Micro precision/recall/F1 are calculated from total TP/FP/FN counts, so charts with many annotated zones contribute more. Macro metrics first calculate each fixture's precision, recall, F1, mean IoU and mean center displacement, then take the arithmetic mean across fixtures so every screenshot has equal weight. Macro F1 is the mean of fixture-level F1 values; it is not recomputed from macro precision and macro recall. Undefined per-fixture values (for example, precision when a chart has no drawable predictions) remain excluded rather than being treated as zero or one. Each macro metric reports its own defined-fixture count, and the total fixture count remains visible. The same macro metrics are reported overall and separately for supply and demand. Context breakdowns remain micro-aggregated. Mean IoU and center displacement in the micro report are averaged across matched zones, not across screenshots. Price errors are averaged across scored zone boundaries; zones outside the calibrated y-range are counted as unscored rather than extrapolated.
 
 
 ## Plot-boundary and overlay containment scoring
@@ -207,7 +207,7 @@ The comparison is paired by `fixture_id`. It refuses to compare reports unless t
 
 Before comparing, the comparator revalidates report provenance, annotation metadata, normalized market context, confusion-matrix arithmetic, precision/recall/F1, match uniqueness, IoU and center-error averages, supply/demand reconciliation, per-zone price calculations, fixture-level price summaries and report-level aggregates. A report whose summary fields do not agree with its included fixture evidence is rejected rather than trusted.
 
-The JSON output includes both prediction profiles, candidate-minus-baseline deltas for overall and supply/demand metrics, per-fixture changes, market-context breakdowns, ignored prediction counts and price-boundary summaries. Positive precision/recall/F1/IoU deltas indicate higher values; negative center-error and price-error deltas indicate lower errors. A `null` delta means one side has no defined metric; it is not treated as zero. The comparator does not declare a trading winner or infer structural quality.
+The JSON output includes both prediction profiles, candidate-minus-baseline deltas for micro-aggregated overall and supply/demand metrics, equal-weight macro metrics for overall and supply/demand results (including each metric's defined-fixture counts), per-fixture changes, market-context breakdowns, ignored prediction counts and price-boundary summaries. Positive precision/recall/F1/IoU deltas indicate higher values; negative center-error and price-error deltas indicate lower errors. A `null` delta means one side has no defined metric; it is not treated as zero. The comparator does not declare a trading winner or infer structural quality.
 
 ## Optional price-axis scoring
 
