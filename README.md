@@ -2,6 +2,16 @@
 
 Monthly ATH breakout scanner with Discord alerts and a Streamlit paper portfolio.
 
+## StockMind Telegram MVP
+
+The StockMind Telegram assistant supports multilingual Indian-equity and crypto research, chart screenshot DNS analysis, and offline human-reviewed zone benchmarking.
+
+- [StockMind Telegram MVP setup and usage](stockmind_telegram_mvp/README.md)
+- [DNS screenshot benchmark methodology](stockmind_telegram_mvp/ZONE_BENCHMARK.md)
+- [Strict JSON input policy](stockmind_telegram_mvp/STRICT_JSON.md)
+
+The chart benchmark is an offline evaluation aid. Synthetic unit tests do not establish real-market chart accuracy; only independently reviewed screenshots paired with actual model predictions are eligible for that evaluation.
+
 ## Cyber trading desk dashboard
 
 The Streamlit app now uses a cyberpunk multi-workspace layout:
