@@ -189,14 +189,37 @@ def _validate_price_accuracy(price, matches, label):
 
 
 def _macro_aggregate_matches(actual, expected):
-    """Accept current coverage fields and the immediately preceding legacy shape."""
-    if actual == expected:
-        return True
+    """Validate current and legacy macro aggregates without Python bool coercion."""
+    if not isinstance(actual, dict):
+        return False
     legacy_expected = {
         key: value for key, value in expected.items()
         if not key.endswith("_coverage")
     }
-    return actual == legacy_expected
+    if set(actual) == set(expected):
+        comparable = expected
+    elif set(actual) == set(legacy_expected):
+        comparable = legacy_expected
+    else:
+        return False
+
+    for field, expected_value in comparable.items():
+        value = actual[field]
+        if field == "fixture_count" or field.endswith("_fixture_count"):
+            # Counts are integers, not booleans or numerically equal floats.
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value != expected_value
+            ):
+                return False
+        elif expected_value is None:
+            if value is not None:
+                return False
+        elif not _same_metric(value, expected_value):
+            # _same_metric rejects booleans, non-finite values and non-numbers.
+            return False
+    return True
 
 
 def _validate_aggregate_report(report, fixtures, label):
