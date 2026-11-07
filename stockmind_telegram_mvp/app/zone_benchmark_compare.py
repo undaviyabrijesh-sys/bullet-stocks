@@ -188,6 +188,17 @@ def _validate_price_accuracy(price, matches, label):
             raise ValueError(f"{label}.{field} does not match per-zone price errors")
 
 
+def _macro_aggregate_matches(actual, expected):
+    """Accept current coverage fields and the immediately preceding legacy shape."""
+    if actual == expected:
+        return True
+    legacy_expected = {
+        key: value for key, value in expected.items()
+        if not key.endswith("_coverage")
+    }
+    return actual == legacy_expected
+
+
 def _validate_aggregate_report(report, fixtures, label):
     """Ensure report-level aggregates are derived from the included fixtures."""
     all_matches = [match for fixture in fixtures for match in fixture["matches"]]
@@ -200,7 +211,9 @@ def _validate_aggregate_report(report, fixtures, label):
     expected_macro_overall = _aggregate_macro_metrics(
         [fixture["overall"] for fixture in fixtures]
     )
-    if "macro_overall" in report and report["macro_overall"] != expected_macro_overall:
+    if "macro_overall" in report and not _macro_aggregate_matches(
+        report["macro_overall"], expected_macro_overall
+    ):
         raise ValueError(f"{label} macro_overall metrics do not match its fixture results")
 
     expected_by_type = {}
@@ -217,8 +230,19 @@ def _validate_aggregate_report(report, fixtures, label):
         ])
         for zone_type in ("supply", "demand")
     }
-    if "macro_by_zone_type" in report and report["macro_by_zone_type"] != expected_macro_by_type:
-        raise ValueError(f"{label} macro_by_zone_type metrics do not match its fixture results")
+    if "macro_by_zone_type" in report:
+        actual_macro_by_type = report["macro_by_zone_type"]
+        if (
+            not isinstance(actual_macro_by_type, dict)
+            or set(actual_macro_by_type) != set(expected_macro_by_type)
+            or any(
+                not _macro_aggregate_matches(
+                    actual_macro_by_type[zone_type], expected_macro_by_type[zone_type]
+                )
+                for zone_type in expected_macro_by_type
+            )
+        ):
+            raise ValueError(f"{label} macro_by_zone_type metrics do not match its fixture results")
 
     expected_ignored = sum(fixture["ignored_prediction_count"] for fixture in fixtures)
     if report.get("ignored_prediction_count") != expected_ignored:
@@ -458,6 +482,11 @@ def _compare_macro_metrics(baseline, candidate):
                 "delta": _delta(baseline[field], candidate[field]),
                 "baseline_defined_fixture_count": baseline[f"{field}_fixture_count"],
                 "candidate_defined_fixture_count": candidate[f"{field}_fixture_count"],
+                "baseline_coverage": baseline[f"{field}_coverage"],
+                "candidate_coverage": candidate[f"{field}_coverage"],
+                "coverage_delta": _delta(
+                    baseline[f"{field}_coverage"], candidate[f"{field}_coverage"]
+                ),
             }
             for field in fields
         },
