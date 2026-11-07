@@ -102,7 +102,17 @@ class ToolArgumentParsingTests(unittest.IsolatedAsyncioTestCase):
                 )
                 first_message = SimpleNamespace(
                     tool_calls=[call],
-                    model_dump=lambda **kwargs: {"role": "assistant", "tool_calls": []},
+                    model_dump=lambda **kwargs: {
+                        "role": "assistant",
+                        "tool_calls": [{
+                            "id": call.id,
+                            "type": "function",
+                            "function": {
+                                "name": call.function.name,
+                                "arguments": call.function.arguments,
+                            },
+                        }],
+                    },
                     content=None,
                 )
                 final_message = SimpleNamespace(
