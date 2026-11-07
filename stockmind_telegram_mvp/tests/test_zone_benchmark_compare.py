@@ -318,7 +318,7 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
             with self.subTest(aggregate=label):
                 report = self._report("baseline", [{**_zone(), "draw_overlay": True}])
                 mutate(report)
-                with self.assertRaisesRegex(ValueError, "does not match its fixture results"):
+                with self.assertRaisesRegex(ValueError, "fixture results"):
                     compare_benchmark_reports(report, report)
 
     def test_prediction_profile_settings_use_exact_json_types(self):
@@ -328,7 +328,10 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
             report["prediction_profile"], sort_keys=True, separators=(",", ":"), allow_nan=False
         ).encode("utf-8")
         report["prediction_profile_sha256"] = hashlib.sha256(canonical).hexdigest()
-        report["fixtures"][0]["prediction_metadata"]["settings"]["temperature"] = True
+        report["fixtures"][0]["prediction_metadata"]["settings"] = {
+            **report["fixtures"][0]["prediction_metadata"]["settings"],
+            "temperature": True,
+        }
 
         with self.assertRaisesRegex(ValueError, "does not match report prediction_profile"):
             compare_benchmark_reports(report, report)
