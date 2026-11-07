@@ -15,6 +15,7 @@ from pathlib import Path, PurePosixPath
 
 from PIL import Image
 
+from .overlay_engine import normalized_zone_to_pixel_box
 from .price_axis import MAX_AXIS_ANCHORS, calibrate_price_axis
 
 MAX_REFERENCE_ZONES = 8
@@ -88,6 +89,29 @@ def validate_manual_geometry(plot_bounds, zones):
     return plot, normalized_zones
 
 
+def validate_reference_zone_pixel_geometry(zones, image_width, image_height):
+    """Reject manual boxes that the benchmark cannot score at source resolution."""
+    for dimension, value in (("image_width", image_width), ("image_height", image_height)):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{dimension} must be a positive integer")
+
+    for index, zone in enumerate(zones):
+        pixel_box = normalized_zone_to_pixel_box(
+            zone,
+            image_width,
+            image_height,
+            require_draw_overlay=False,
+            min_width=1,
+            min_height=1,
+        )
+        if pixel_box is None:
+            raise ValueError(
+                f"reference_zones[{index}] is not scoreable at the original image resolution; "
+                "each zone must span at least one pixel in both dimensions and be no taller "
+                "than 45% of the screenshot"
+            )
+
+
 def validate_price_axis_anchor_points(plot_bounds, anchors):
     """Validate manually read price labels without fitting until save time."""
     plot = _validate_box(plot_bounds, "price_axis_plot_bounds")
@@ -151,6 +175,13 @@ def _validate_draft(draft, expected_status):
     fixture_id = draft.get("fixture_id")
     if not isinstance(fixture_id, str) or not _FIXTURE_ID_RE.fullmatch(fixture_id):
         raise ValueError("draft fixture_id is invalid")
+    image_width = draft.get("image_width")
+    image_height = draft.get("image_height")
+    if (
+        isinstance(image_width, bool) or not isinstance(image_width, int) or image_width <= 0
+        or isinstance(image_height, bool) or not isinstance(image_height, int) or image_height <= 0
+    ):
+        raise ValueError("draft image_width and image_height must be positive integers")
     if draft.get("status") != expected_status:
         raise ValueError(f"draft status must be {expected_status!r}")
     metadata = draft.get("annotation_metadata")
@@ -192,7 +223,10 @@ def _validate_draft(draft, expected_status):
         _parse_timestamp(metadata.get("annotated_at"), "annotation_metadata.annotated_at")
         if metadata.get("reviewer_id") is not None or metadata.get("reviewed_at") is not None:
             raise ValueError("pending review draft must not contain reviewer provenance")
-        plot, _ = validate_manual_geometry(draft.get("reference_plot_bounds"), draft.get("reference_zones"))
+        plot, normalized_zones = validate_manual_geometry(
+            draft.get("reference_plot_bounds"), draft.get("reference_zones")
+        )
+        validate_reference_zone_pixel_geometry(normalized_zones, image_width, image_height)
         anchors = draft.get("price_axis_anchors", [])
         if anchors is None:
             anchors = []
@@ -224,6 +258,9 @@ def apply_manual_annotations(
     if not isinstance(annotator_id, str) or not _ANNOTATOR_ID_RE.fullmatch(annotator_id):
         raise ValueError("annotator_id must be an anonymized ID like 'ann-001'")
     plot, normalized_zones = validate_manual_geometry(plot_bounds, zones)
+    validate_reference_zone_pixel_geometry(
+        normalized_zones, draft["image_width"], draft["image_height"]
+    )
     axis_anchors, axis_scale = validate_price_axis_annotations(
         plot, price_axis_anchors if price_axis_anchors is not None else [], price_axis_scale
     )
@@ -336,6 +373,7 @@ class _DesktopEditor:
         self.draft = draft
         self.mode = mode
         self.output_path = output_path
+        self.image_width, self.image_height = image.size
         self.plot_bounds = draft.get("reference_plot_bounds")
         self.zones = copy.deepcopy(draft.get("reference_zones", []))
         self.axis_anchors = copy.deepcopy(draft.get("price_axis_anchors", []))
@@ -506,7 +544,12 @@ class _DesktopEditor:
                 return
             zone = {"zone_type": self.tool.get(), **box}
             try:
-                validate_manual_geometry(self.plot_bounds, self.zones + [zone])
+                _, candidate_zones = validate_manual_geometry(
+                    self.plot_bounds, self.zones + [zone]
+                )
+                validate_reference_zone_pixel_geometry(
+                    candidate_zones, self.image_width, self.image_height
+                )
             except ValueError as exc:
                 self.status.set(str(exc))
                 return
