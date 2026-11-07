@@ -261,6 +261,45 @@ def _parse_tool_arguments(raw_arguments) -> dict:
     return arguments
 
 
+_TOOL_ARGUMENT_DEFAULTS = {
+    "search_stocks": {"limit": 10, "sector": None, "industry": None},
+    "get_financials": {"section": "annual"},
+    "get_price_history": {"days": 90},
+    "get_intraday_stock_bars": {
+        "interval": 5, "date": None, "from_date": None, "to_date": None, "limit": 375
+    },
+    "get_crypto_klines": {"interval": "15m", "market": "spot", "limit": 100},
+    "get_crypto_ticker": {"market": "spot"},
+}
+_SYMBOL_TOOL_NAMES = frozenset({
+    "get_quote",
+    "get_live_quote",
+    "get_financials",
+    "get_price_history",
+    "get_intraday_stock_bars",
+    "get_crypto_klines",
+    "get_crypto_ticker",
+})
+
+
+def _canonical_tool_arguments(tool_name: str, arguments: dict) -> dict:
+    """Normalize only values the dispatcher/provider already treats as equivalent."""
+    canonical = dict(arguments)
+    for key, default in _TOOL_ARGUMENT_DEFAULTS.get(tool_name, {}).items():
+        canonical.setdefault(key, default)
+
+    if tool_name in _SYMBOL_TOOL_NAMES:
+        symbol = canonical.get("symbol")
+        if isinstance(symbol, str):
+            canonical["symbol"] = symbol.strip().upper()
+    elif tool_name == "search_stocks":
+        query = canonical.get("query")
+        if isinstance(query, str):
+            canonical["query"] = query.strip()
+
+    return canonical
+
+
 def _tool_budget_error(reason: str) -> dict:
     if reason == "call_limit":
         return {
@@ -703,7 +742,8 @@ class ResearchAI:
                     )
                 else:
                     try:
-                        args = _parse_tool_arguments(call.function.arguments)
+                        raw_args = _parse_tool_arguments(call.function.arguments)
+                        args = _canonical_tool_arguments(call.function.name, raw_args)
                     except ValueError as exc:
                         result = {"error": str(exc), "type": "InvalidToolArguments"}
                     else:
