@@ -26,6 +26,19 @@ class ToolArgumentParsingTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaisesRegex(ValueError, "valid JSON"):
                     _parse_tool_arguments(raw)
 
+    def test_rejects_duplicate_keys_and_non_standard_numeric_constants(self):
+        invalid_payloads = (
+            '{"symbol":"RELIANCE","symbol":"TCS"}',
+            '{"filters":{"limit":10,"limit":20}}',
+            '{"limit":NaN}',
+            '{"limit":Infinity}',
+            '{"limit":-Infinity}',
+        )
+        for raw in invalid_payloads:
+            with self.subTest(raw=raw):
+                with self.assertRaisesRegex(ValueError, "valid JSON"):
+                    _parse_tool_arguments(raw)
+
     def test_rejects_valid_json_that_is_not_an_object(self):
         for raw in ("[]", '"RELIANCE"', "42", "true", "null"):
             with self.subTest(raw=raw):
