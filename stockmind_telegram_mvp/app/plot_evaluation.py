@@ -192,6 +192,23 @@ def build_plot_boundary_accuracy(
     }
 
 
+def _strict_json_equal(actual, expected):
+    """Compare report evidence without Python's bool/int/float equality loophole."""
+    if type(actual) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        return (
+            actual.keys() == expected.keys()
+            and all(_strict_json_equal(actual[key], expected[key]) for key in expected)
+        )
+    if isinstance(expected, list):
+        return (
+            len(actual) == len(expected)
+            and all(_strict_json_equal(left, right) for left, right in zip(actual, expected))
+        )
+    return actual == expected
+
+
 def validate_plot_boundary_accuracy(
     metrics,
     reference_plot_bounds,
@@ -214,7 +231,7 @@ def validate_plot_boundary_accuracy(
         image_width,
         image_height,
     )
-    if metrics != expected:
+    if not _strict_json_equal(metrics, expected):
         raise ValueError(f"{label} does not agree with its plot bounds and zone-box evidence")
 
 
