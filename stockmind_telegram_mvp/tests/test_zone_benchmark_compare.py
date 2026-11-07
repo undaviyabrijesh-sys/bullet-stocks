@@ -8,7 +8,10 @@ from pathlib import Path
 from PIL import Image
 
 from stockmind_telegram_mvp.app.zone_benchmark import evaluate_benchmark_manifest
-from stockmind_telegram_mvp.app.zone_benchmark_compare import compare_benchmark_reports
+from stockmind_telegram_mvp.app.zone_benchmark_compare import (
+    _read_report,
+    compare_benchmark_reports,
+)
 
 
 def _image():
@@ -456,6 +459,21 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not agree with its plot bounds"):
             compare_benchmark_reports(baseline, candidate)
 
+
+
+def test_report_loader_rejects_duplicate_object_keys(self):
+        report_path = self.root / "duplicate-report.json"
+        report_path.write_text(
+            '{"fixture_count":1,"fixture_count":2}', encoding="utf-8"
+        )
+        with self.assertRaisesRegex(ValueError, "duplicate JSON object key 'fixture_count'"):
+            _read_report(report_path, "baseline")
+
+    def test_report_loader_rejects_non_standard_numeric_constants(self):
+        report_path = self.root / "nonfinite-report.json"
+        report_path.write_text('{"score":NaN}', encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "non-standard JSON constant 'NaN'"):
+            _read_report(report_path, "candidate")
 
 if __name__ == "__main__":
     unittest.main()

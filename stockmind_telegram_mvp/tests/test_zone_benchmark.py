@@ -698,5 +698,23 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
             evaluate_benchmark_manifest(self.manifest)
 
 
+def test_rejects_duplicate_object_keys_in_jsonl_manifest(self):
+        record = self._record("duplicate-json-key")
+        raw = json.dumps(record).replace(
+            '"fixture_id": "duplicate-json-key"',
+            '"fixture_id": "shadow", "fixture_id": "duplicate-json-key"',
+            1,
+        )
+        self.manifest.write_text(raw + "\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "duplicate JSON object key 'fixture_id'"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_rejects_non_standard_numeric_constants_in_jsonl_manifest(self):
+        record = self._record("nonfinite-json")
+        raw = json.dumps(record).replace('"image_width": 40', '"image_width": NaN', 1)
+        self.manifest.write_text(raw + "\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "non-standard JSON constant 'NaN'"):
+            evaluate_benchmark_manifest(self.manifest)
+
 if __name__ == "__main__":
     unittest.main()

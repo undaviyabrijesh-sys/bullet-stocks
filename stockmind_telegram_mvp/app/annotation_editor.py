@@ -17,6 +17,7 @@ from PIL import Image
 
 from .overlay_engine import normalized_zone_to_pixel_box
 from .price_axis import MAX_AXIS_ANCHORS, calibrate_price_axis
+from .strict_json import loads as strict_json_loads
 
 MAX_REFERENCE_ZONES = 8
 _ANNOTATOR_ID_RE = re.compile(r"^ann-[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
@@ -316,7 +317,7 @@ def load_draft_and_image(draft_path, image_path=None):
         draft_bytes = stream.read(1024 * 1024 + 1)
     if len(draft_bytes) > 1024 * 1024:
         raise ValueError("annotation draft exceeds the 1 MiB editor limit")
-    draft = json.loads(draft_bytes.decode("utf-8"))
+    draft = strict_json_loads(draft_bytes.decode("utf-8"))
     if not isinstance(draft, dict) or draft.get("draft_schema") != "stockmind.annotation-draft.v1":
         raise ValueError("unsupported annotation draft schema")
 

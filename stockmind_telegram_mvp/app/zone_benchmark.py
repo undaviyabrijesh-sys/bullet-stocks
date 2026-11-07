@@ -17,6 +17,7 @@ from PIL import Image
 from .overlay_engine import validate_chart_image
 from .zone_evaluation import evaluate_zone_predictions
 from .plot_evaluation import aggregate_plot_boundary_accuracy
+from .strict_json import loads as strict_json_loads
 
 
 _REQUIRED_FIELDS = {
@@ -579,10 +580,11 @@ def evaluate_benchmark_manifest(manifest_path, *, max_image_bytes=DEFAULT_MAX_IM
                 if not raw_line.strip():
                     continue
                 try:
-                    record = json.loads(raw_line)
-                except json.JSONDecodeError as exc:
+                    record = strict_json_loads(raw_line)
+                except ValueError as exc:
+                    detail = exc.msg if isinstance(exc, json.JSONDecodeError) else str(exc)
                     raise ValueError(
-                        f"line {line_number}: invalid JSON ({exc.msg})"
+                        f"line {line_number}: invalid JSON ({detail})"
                     ) from exc
                 fixture = _validate_record(
                     record, manifest_path.parent, line_number, max_image_bytes

@@ -126,5 +126,30 @@ class ChartPredictionProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertRegex(CHART_PROMPT_SHA256, re.compile(r"^[0-9a-f]{64}$"))
 
 
+
+async def test_rejects_duplicate_keys_in_provider_chart_json(self):
+        response = SimpleNamespace(
+            model="vision-model",
+            created=1793908800,
+            choices=[SimpleNamespace(message=SimpleNamespace(
+                content='{"analysis":"first","analysis":"second","plot_bounds":null,"zones":[]}'
+            ))],
+        )
+        research, _ = self._research(response, "vision-model")
+        with self.assertRaisesRegex(ValueError, "duplicate JSON object key"):
+            await research.analyze_chart_image([], "Map DNS", b"image-bytes", "image/png")
+
+    async def test_rejects_non_standard_numbers_in_provider_chart_json(self):
+        response = SimpleNamespace(
+            model="vision-model",
+            created=1793908800,
+            choices=[SimpleNamespace(message=SimpleNamespace(
+                content='{"analysis":"test","plot_bounds":null,"zones":[{"score":NaN}]}'
+            ))],
+        )
+        research, _ = self._research(response, "vision-model")
+        with self.assertRaisesRegex(ValueError, "non-standard JSON constant"):
+            await research.analyze_chart_image([], "Map DNS", b"image-bytes", "image/png")
+
 if __name__ == "__main__":
     unittest.main()

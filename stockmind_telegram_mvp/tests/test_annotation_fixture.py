@@ -249,5 +249,27 @@ class AnnotationFixtureAssemblyTests(unittest.TestCase):
             )
 
 
+
+def test_rejects_duplicate_keys_in_prediction_capture_json(self):
+        capture = build_prediction_capture(self.reviewed_path, self.result)
+        capture_path = self.inbox / "duplicate.prediction.json"
+        raw = json.dumps(capture)
+        raw = raw.replace(
+            '"fixture_id": "btc-1h-001"',
+            '"fixture_id": "shadow", "fixture_id": "btc-1h-001"',
+            1,
+        )
+        capture_path.write_text(raw, encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "duplicate JSON object key"):
+            assemble_benchmark_fixture(self.reviewed_path, capture_path)
+
+    def test_rejects_non_standard_constants_in_prediction_capture_json(self):
+        capture = build_prediction_capture(self.reviewed_path, self.result)
+        capture_path = self.inbox / "nonfinite.prediction.json"
+        raw = json.dumps(capture).replace('"image_width": 64', '"image_width": NaN', 1)
+        capture_path.write_text(raw, encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "non-standard JSON constant"):
+            assemble_benchmark_fixture(self.reviewed_path, capture_path)
+
 if __name__ == "__main__":
     unittest.main()

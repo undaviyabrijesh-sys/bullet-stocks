@@ -6,6 +6,7 @@ import math
 import re
 from pathlib import Path
 
+from .strict_json import loads as strict_json_loads
 from .zone_benchmark import (
     _aggregate_by_context,
     _aggregate_metrics,
@@ -699,11 +700,12 @@ def compare_benchmark_reports(baseline_report, candidate_report):
 def _read_report(path, label):
     try:
         with Path(path).open("r", encoding="utf-8") as report_file:
-            return json.load(report_file)
+            return strict_json_loads(report_file.read())
     except UnicodeDecodeError as exc:
         raise ValueError(f"{label} report must be UTF-8 JSON") from exc
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"{label} report contains invalid JSON: {exc.msg}") from exc
+    except ValueError as exc:
+        detail = exc.msg if isinstance(exc, json.JSONDecodeError) else str(exc)
+        raise ValueError(f"{label} report contains invalid JSON: {detail}") from exc
 
 
 def main(argv=None):

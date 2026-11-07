@@ -8,6 +8,7 @@ import httpx
 from openai import AsyncOpenAI
 
 from .tapetide import TapetideAPIError
+from .strict_json import loads as strict_json_loads
 
 SYSTEM_PROMPT = """
 You are StockMind AI, a multilingual market research assistant for Indian equities and crypto.
@@ -687,7 +688,7 @@ class ResearchAI:
         raw = response.choices[0].message.content
         if not raw:
             raise RuntimeError("Empty chart analysis response.")
-        data = json.loads(raw)
+        data = strict_json_loads(raw)
         if not isinstance(data, dict) or not isinstance(data.get("zones"), list):
             raise ValueError("Invalid chart analysis structure.")
         result = sanitize_chart_analysis(data)

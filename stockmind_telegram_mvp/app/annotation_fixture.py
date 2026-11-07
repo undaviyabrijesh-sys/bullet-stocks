@@ -12,6 +12,7 @@ import re
 import tempfile
 from pathlib import Path
 
+from .strict_json import loads as strict_json_loads
 from .ai import sanitize_chart_analysis
 from .annotation_editor import (
     load_draft_and_image,
@@ -47,9 +48,12 @@ def _read_json(path, *, max_bytes=_MAX_JSON_BYTES):
     if len(raw) > max_bytes:
         raise ValueError(f"JSON input exceeds the {max_bytes}-byte limit")
     try:
-        value = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError("JSON input must be valid UTF-8 JSON") from exc
+        value = strict_json_loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise ValueError(
+            "JSON input must be valid UTF-8 JSON with unique object keys and standard numeric constants: "
+            f"{exc}"
+        ) from exc
     if not isinstance(value, dict):
         raise ValueError("JSON input must contain an object")
     return value

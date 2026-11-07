@@ -2,6 +2,10 @@
 
 This benchmark compares AI overlay rectangles with zones manually marked on the exact same chart screenshot. It is an offline evaluation aid; it does not alter bot responses or make a live model call.
 
+## Strict JSON inputs
+
+The chart-response parser, annotation editor, prediction-capture loader, JSONL benchmark runner and paired-report loader reject duplicate object keys and non-standard numeric constants (`NaN`, `Infinity` and `-Infinity`). Python's default JSON decoder otherwise accepts these ambiguous/non-standard inputs (and silently keeps the last duplicate key). Rejecting them keeps model output, screenshot provenance and benchmark evidence unambiguous. Ordinary JSON strings containing words such as `NaN` remain valid.
+
 ## Prediction provenance
 
 Every fixture must include a prediction_metadata object containing provider, the model identifier returned by the provider, requested_model, prompt_version, prompt_sha256, generated_at, settings and optional system_fingerprint. The chart prompt is supplied as a separate system message from the user's caption. Chart-image requests are stateless: prior conversation turns are not forwarded to the vision model, preventing stale levels and earlier user instructions from contaminating a new screenshot analysis while reducing input-token cost. Text embedded in a screenshot is treated as chart content, not executable instructions; the current caption can describe the requested analysis but cannot override the chart evidence rules or structured output contract. generated_at must be an ISO-8601 timestamp with an explicit timezone. Missing provider-returned model IDs or timestamps are not guessed; such incomplete metadata cannot be benchmarked.
