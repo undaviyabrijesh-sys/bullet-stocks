@@ -541,6 +541,15 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate fixture_id"):
             evaluate_benchmark_manifest(self.manifest)
 
+    def test_rejects_duplicate_screenshot_hashes_with_distinct_fixture_ids(self):
+        self._write(
+            self._record("chart-copy-a"),
+            self._record("chart-copy-b"),
+        )
+
+        with self.assertRaisesRegex(ValueError, "duplicate screenshot image_sha256"):
+            evaluate_benchmark_manifest(self.manifest)
+
     def test_rejects_malformed_jsonl(self):
         self.manifest.write_text('{"fixture_id":\n', encoding="utf-8")
 
