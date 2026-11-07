@@ -204,6 +204,40 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         self.assertAlmostEqual(result["macro_by_zone_type"]["demand"]["recall"], 0.5)
         self.assertAlmostEqual(result["macro_by_zone_type"]["demand"]["f1"], 0.5)
 
+    def test_macro_metrics_exclude_undefined_charts_and_report_coverage(self):
+        self._write(
+            self._record(
+                "empty-chart",
+                reference_zones=[],
+                predicted_zones=[],
+            ),
+            self._record("scored-chart"),
+        )
+
+        result = evaluate_benchmark_manifest(self.manifest)
+        macro = result["macro_overall"]
+
+        self.assertEqual(macro["fixture_count"], 2)
+        expected = {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "mean_iou": 1.0,
+            "mean_center_error_normalized": 0.0,
+        }
+        for field, value in expected.items():
+            self.assertAlmostEqual(macro[field], value)
+            self.assertEqual(macro[f"{field}_fixture_count"], 1)
+
+        supply = result["macro_by_zone_type"]["supply"]
+        self.assertEqual(supply["fixture_count"], 2)
+        self.assertIsNone(supply["precision"])
+        self.assertEqual(supply["precision_fixture_count"], 0)
+
+        demand = result["macro_by_zone_type"]["demand"]
+        self.assertEqual(demand["fixture_count"], 2)
+        self.assertEqual(demand["recall_fixture_count"], 1)
+
     def test_allows_different_generation_times_for_the_same_profile(self):
         self._write(
             self._record("first"),
