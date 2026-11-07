@@ -77,7 +77,7 @@ class AnnotationBenchmarkCompatibilityTests(unittest.TestCase):
     def test_rejects_invalid_image_dimensions(self):
         for width, height in ((True, 100), (100, False), (0, 100), (100, 0)):
             with self.subTest(width=width, height=height), self.assertRaisesRegex(
-                ValueError, "positive integers"
+                ValueError, "positive integer"
             ):
                 validate_reference_zone_pixel_geometry([], width, height)
 
