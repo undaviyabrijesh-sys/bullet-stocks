@@ -482,8 +482,12 @@ def _aggregate_macro_metrics(rows):
     result = {"fixture_count": len(rows)}
     for field in fields:
         values = [row[field] for row in rows if row.get(field) is not None]
-        result[field] = sum(values) / len(values) if values else None
-        result[f"{field}_fixture_count"] = len(values)
+        defined_count = len(values)
+        result[field] = sum(values) / defined_count if defined_count else None
+        result[f"{field}_fixture_count"] = defined_count
+        result[f"{field}_coverage"] = (
+            defined_count / len(rows) if rows else None
+        )
     return result
 
 
