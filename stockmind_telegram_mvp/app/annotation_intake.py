@@ -125,6 +125,9 @@ def prepare_annotation_draft(
         "market_context": context,
         "reference_plot_bounds": None,
         "reference_zones": [],
+        "price_axis_anchors": [],
+        "price_axis_scale": None,
+        "price_axis_plot_bounds": None,
         "annotation_metadata": {
             "source": "manual",
             "annotator_id": None,

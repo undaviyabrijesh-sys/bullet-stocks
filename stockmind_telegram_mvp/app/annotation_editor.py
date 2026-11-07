@@ -15,6 +15,8 @@ from pathlib import Path, PurePosixPath
 
 from PIL import Image
 
+from .price_axis import MAX_AXIS_ANCHORS, calibrate_price_axis
+
 MAX_REFERENCE_ZONES = 8
 _ANNOTATOR_ID_RE = re.compile(r"^ann-[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 _REVIEWER_ID_RE = re.compile(r"^rev-[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
@@ -86,6 +88,59 @@ def validate_manual_geometry(plot_bounds, zones):
     return plot, normalized_zones
 
 
+def validate_price_axis_anchor_points(plot_bounds, anchors):
+    """Validate manually read price labels without fitting until save time."""
+    plot = _validate_box(plot_bounds, "price_axis_plot_bounds")
+    if not isinstance(anchors, list):
+        raise ValueError("price_axis_anchors must be a list")
+    if len(anchors) > MAX_AXIS_ANCHORS:
+        raise ValueError(f"price_axis_anchors cannot exceed {MAX_AXIS_ANCHORS} entries")
+
+    normalized = []
+    for index, anchor in enumerate(anchors):
+        field = f"price_axis_anchors[{index}]"
+        if not isinstance(anchor, dict) or set(anchor) != {"y", "price"}:
+            raise ValueError(f"{field} must contain exactly y and price")
+        point = {}
+        for key in ("y", "price"):
+            value = anchor[key]
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"{field}.{key} must be a finite number")
+            try:
+                value = float(value)
+            except (OverflowError, TypeError, ValueError) as exc:
+                raise ValueError(f"{field}.{key} must be a finite number") from exc
+            if not math.isfinite(value):
+                raise ValueError(f"{field}.{key} must be a finite number")
+            point[key] = value
+        if not plot["y_top"] <= point["y"] <= plot["y_bottom"]:
+            raise ValueError(f"{field}.y must fall inside the marked price plot")
+        if point["price"] <= 0:
+            raise ValueError(f"{field}.price must be positive")
+        normalized.append(point)
+
+    normalized.sort(key=lambda point: point["y"])
+    for previous, current in zip(normalized, normalized[1:]):
+        if current["y"] - previous["y"] <= 1e-9:
+            raise ValueError("price-axis anchors must have distinct y coordinates")
+        if current["price"] >= previous["price"]:
+            raise ValueError("price must decrease from top to bottom of the chart")
+    return normalized
+
+
+def validate_price_axis_annotations(plot_bounds, anchors, scale):
+    """Validate 3..20 manual anchors and reject a distorted linear/log fit."""
+    normalized = validate_price_axis_anchor_points(plot_bounds, anchors)
+    if not normalized:
+        return [], None
+    if len(normalized) < 3:
+        raise ValueError("price-axis calibration requires at least 3 anchors")
+    if not isinstance(scale, str) or scale not in {"linear", "log"}:
+        raise ValueError("price_axis_scale must be 'linear' or 'log'")
+    calibrate_price_axis(normalized, scale=scale)
+    return normalized, scale
+
+
 def _validate_draft(draft, expected_status):
     if not isinstance(draft, dict):
         raise ValueError("annotation draft must be a JSON object")
@@ -124,6 +179,12 @@ def _validate_draft(draft, expected_status):
             raise ValueError("unannotated draft must not contain annotation or review provenance")
         if draft.get("reference_plot_bounds") is not None or draft.get("reference_zones") != []:
             raise ValueError("unannotated draft must not contain manual geometry")
+        if (
+            draft.get("price_axis_anchors", []) not in (None, [])
+            or draft.get("price_axis_scale") is not None
+            or draft.get("price_axis_plot_bounds") is not None
+        ):
+            raise ValueError("unannotated draft must not contain price-axis calibration")
     else:
         annotator_id = metadata.get("annotator_id")
         if not isinstance(annotator_id, str) or not _ANNOTATOR_ID_RE.fullmatch(annotator_id):
@@ -131,22 +192,50 @@ def _validate_draft(draft, expected_status):
         _parse_timestamp(metadata.get("annotated_at"), "annotation_metadata.annotated_at")
         if metadata.get("reviewer_id") is not None or metadata.get("reviewed_at") is not None:
             raise ValueError("pending review draft must not contain reviewer provenance")
-        validate_manual_geometry(draft.get("reference_plot_bounds"), draft.get("reference_zones"))
+        plot, _ = validate_manual_geometry(draft.get("reference_plot_bounds"), draft.get("reference_zones"))
+        anchors = draft.get("price_axis_anchors", [])
+        if anchors is None:
+            anchors = []
+        if not isinstance(anchors, list):
+            raise ValueError("price_axis_anchors must be a list")
+        axis_scale = draft.get("price_axis_scale")
+        axis_plot = draft.get("price_axis_plot_bounds")
+        if anchors:
+            validate_price_axis_annotations(plot, anchors, axis_scale)
+            if axis_plot is None or _validate_box(axis_plot, "price_axis_plot_bounds") != plot:
+                raise ValueError("price_axis_plot_bounds must match the manually marked reference plot")
+        elif axis_scale is not None or axis_plot is not None:
+            raise ValueError("price-axis scale and plot bounds require at least 3 anchors")
     return metadata
 
 
-def apply_manual_annotations(draft, plot_bounds, zones, annotator_id, *, annotated_at=None):
+def apply_manual_annotations(
+    draft,
+    plot_bounds,
+    zones,
+    annotator_id,
+    *,
+    annotated_at=None,
+    price_axis_anchors=None,
+    price_axis_scale=None,
+):
     """Return a pending-review copy of an intake draft with validated geometry."""
     _validate_draft(draft, "pending_annotation")
     if not isinstance(annotator_id, str) or not _ANNOTATOR_ID_RE.fullmatch(annotator_id):
         raise ValueError("annotator_id must be an anonymized ID like 'ann-001'")
     plot, normalized_zones = validate_manual_geometry(plot_bounds, zones)
+    axis_anchors, axis_scale = validate_price_axis_annotations(
+        plot, price_axis_anchors if price_axis_anchors is not None else [], price_axis_scale
+    )
     timestamp = annotated_at or _utc_now()
     _parse_timestamp(timestamp, "annotated_at")
 
     result = copy.deepcopy(draft)
     result["reference_plot_bounds"] = plot
     result["reference_zones"] = normalized_zones
+    result["price_axis_anchors"] = axis_anchors
+    result["price_axis_scale"] = axis_scale
+    result["price_axis_plot_bounds"] = copy.deepcopy(plot) if axis_anchors else None
     result["status"] = "pending_review"
     result["benchmark_ready"] = False
     result["annotation_metadata"].update({
@@ -237,21 +326,25 @@ class _DesktopEditor:
 
     def __init__(self, root, draft, image, mode, output_path):
         import tkinter as tk
-        from tkinter import messagebox
+        from tkinter import messagebox, simpledialog
         from PIL import ImageTk
 
         self.tk = tk
         self.messagebox = messagebox
+        self.simpledialog = simpledialog
         self.root = root
         self.draft = draft
         self.mode = mode
         self.output_path = output_path
         self.plot_bounds = draft.get("reference_plot_bounds")
         self.zones = copy.deepcopy(draft.get("reference_zones", []))
+        self.axis_anchors = copy.deepcopy(draft.get("price_axis_anchors", []))
+        self.axis_scale = tk.StringVar(value=draft.get("price_axis_scale") or "linear")
         self.tool = tk.StringVar(value="plot" if self.plot_bounds is None else "demand")
         self.identity = tk.StringVar()
         self.drag_start = None
         self.preview_id = None
+        self.undo_stack = []
 
         screen_w = max(800, root.winfo_screenwidth() - 100)
         screen_h = max(600, root.winfo_screenheight() - 180)
@@ -270,10 +363,14 @@ class _DesktopEditor:
 
         if mode == "annotate":
             tk.Label(controls, text="Draw:").pack(side="left")
-            tk.OptionMenu(controls, self.tool, "plot", "demand", "supply").pack(side="left")
+            tk.OptionMenu(controls, self.tool, "plot", "demand", "supply", "axis_anchor").pack(side="left")
+            tk.Label(controls, text="Axis scale:").pack(side="left", padx=(8, 2))
+            tk.OptionMenu(controls, self.axis_scale, "linear", "log").pack(side="left")
             tk.Button(controls, text="Undo", command=self.undo).pack(side="left", padx=6)
             tk.Button(controls, text="Save annotation draft", command=self.save_annotation).pack(side="left", padx=6)
         else:
+            if self.axis_anchors:
+                tk.Label(controls, text=f"Price-axis calibration: {self.axis_scale.get()} ({len(self.axis_anchors)} anchors)").pack(side="left", padx=6)
             tk.Button(controls, text="Approve", command=lambda: self.save_review(True)).pack(side="left", padx=6)
             tk.Button(controls, text="Reject", command=lambda: self.save_review(False)).pack(side="left", padx=6)
 
@@ -292,8 +389,12 @@ class _DesktopEditor:
 
     def _instructions(self):
         if self.mode == "annotate":
-            return "Draw the price-plot boundary first; then draw each visible supply or demand band. Empty zone lists are allowed."
-        return "Review the original screenshot and manual rectangles. Approval requires a separate reviewer ID."
+            return (
+                "Draw the price-plot boundary, then supply/demand bands. "
+                "Optional: choose axis_anchor, click 3..20 price levels inside the plot, "
+                "and enter their exact visible labels. Empty zone lists are allowed."
+            )
+        return "Review the original screenshot, zones and any manually entered price-axis anchors. Use a separate reviewer ID."
 
     def _coords(self, box):
         return (box["x_start"] * self.display_w, box["y_top"] * self.display_h,
@@ -308,19 +409,33 @@ class _DesktopEditor:
             self.canvas.create_rectangle(*self._coords(zone), outline=color, width=2, stipple="gray25", tags="overlay")
             x1, y1, _, _ = self._coords(zone)
             self.canvas.create_text(x1 + 5, y1 + 5, text=zone["zone_type"].upper(), fill=color, anchor="nw", tags="overlay")
+        if self.plot_bounds:
+            plot_x1, _, plot_x2, _ = self._coords(self.plot_bounds)
+            for anchor in self.axis_anchors:
+                y = anchor["y"] * self.display_h
+                self.canvas.create_line(plot_x1, y, plot_x2, y, fill="#F59E0B", dash=(3, 3), width=1, tags="overlay")
+                self.canvas.create_oval(plot_x2 - 4, y - 4, plot_x2 + 4, y + 4, outline="#F59E0B", fill="#F59E0B", tags="overlay")
+                self.canvas.create_text(plot_x2 - 6, y - 5, text=f"{anchor['price']:g}", fill="#F59E0B", anchor="se", tags="overlay")
 
     def _start_draw(self, event):
         self.drag_start = (max(0, min(self.display_w, event.x)), max(0, min(self.display_h, event.y)))
         if self.preview_id is not None:
             self.canvas.delete(self.preview_id)
-        self.preview_id = self.canvas.create_rectangle(*self.drag_start, *self.drag_start, outline="#F59E0B", width=2, dash=(3, 3))
+        if self.tool.get() == "axis_anchor":
+            y = self.drag_start[1]
+            self.preview_id = self.canvas.create_line(0, y, self.display_w, y, fill="#F59E0B", dash=(3, 3))
+        else:
+            self.preview_id = self.canvas.create_rectangle(*self.drag_start, *self.drag_start, outline="#F59E0B", width=2, dash=(3, 3))
 
     def _move_draw(self, event):
         if self.drag_start is None or self.preview_id is None:
             return
         x = max(0, min(self.display_w, event.x))
         y = max(0, min(self.display_h, event.y))
-        self.canvas.coords(self.preview_id, self.drag_start[0], self.drag_start[1], x, y)
+        if self.tool.get() == "axis_anchor":
+            self.canvas.coords(self.preview_id, 0, y, self.display_w, y)
+        else:
+            self.canvas.coords(self.preview_id, self.drag_start[0], self.drag_start[1], x, y)
 
     def _finish_draw(self, event):
         if self.drag_start is None:
@@ -332,6 +447,39 @@ class _DesktopEditor:
         if self.preview_id is not None:
             self.canvas.delete(self.preview_id)
             self.preview_id = None
+        if self.tool.get() == "axis_anchor":
+            if self.plot_bounds is None:
+                self.status.set("Draw the price-plot boundary before adding price-axis anchors.")
+                return
+            y = y1 / self.display_h
+            if not self.plot_bounds["y_top"] <= y <= self.plot_bounds["y_bottom"]:
+                self.status.set("Price-axis anchors must be placed inside the main price plot.")
+                return
+            raw_price = self.simpledialog.askstring(
+                "Manual price-axis anchor",
+                "Enter the exact visible price label aligned with this horizontal level (no commas):",
+                parent=self.root,
+            )
+            if raw_price is None:
+                self.status.set(self._instructions())
+                return
+            try:
+                price = float(raw_price.strip())
+                anchor = {"y": y, "price": price}
+                normalized = validate_price_axis_anchor_points(
+                    self.plot_bounds, self.axis_anchors + [anchor]
+                )
+            except (AttributeError, ValueError) as exc:
+                self.status.set(str(exc))
+                return
+            self.axis_anchors = normalized
+            self.undo_stack.append(("axis_anchor", anchor))
+            self.status.set(
+                f"Added manual price anchor {price:g}; {len(self.axis_anchors)} recorded (3 minimum for scoring)."
+            )
+            self._redraw()
+            return
+
         left, right = sorted((x0, x1))
         top, bottom = sorted((y0, y1))
         if right - left < 2 or bottom - top < 2:
@@ -346,9 +494,11 @@ class _DesktopEditor:
         if self.tool.get() == "plot":
             try:
                 validate_manual_geometry(box, self.zones)
+                validate_price_axis_anchor_points(box, self.axis_anchors)
             except ValueError as exc:
                 self.status.set(str(exc))
                 return
+            self.undo_stack.append(("plot", copy.deepcopy(self.plot_bounds)))
             self.plot_bounds = box
         else:
             if self.plot_bounds is None:
@@ -361,20 +511,33 @@ class _DesktopEditor:
                 self.status.set(str(exc))
                 return
             self.zones.append(zone)
+            self.undo_stack.append(("zone", zone))
         self.status.set(self._instructions())
         self._redraw()
 
     def undo(self):
-        if self.zones:
-            self.zones.pop()
-        elif self.plot_bounds is not None:
-            self.plot_bounds = None
+        if not self.undo_stack:
+            self.status.set("No new drawing action to undo.")
+            return
+        action, value = self.undo_stack.pop()
+        if action == "zone":
+            self.zones.remove(value)
+        elif action == "axis_anchor":
+            self.axis_anchors.remove(value)
+        elif action == "plot":
+            self.plot_bounds = value
         self._redraw()
+        self.status.set(self._instructions())
 
     def save_annotation(self):
         try:
             updated = apply_manual_annotations(
-                self.draft, self.plot_bounds, self.zones, self.identity.get().strip()
+                self.draft,
+                self.plot_bounds,
+                self.zones,
+                self.identity.get().strip(),
+                price_axis_anchors=self.axis_anchors,
+                price_axis_scale=self.axis_scale.get(),
             )
             _write_new_json(self.output_path, updated)
         except (OSError, ValueError) as exc:

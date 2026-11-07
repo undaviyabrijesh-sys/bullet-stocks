@@ -16,6 +16,8 @@ from stockmind_telegram_mvp.app.annotation_editor import (
     load_draft_and_image,
     review_annotation_draft,
     validate_manual_geometry,
+    validate_price_axis_anchor_points,
+    validate_price_axis_annotations,
 )
 
 
@@ -42,6 +44,9 @@ def _draft():
         "market_context": {"asset_class": "crypto", "symbol": "BTCUSDT", "exchange": "binance", "timeframe": "1h"},
         "reference_plot_bounds": None,
         "reference_zones": [],
+        "price_axis_anchors": [],
+        "price_axis_scale": None,
+        "price_axis_plot_bounds": None,
         "annotation_metadata": {
             "source": "manual",
             "annotator_id": None,
@@ -104,6 +109,80 @@ class AnnotationGeometryTests(unittest.TestCase):
             validate_manual_geometry(PLOT, [ZONE] * 9)
 
 
+class PriceAxisAnnotationTests(unittest.TestCase):
+    LINEAR_ANCHORS = [
+        {"y": 0.2, "price": 120.0},
+        {"y": 0.5, "price": 90.0},
+        {"y": 0.8, "price": 60.0},
+    ]
+
+    def test_normalizes_anchor_order_and_calibrates_linear_scale(self):
+        reversed_order = list(reversed(self.LINEAR_ANCHORS))
+        anchors, scale = validate_price_axis_annotations(PLOT, reversed_order, "linear")
+        self.assertEqual([point["y"] for point in anchors], [0.2, 0.5, 0.8])
+        self.assertEqual(scale, "linear")
+
+    def test_calibrates_log_scale_from_manually_supplied_anchors(self):
+        anchors = [
+            {"y": 0.2, "price": 100.0},
+            {"y": 0.5, "price": 70.0},
+            {"y": 0.8, "price": 49.0},
+        ]
+        normalized, scale = validate_price_axis_annotations(PLOT, anchors, "log")
+        self.assertEqual(len(normalized), 3)
+        self.assertEqual(scale, "log")
+
+    def test_geometry_only_annotation_does_not_invent_a_scale(self):
+        anchors, scale = validate_price_axis_annotations(PLOT, [], "linear")
+        self.assertEqual(anchors, [])
+        self.assertIsNone(scale)
+
+    def test_rejects_one_or_two_anchors_for_price_scoring(self):
+        for anchors in (self.LINEAR_ANCHORS[:1], self.LINEAR_ANCHORS[:2]):
+            with self.subTest(count=len(anchors)), self.assertRaisesRegex(ValueError, "at least 3"):
+                validate_price_axis_annotations(PLOT, anchors, "linear")
+
+    def test_rejects_anchor_outside_plot_or_duplicate_y(self):
+        outside = [dict(self.LINEAR_ANCHORS[0], y=0.05), *self.LINEAR_ANCHORS[1:]]
+        duplicate = [*self.LINEAR_ANCHORS[:2], dict(self.LINEAR_ANCHORS[2], y=0.5)]
+        with self.assertRaisesRegex(ValueError, "inside the marked price plot"):
+            validate_price_axis_anchor_points(PLOT, outside)
+        with self.assertRaisesRegex(ValueError, "distinct y"):
+            validate_price_axis_anchor_points(PLOT, duplicate)
+
+    def test_rejects_reversed_or_non_positive_prices(self):
+        reversed_prices = [
+            {"y": 0.2, "price": 60.0},
+            {"y": 0.5, "price": 90.0},
+            {"y": 0.8, "price": 120.0},
+        ]
+        with self.assertRaisesRegex(ValueError, "decrease"):
+            validate_price_axis_anchor_points(PLOT, reversed_prices)
+        invalid = [dict(self.LINEAR_ANCHORS[0], price=0), *self.LINEAR_ANCHORS[1:]]
+        with self.assertRaisesRegex(ValueError, "positive"):
+            validate_price_axis_anchor_points(PLOT, invalid)
+
+    def test_rejects_boolean_non_finite_and_extra_anchor_fields(self):
+        for value in (True, float("nan"), float("inf")):
+            bad = [dict(self.LINEAR_ANCHORS[0], price=value), *self.LINEAR_ANCHORS[1:]]
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                validate_price_axis_anchor_points(PLOT, bad)
+        extra = [dict(self.LINEAR_ANCHORS[0], note="estimated"), *self.LINEAR_ANCHORS[1:]]
+        with self.assertRaisesRegex(ValueError, "exactly y and price"):
+            validate_price_axis_anchor_points(PLOT, extra)
+
+    def test_rejects_distorted_fit_and_invalid_scale(self):
+        distorted = [
+            {"y": 0.2, "price": 120.0},
+            {"y": 0.5, "price": 100.0},
+            {"y": 0.8, "price": 50.0},
+        ]
+        with self.assertRaisesRegex(ValueError, "distorted or inconsistent"):
+            validate_price_axis_annotations(PLOT, distorted, "linear")
+        with self.assertRaisesRegex(ValueError, "linear' or 'log"):
+            validate_price_axis_annotations(PLOT, self.LINEAR_ANCHORS, "unknown")
+
+
 class AnnotationWorkflowTests(unittest.TestCase):
     def test_annotation_creates_pending_review_without_mutating_input(self):
         draft = _draft()
@@ -123,6 +202,64 @@ class AnnotationWorkflowTests(unittest.TestCase):
         result = apply_manual_annotations(_draft(), PLOT, [], "ann-001", annotated_at="2026-11-07T12:00:00Z")
         self.assertEqual(result["reference_zones"], [])
         self.assertEqual(result["status"], "pending_review")
+        self.assertEqual(result["price_axis_anchors"], [])
+        self.assertIsNone(result["price_axis_scale"])
+        self.assertIsNone(result["price_axis_plot_bounds"])
+
+    def test_annotation_persists_manual_axis_anchors_and_plot_bounds(self):
+        anchors = [
+            {"y": 0.8, "price": 60},
+            {"y": 0.2, "price": 120},
+            {"y": 0.5, "price": 90},
+        ]
+        result = apply_manual_annotations(
+            _draft(), PLOT, [ZONE], "ann-001",
+            annotated_at="2026-11-07T12:00:00Z",
+            price_axis_anchors=anchors,
+            price_axis_scale="linear",
+        )
+        self.assertEqual(result["price_axis_anchors"], [
+            {"y": 0.2, "price": 120.0},
+            {"y": 0.5, "price": 90.0},
+            {"y": 0.8, "price": 60.0},
+        ])
+        self.assertEqual(result["price_axis_scale"], "linear")
+        self.assertEqual(result["price_axis_plot_bounds"], PLOT)
+
+    def test_reviewer_revalidates_and_preserves_price_axis_calibration(self):
+        annotated = apply_manual_annotations(
+            _draft(), PLOT, [], "ann-001",
+            annotated_at="2026-11-07T12:00:00Z",
+            price_axis_anchors=[
+                {"y": 0.2, "price": 120},
+                {"y": 0.5, "price": 90},
+                {"y": 0.8, "price": 60},
+            ],
+            price_axis_scale="linear",
+        )
+        approved = review_annotation_draft(
+            annotated, "rev-002", approve=True, reviewed_at="2026-11-07T12:05:00Z"
+        )
+        self.assertEqual(approved["price_axis_scale"], "linear")
+        self.assertEqual(len(approved["price_axis_anchors"]), 3)
+        self.assertEqual(approved["price_axis_plot_bounds"], PLOT)
+
+    def test_rejects_review_when_axis_plot_does_not_match_reference_plot(self):
+        annotated = apply_manual_annotations(
+            _draft(), PLOT, [], "ann-001",
+            annotated_at="2026-11-07T12:00:00Z",
+            price_axis_anchors=[
+                {"y": 0.2, "price": 120},
+                {"y": 0.5, "price": 90},
+                {"y": 0.8, "price": 60},
+            ],
+            price_axis_scale="linear",
+        )
+        annotated["price_axis_plot_bounds"] = dict(PLOT, x_start=0.2)
+        with self.assertRaisesRegex(ValueError, "must match"):
+            review_annotation_draft(
+                annotated, "rev-002", approve=True, reviewed_at="2026-11-07T12:05:00Z"
+            )
 
     def test_rejects_invalid_annotator_id(self):
         for value in ("ann-", "person@example.com", "../ann-1", "rev-001"):
