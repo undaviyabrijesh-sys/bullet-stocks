@@ -228,15 +228,18 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         for field, value in expected.items():
             self.assertAlmostEqual(macro[field], value)
             self.assertEqual(macro[f"{field}_fixture_count"], 1)
+            self.assertAlmostEqual(macro[f"{field}_coverage"], 0.5)
 
         supply = result["macro_by_zone_type"]["supply"]
         self.assertEqual(supply["fixture_count"], 2)
         self.assertIsNone(supply["precision"])
         self.assertEqual(supply["precision_fixture_count"], 0)
+        self.assertEqual(supply["precision_coverage"], 0.0)
 
         demand = result["macro_by_zone_type"]["demand"]
         self.assertEqual(demand["fixture_count"], 2)
         self.assertEqual(demand["recall_fixture_count"], 1)
+        self.assertEqual(demand["recall_coverage"], 0.5)
 
     def test_allows_different_generation_times_for_the_same_profile(self):
         self._write(
