@@ -86,6 +86,56 @@ class ToolArgumentParsingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(tool_message["content"])["type"], "InvalidToolArguments")
 
 
+    async def test_ambiguous_arguments_are_rejected_before_market_data_dispatch(self):
+        invalid_payloads = (
+            '{"symbol":"RELIANCE","symbol":"TCS"}',
+            '{"symbol":"RELIANCE","limit":NaN}',
+        )
+        for raw_arguments in invalid_payloads:
+            with self.subTest(raw_arguments=raw_arguments):
+                call = SimpleNamespace(
+                    id="call-ambiguous",
+                    function=SimpleNamespace(
+                        name="get_quote",
+                        arguments=raw_arguments,
+                    ),
+                )
+                first_message = SimpleNamespace(
+                    tool_calls=[call],
+                    model_dump=lambda **kwargs: {"role": "assistant", "tool_calls": []},
+                    content=None,
+                )
+                final_message = SimpleNamespace(
+                    tool_calls=[],
+                    content="I rejected ambiguous tool arguments.",
+                )
+                create = AsyncMock(
+                    side_effect=[
+                        SimpleNamespace(choices=[SimpleNamespace(message=first_message)]),
+                        SimpleNamespace(choices=[SimpleNamespace(message=final_message)]),
+                    ]
+                )
+                quote = AsyncMock(return_value={"data": {"symbol": "RELIANCE"}})
+                research = object.__new__(ResearchAI)
+                research.model = "gpt-4o-mini"
+                research.client = SimpleNamespace(
+                    chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+                )
+                research.market_data = SimpleNamespace(quote=quote)
+                research.crypto_data = None
+
+                answer = await research.answer([], "Get a quote")
+
+                self.assertEqual(answer, "I rejected ambiguous tool arguments.")
+                quote.assert_not_awaited()
+                tool_message = create.await_args_list[1].kwargs["messages"][-1]
+                self.assertEqual(tool_message["role"], "tool")
+                self.assertEqual(
+                    json.loads(tool_message["content"])["type"],
+                    "InvalidToolArguments",
+                )
+
+
 class ToolRequestCanonicalizationTests(unittest.TestCase):
     def test_provider_defaults_and_symbol_normalization_are_applied(self):
         self.assertEqual(
