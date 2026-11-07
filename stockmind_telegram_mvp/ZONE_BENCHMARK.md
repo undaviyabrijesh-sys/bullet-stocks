@@ -366,3 +366,13 @@ to the bot; do not independently re-export or recompress it. The model provenanc
 hash is computed from the exact bytes sent to vision. If orientation normalization
 would exceed the configured byte limit, processing stops with an explicit error
 rather than sending mismatched or oversized data.
+
+
+## Direct overlay renderer orientation contract
+
+`render_overlay` normalizes EXIF orientation for ordinary callers before
+converting normalized coordinates to pixels. This keeps direct/offline rendering
+consistent with Telegram chart processing and annotation intake. The internal
+`validated=True` fast path is only for callers that have already run
+`prepare_chart_image` on the exact same bytes; validation without orientation
+normalization is not sufficient for that fast path.
