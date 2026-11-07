@@ -321,14 +321,20 @@ def _serialize_tool_result(result, tool_name: str, max_bytes: int = MAX_TOOL_RES
     max_bytes = max(MIN_TOOL_RESULT_BUDGET_BYTES, int(max_bytes))
     try:
         serialized = json.dumps(
-            result, ensure_ascii=False, separators=(",", ":"), default=str
+            result,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
+            allow_nan=False,
         )
     except (TypeError, ValueError, OverflowError):
         result = {
             "error": "The market-data result could not be serialized safely.",
             "type": "ToolResultSerializationError",
         }
-        serialized = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+        serialized = json.dumps(
+            result, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+        )
 
     rows = result.get("data") if isinstance(result, dict) else None
     serialized_size = len(serialized.encode("utf-8"))
@@ -360,7 +366,11 @@ def _serialize_tool_result(result, tool_name: str, max_bytes: int = MAX_TOOL_RES
                 ),
             }
             candidate_json = json.dumps(
-                candidate, ensure_ascii=False, separators=(",", ":"), default=str
+                candidate,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                default=str,
+                allow_nan=False,
             )
             if len(candidate_json.encode("utf-8")) <= max_bytes:
                 best = candidate_json
@@ -377,7 +387,9 @@ def _serialize_tool_result(result, tool_name: str, max_bytes: int = MAX_TOOL_RES
         ),
         "type": "ToolResultTooLarge",
     }
-    return json.dumps(fallback, ensure_ascii=False, separators=(",", ":"))
+    return json.dumps(
+        fallback, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    )
 
 
 def _tool_error_payload(exc: Exception) -> dict:

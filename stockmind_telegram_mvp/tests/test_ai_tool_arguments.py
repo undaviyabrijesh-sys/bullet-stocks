@@ -10,6 +10,7 @@ from stockmind_telegram_mvp.app.ai import (
     _parse_tool_arguments,
     _serialize_tool_result,
 )
+from stockmind_telegram_mvp.app.strict_json import loads as strict_json_loads
 
 
 class ToolArgumentParsingTests(unittest.IsolatedAsyncioTestCase):
@@ -223,6 +224,28 @@ class ToolResultSerializationTests(unittest.TestCase):
         self.assertEqual(
             result["truncation"]["selection"], "first_in_provider_order"
         )
+
+    def test_non_finite_provider_numbers_are_withheld_as_serialization_errors(self):
+        for value in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(value=repr(value)):
+                serialized = _serialize_tool_result(
+                    {"source": "Tapetide", "data": [{"nested": {"value": value}}]},
+                    "get_quote",
+                )
+
+                result = strict_json_loads(serialized)
+                self.assertEqual(result["type"], "ToolResultSerializationError")
+                self.assertNotIn("Infinity", serialized)
+                self.assertNotIn(":NaN", serialized)
+
+    def test_finite_large_provider_numbers_remain_valid_json(self):
+        serialized = _serialize_tool_result(
+            {"data": [{"value": 1e200}]},
+            "get_quote",
+        )
+
+        result = strict_json_loads(serialized)
+        self.assertEqual(result["data"][0]["value"], 1e200)
 
     def test_oversized_non_list_payload_is_withheld_not_partially_forwarded(self):
         sensitive_value = "x" * 2048

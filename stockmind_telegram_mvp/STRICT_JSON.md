@@ -1,4 +1,4 @@
-# Strict JSON input policy
+# Strict JSON policy
 
 StockMind uses a shared strict JSON decoder for untrusted model output, model
 tool arguments, annotation drafts, prediction captures and benchmark reports.
@@ -21,6 +21,13 @@ words such as `"NaN"` or `"Infinity"` are also valid.
 For model tool calls, parsing happens before dispatch. Invalid arguments are
 returned to the model as an `InvalidToolArguments` result and do not invoke a
 market-data provider.
+
+Outbound market-data results are also serialized with non-finite floats disabled.
+Python's default JSON encoder otherwise emits non-standard `NaN` and
+`Infinity` tokens. If a provider response contains a non-finite numeric value,
+StockMind withholds that result and returns a bounded
+`ToolResultSerializationError` payload instead of passing ambiguous numeric
+data into model context. Finite large values remain valid JSON numbers.
 
 Run the focused tests from the repository root:
 
