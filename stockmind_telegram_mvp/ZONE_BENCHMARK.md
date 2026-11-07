@@ -4,7 +4,7 @@ This benchmark compares AI overlay rectangles with zones manually marked on the 
 
 ## Strict JSON inputs
 
-The chart-response parser, annotation editor, prediction-capture loader, JSONL benchmark runner and paired-report loader reject duplicate object keys and non-standard numeric constants (`NaN`, `Infinity` and `-Infinity`). Python's default JSON decoder otherwise accepts these ambiguous/non-standard inputs (and silently keeps the last duplicate key). Rejecting them keeps model output, screenshot provenance and benchmark evidence unambiguous. Ordinary JSON strings containing words such as `NaN` remain valid.
+The chart-response parser, annotation editor, prediction-capture loader, JSONL benchmark runner and paired-report loader reject duplicate object keys and non-standard numeric constants (`NaN`, `Infinity` and `-Infinity`). Python's default JSON decoder otherwise accepts these ambiguous/non-standard inputs (and silently keeps the last duplicate key). Rejecting them keeps model output, screenshot provenance and benchmark evidence unambiguous. Ordinary JSON strings containing words such as `NaN` remain valid. The model tool-argument parser uses the same strict decoder, so duplicate keys and non-standard numeric constants are rejected before any market-data tool is dispatched.
 
 Plot-boundary report evidence is also compared with exact JSON value types after its pixel metrics are recomputed. In particular, JSON booleans cannot stand in for numeric values (true is not an acceptable substitute for 1 or 1.0, and false is not an acceptable substitute for 0 or 0.0). This matters because Python's ordinary equality treats booleans as integers. The validator checks nested edge metrics and pixel evidence as well as top-level scores.
 
