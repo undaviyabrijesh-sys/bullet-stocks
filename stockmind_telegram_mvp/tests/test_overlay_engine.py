@@ -217,6 +217,47 @@ class OverlayRendererTests(unittest.TestCase):
             ],
         )
 
+    def test_invalid_early_candidates_do_not_consume_overlay_limit(self):
+        invalid = {
+            "zone_type": "demand", "draw_overlay": True,
+            "x_start": 0.8, "x_end": 0.2, "y_top": 0.3, "y_bottom": 0.4,
+        }
+        valid = {
+            "zone_type": "supply", "draw_overlay": True,
+            "x_start": 0.2, "x_end": 0.6, "y_top": 0.3, "y_bottom": 0.4,
+        }
+
+        with patch.object(
+            overlay_engine.ImageDraw.ImageDraw, "rectangle", autospec=True
+        ) as draw_rectangle:
+            result, count = render_overlay(sample_image(), [invalid] * 8 + [valid])
+
+        self.assertIsNotNone(result)
+        self.assertEqual(count, 1)
+        self.assertEqual(draw_rectangle.call_count, 1)
+
+    def test_renderer_caps_successfully_drawn_zones_at_eight(self):
+        zones = [
+            {
+                "zone_type": "demand" if index % 2 == 0 else "supply",
+                "draw_overlay": True,
+                "x_start": 0.02 + index * 0.1,
+                "x_end": 0.08 + index * 0.1,
+                "y_top": 0.2,
+                "y_bottom": 0.3,
+            }
+            for index in range(9)
+        ]
+
+        with patch.object(
+            overlay_engine.ImageDraw.ImageDraw, "rectangle", autospec=True
+        ) as draw_rectangle:
+            result, count = render_overlay(sample_image(), zones)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(count, 8)
+        self.assertEqual(draw_rectangle.call_count, 8)
+
     def test_renderer_pixel_geometry_is_shared_and_rejects_subminimum_boxes(self):
         zone = {
             "zone_type": "demand",

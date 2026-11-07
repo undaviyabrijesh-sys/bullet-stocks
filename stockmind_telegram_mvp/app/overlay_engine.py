@@ -6,6 +6,7 @@ from PIL import Image, ImageDraw, UnidentifiedImageError
 
 
 MAX_CHART_IMAGE_PIXELS = 25_000_000
+MAX_OVERLAY_ZONES = 8
 SUPPORTED_IMAGE_MIME_TYPES = {
     "JPEG": "image/jpeg",
     "PNG": "image/png",
@@ -183,6 +184,8 @@ def render_overlay(
 
     validated=True is reserved for callers that have just run validate_chart_image
     on these exact bytes before sending them to AI.
+    At most MAX_OVERLAY_ZONES drawable rectangles are emitted; rejected candidates
+    do not consume that limit.
     """
     if not validated:
         validate_chart_image(image_bytes)
@@ -208,7 +211,11 @@ def render_overlay(
     draw = ImageDraw.Draw(layer)
     count = 0
 
-    for zone in zones[:8]:
+    for zone in zones:
+        # The cap applies to successfully drawn overlays, not malformed or
+        # out-of-plot candidates that must be skipped.
+        if count >= MAX_OVERLAY_ZONES:
+            break
         if not isinstance(zone, dict) or zone.get("draw_overlay") is not True:
             continue
         zone_type = zone.get("zone_type")
