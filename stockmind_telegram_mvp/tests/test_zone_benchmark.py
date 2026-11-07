@@ -541,10 +541,11 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate fixture_id"):
             evaluate_benchmark_manifest(self.manifest)
 
-    def test_rejects_duplicate_screenshot_hashes_with_distinct_fixture_ids(self):
+    def test_rejects_duplicate_screenshot_hashes_with_distinct_paths_and_ids(self):
+        (self.root / "chart-copy.png").write_bytes(self.image_bytes)
         self._write(
             self._record("chart-copy-a"),
-            self._record("chart-copy-b"),
+            self._record("chart-copy-b", image_file="chart-copy.png"),
         )
 
         with self.assertRaisesRegex(ValueError, "duplicate screenshot image_sha256"):
