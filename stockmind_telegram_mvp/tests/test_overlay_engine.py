@@ -53,6 +53,33 @@ class OverlayRendererTests(unittest.TestCase):
                 self.assertEqual(mime_type, expected_mime[image_format])
                 self.assertEqual(validate_chart_image(normalized), mime_type)
 
+    def test_renderer_normalizes_exif_orientation_for_direct_callers(self):
+        original = oriented_sample_image(image_format="PNG", orientation=6)
+        zone = {
+            "zone_type": "demand",
+            "draw_overlay": True,
+            "x_start": 0.2,
+            "x_end": 0.8,
+            "y_top": 0.2,
+            "y_bottom": 0.4,
+        }
+        bounds = {
+            "x_start": 0.05,
+            "x_end": 0.95,
+            "y_top": 0.05,
+            "y_bottom": 0.95,
+        }
+
+        result, count = render_overlay(
+            original, [zone], plot_bounds=bounds, require_plot_bounds=True
+        )
+
+        self.assertEqual(count, 1)
+        with Image.open(BytesIO(result)) as rendered:
+            # EXIF orientation 6 rotates the source from 64x48 to 48x64.
+            # Normalize before applying normalized coordinates or zones shift.
+            self.assertEqual(rendered.size, (48, 64))
+
     def test_exif_orientation_one_preserves_original_bytes(self):
         original = oriented_sample_image(orientation=1)
         normalized, mime_type = prepare_chart_image(original)
