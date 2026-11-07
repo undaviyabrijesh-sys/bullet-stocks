@@ -254,9 +254,11 @@ def _parse_tool_arguments(raw_arguments) -> dict:
     if not isinstance(raw_arguments, str):
         raise ValueError("Tool arguments must be a JSON string.")
     try:
-        arguments = json.loads(raw_arguments)
-    except json.JSONDecodeError as exc:
-        raise ValueError("Tool arguments must be valid JSON.") from exc
+        arguments = strict_json_loads(raw_arguments)
+    except ValueError as exc:
+        raise ValueError(
+            "Tool arguments must be valid JSON without duplicate keys or non-standard numeric constants."
+        ) from exc
     if not isinstance(arguments, dict):
         raise ValueError("Tool arguments must be a JSON object.")
     return arguments
