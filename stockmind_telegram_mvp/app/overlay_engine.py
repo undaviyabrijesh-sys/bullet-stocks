@@ -252,13 +252,17 @@ def render_overlay(
 ) -> tuple[bytes | None, int]:
     """Draw validated, normalized rectangles onto a copy of the uploaded chart.
 
-    validated=True is reserved for callers that have just run validate_chart_image
-    on these exact bytes before sending them to AI.
+    validated=True is reserved for callers that have just run prepare_chart_image
+    on these exact bytes before sending them to AI. Ordinary direct callers are
+    normalized here so EXIF orientation cannot shift overlay coordinates.
     At most MAX_OVERLAY_ZONES drawable rectangles are emitted; rejected candidates
     do not consume that limit.
     """
     if not validated:
-        validate_chart_image(image_bytes)
+        # Direct renderer callers receive the same EXIF-safe coordinate frame as
+        # Telegram and annotation intake. The bot may skip this duplicate decode
+        # only after it has prepared these exact canonical bytes for vision.
+        image_bytes, _ = prepare_chart_image(image_bytes)
     if not isinstance(zones, (list, tuple)):
         return None, 0
 
