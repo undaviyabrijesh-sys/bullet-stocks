@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 from stockmind_telegram_mvp.app.ai import (
     MAX_TOOL_CALLS_PER_TURN,
     ResearchAI,
+    _canonical_tool_arguments,
     _parse_tool_arguments,
     _serialize_tool_result,
 )
@@ -70,6 +71,52 @@ class ToolArgumentParsingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tool_message["role"], "tool")
         self.assertEqual(tool_message["tool_call_id"], "call-malformed")
         self.assertEqual(json.loads(tool_message["content"])["type"], "InvalidToolArguments")
+
+
+class ToolRequestCanonicalizationTests(unittest.TestCase):
+    def test_provider_defaults_and_symbol_normalization_are_applied(self):
+        self.assertEqual(
+            _canonical_tool_arguments("get_crypto_klines", {"symbol": " btcusdt "}),
+            {
+                "symbol": "BTCUSDT",
+                "interval": "15m",
+                "market": "spot",
+                "limit": 100,
+            },
+        )
+        self.assertEqual(
+            _canonical_tool_arguments("get_price_history", {"symbol": " reliance "}),
+            {"symbol": "RELIANCE", "days": 90},
+        )
+        self.assertEqual(
+            _canonical_tool_arguments("get_intraday_stock_bars", {"symbol": "tcs"}),
+            {
+                "symbol": "TCS",
+                "interval": 5,
+                "date": None,
+                "from_date": None,
+                "to_date": None,
+                "limit": 375,
+            },
+        )
+
+    def test_distinct_crypto_market_or_interval_remains_distinct(self):
+        base = _canonical_tool_arguments("get_crypto_klines", {"symbol": "BTCUSDT"})
+        futures = _canonical_tool_arguments(
+            "get_crypto_klines", {"symbol": "BTCUSDT", "market": "usdm"}
+        )
+        hourly = _canonical_tool_arguments(
+            "get_crypto_klines", {"symbol": "BTCUSDT", "interval": "1h"}
+        )
+        self.assertNotEqual(base, futures)
+        self.assertNotEqual(base, hourly)
+
+    def test_stock_search_trims_query_without_changing_case(self):
+        padded = _canonical_tool_arguments("search_stocks", {"query": " Reliance "})
+        exact = _canonical_tool_arguments("search_stocks", {"query": "Reliance"})
+        different_case = _canonical_tool_arguments("search_stocks", {"query": "RELIANCE"})
+        self.assertEqual(padded, exact)
+        self.assertNotEqual(exact, different_case)
 
 
 class ToolResultSerializationTests(unittest.TestCase):
@@ -158,14 +205,14 @@ class ToolBudgetExecutionTests(unittest.IsolatedAsyncioTestCase):
             ],
         }
 
-    def make_research(self, create, market_data):
+    def make_research(self, create, market_data, crypto_data=None):
         research = object.__new__(ResearchAI)
         research.model = "gpt-4o-mini"
         research.client = SimpleNamespace(
             chat=SimpleNamespace(completions=SimpleNamespace(create=create))
         )
         research.market_data = market_data
-        research.crypto_data = None
+        research.crypto_data = crypto_data
         return research
 
     async def test_identical_tool_requests_in_one_batch_execute_provider_once(self):
@@ -256,6 +303,94 @@ class ToolBudgetExecutionTests(unittest.IsolatedAsyncioTestCase):
         duplicate = json.loads(tool_messages[1]["content"])
         self.assertTrue(duplicate["deduplicated"])
         self.assertEqual(duplicate["reused_tool_call_id"], "call-1")
+
+    async def test_crypto_request_with_omitted_defaults_matches_explicit_defaults(self):
+        calls = [
+            self.make_call(1, name="get_crypto_klines", arguments='{"symbol":" btcusdt "}'),
+            self.make_call(
+                2,
+                name="get_crypto_klines",
+                arguments='{"symbol":"BTCUSDT","interval":"15m","market":"spot","limit":100}',
+            ),
+        ]
+        first_message = SimpleNamespace(
+            tool_calls=calls,
+            content=None,
+            model_dump=lambda **kwargs: self.assistant_dump(calls),
+        )
+        final_message = SimpleNamespace(
+            tool_calls=[], content="The same BTC candle request was reused."
+        )
+        create = AsyncMock(
+            side_effect=[
+                self.make_response(first_message),
+                self.make_response(final_message),
+            ]
+        )
+        klines = AsyncMock(return_value={"source": "Binance", "data": [{"open_time": 1}]})
+        research = self.make_research(
+            create, SimpleNamespace(), SimpleNamespace(klines=klines)
+        )
+
+        answer = await research.answer([], "Get BTC candles")
+
+        self.assertEqual(answer, "The same BTC candle request was reused.")
+        klines.assert_awaited_once_with("BTCUSDT", "15m", "spot", 100)
+        tool_messages = [
+            item for item in create.await_args_list[1].kwargs["messages"]
+            if item.get("role") == "tool"
+        ]
+        self.assertTrue(json.loads(tool_messages[1]["content"])["deduplicated"])
+
+    async def test_different_crypto_market_and_interval_are_not_deduplicated(self):
+        calls = [
+            self.make_call(
+                1,
+                name="get_crypto_klines",
+                arguments='{"symbol":"BTCUSDT","market":"spot","interval":"15m"}',
+            ),
+            self.make_call(
+                2,
+                name="get_crypto_klines",
+                arguments='{"symbol":"BTCUSDT","market":"usdm","interval":"15m"}',
+            ),
+            self.make_call(
+                3,
+                name="get_crypto_klines",
+                arguments='{"symbol":"BTCUSDT","market":"spot","interval":"1h"}',
+            ),
+        ]
+        first_message = SimpleNamespace(
+            tool_calls=calls,
+            content=None,
+            model_dump=lambda **kwargs: self.assistant_dump(calls),
+        )
+        final_message = SimpleNamespace(tool_calls=[], content="Three distinct candle requests.")
+        create = AsyncMock(
+            side_effect=[
+                self.make_response(first_message),
+                self.make_response(final_message),
+            ]
+        )
+        klines = AsyncMock(
+            side_effect=[
+                {"market": "spot", "interval": "15m", "data": []},
+                {"market": "usdm", "interval": "15m", "data": []},
+                {"market": "spot", "interval": "1h", "data": []},
+            ]
+        )
+        research = self.make_research(
+            create, SimpleNamespace(), SimpleNamespace(klines=klines)
+        )
+
+        answer = await research.answer([], "Compare BTC spot and futures candles")
+
+        self.assertEqual(answer, "Three distinct candle requests.")
+        self.assertEqual(klines.await_count, 3)
+        self.assertEqual(
+            [call.args[1:3] for call in klines.await_args_list],
+            [("15m", "spot"), ("15m", "usdm"), ("1h", "spot")],
+        )
 
     async def test_different_arguments_are_not_deduplicated(self):
         calls = [
