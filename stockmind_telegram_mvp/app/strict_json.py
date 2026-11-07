@@ -1,19 +1,30 @@
 """Strict JSON decoding for untrusted model and benchmark inputs.
 
-Python's default JSON decoder silently keeps the last duplicate object key and
-accepts NaN/Infinity, neither of which is valid interoperable JSON. Reject both
-so screenshots, predictions and benchmark evidence have one unambiguous parse.
+Python's default JSON decoder silently keeps the last duplicate object key,
+accepts NaN/Infinity constants, and converts sufficiently large exponent-form
+numbers (for example 1e999) to float infinity. Reject these ambiguous or
+non-finite values so model requests and benchmark evidence have one parse.
 """
 
 import json
+import math
 
 
 class StrictJSONError(ValueError):
-    """Raised when JSON uses ambiguous or non-standard values."""
+    """Raised when JSON uses ambiguous or unsupported numeric values."""
 
 
 def _reject_constant(token):
     raise StrictJSONError(f"non-standard JSON constant {token!r} is not permitted")
+
+
+def _finite_float(token):
+    value = float(token)
+    if not math.isfinite(value):
+        raise StrictJSONError(
+            f"JSON number {token!r} is outside the supported finite numeric range"
+        )
+    return value
 
 
 def _unique_object(pairs):
@@ -26,9 +37,10 @@ def _unique_object(pairs):
 
 
 def loads(value):
-    """Decode JSON while rejecting duplicate keys and NaN/Infinity constants."""
+    """Decode JSON, rejecting duplicate keys and non-finite numeric values."""
     return json.loads(
         value,
         object_pairs_hook=_unique_object,
         parse_constant=_reject_constant,
+        parse_float=_finite_float,
     )
