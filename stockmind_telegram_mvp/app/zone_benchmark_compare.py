@@ -188,6 +188,35 @@ def _validate_price_accuracy(price, matches, label):
             raise ValueError(f"{label}.{field} does not match per-zone price errors")
 
 
+def _aggregate_values_match(actual, expected):
+    """Compare JSON aggregate values without Python's bool/int equivalence."""
+    if expected is None:
+        return actual is None
+    if isinstance(expected, bool):
+        return isinstance(actual, bool) and actual is expected
+    if isinstance(expected, int):
+        return isinstance(actual, int) and not isinstance(actual, bool) and actual == expected
+    if isinstance(expected, float):
+        return _finite(actual) and math.isclose(
+            float(actual), expected, rel_tol=1e-9, abs_tol=1e-12
+        )
+    if isinstance(expected, str):
+        return isinstance(actual, str) and actual == expected
+    if isinstance(expected, dict):
+        return (
+            isinstance(actual, dict)
+            and set(actual) == set(expected)
+            and all(_aggregate_values_match(actual[key], value) for key, value in expected.items())
+        )
+    if isinstance(expected, list):
+        return (
+            isinstance(actual, list)
+            and len(actual) == len(expected)
+            and all(_aggregate_values_match(left, right) for left, right in zip(actual, expected))
+        )
+    return type(actual) is type(expected) and actual == expected
+
+
 def _macro_aggregate_matches(actual, expected):
     """Validate current and legacy macro aggregates without Python bool coercion."""
     if not isinstance(actual, dict):
@@ -228,7 +257,7 @@ def _validate_aggregate_report(report, fixtures, label):
     expected_overall = _aggregate_metrics(
         [fixture["overall"] for fixture in fixtures], all_matches
     )
-    if report.get("overall") != expected_overall:
+    if not _aggregate_values_match(report.get("overall"), expected_overall):
         raise ValueError(f"{label} overall metrics do not match its fixture results")
 
     expected_macro_overall = _aggregate_macro_metrics(
@@ -244,7 +273,7 @@ def _validate_aggregate_report(report, fixtures, label):
         rows = [fixture["by_zone_type"][zone_type] for fixture in fixtures]
         matches = [match for match in all_matches if match["zone_type"] == zone_type]
         expected_by_type[zone_type] = _aggregate_metrics(rows, matches)
-    if report.get("by_zone_type") != expected_by_type:
+    if not _aggregate_values_match(report.get("by_zone_type"), expected_by_type):
         raise ValueError(f"{label} by_zone_type metrics do not match its fixture results")
 
     expected_macro_by_type = {
@@ -268,13 +297,13 @@ def _validate_aggregate_report(report, fixtures, label):
             raise ValueError(f"{label} macro_by_zone_type metrics do not match its fixture results")
 
     expected_ignored = sum(fixture["ignored_prediction_count"] for fixture in fixtures)
-    if report.get("ignored_prediction_count") != expected_ignored:
+    if not _aggregate_values_match(report.get("ignored_prediction_count"), expected_ignored):
         raise ValueError(f"{label} ignored_prediction_count does not match its fixtures")
 
-    if report.get("price_accuracy") != _aggregate_price_accuracy(fixtures):
+    if not _aggregate_values_match(report.get("price_accuracy"), _aggregate_price_accuracy(fixtures)):
         raise ValueError(f"{label} price_accuracy does not match its fixture results")
 
-    if report.get("plot_boundary_accuracy") != aggregate_plot_boundary_accuracy(fixtures):
+    if not _aggregate_values_match(report.get("plot_boundary_accuracy"), aggregate_plot_boundary_accuracy(fixtures)):
         raise ValueError(f"{label} plot_boundary_accuracy does not match its fixture results")
 
     for field, key in (
@@ -283,7 +312,7 @@ def _validate_aggregate_report(report, fixtures, label):
         ("exchange", "by_exchange"),
         ("timeframe", "by_timeframe"),
     ):
-        if report.get(key) != _aggregate_by_context(fixtures, field):
+        if not _aggregate_values_match(report.get(key), _aggregate_by_context(fixtures, field)):
             raise ValueError(f"{label} {key} does not match its fixture results")
 
 
@@ -310,7 +339,12 @@ def _validate_report(report, label):
     fixtures = report.get("fixtures")
     if not isinstance(fixtures, list) or not fixtures:
         raise ValueError(f"{label} report must contain a non-empty fixtures array")
-    if report.get("fixture_count") != len(fixtures):
+    fixture_count = report.get("fixture_count")
+    if (
+        isinstance(fixture_count, bool)
+        or not isinstance(fixture_count, int)
+        or fixture_count != len(fixtures)
+    ):
         raise ValueError(f"{label} fixture_count does not match its fixtures array")
 
     indexed = {}
@@ -333,12 +367,12 @@ def _validate_report(report, label):
         ):
             raise ValueError(f"{prefix} has an invalid price_axis_calibration_sha256")
         try:
-            _, fixture_profile, _ = _validate_prediction_metadata(
+            _, _, fixture_profile_sha256 = _validate_prediction_metadata(
                 fixture.get("prediction_metadata"), index + 1, fixture_id
             )
         except (TypeError, ValueError) as exc:
             raise ValueError(f"{prefix} has invalid prediction provenance: {exc}") from exc
-        if fixture_profile != profile:
+        if fixture_profile_sha256 != profile_hash:
             raise ValueError(f"{prefix} prediction_metadata does not match report prediction_profile")
         try:
             annotation = _validate_annotation_metadata(
