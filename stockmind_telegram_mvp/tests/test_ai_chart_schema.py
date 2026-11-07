@@ -122,6 +122,20 @@ class ChartResponseValidationTests(unittest.TestCase):
 
         self.assertEqual(len(result["zones"]), 8)
 
+    def test_invalid_early_items_do_not_consume_valid_zone_limit(self):
+        zones = [
+            None,
+            "not-a-zone",
+            *[zone(zone_type="resistance") for _ in range(6)],
+            zone(label="Late valid demand"),
+        ]
+
+        result = sanitize_chart_analysis(payload(zones))
+
+        self.assertEqual(len(result["zones"]), 1)
+        self.assertEqual(result["zones"][0]["label"], "Late valid demand")
+        self.assertTrue(result["zones"][0]["draw_overlay"])
+
     def test_sanitizes_untrusted_label_and_price_fields(self):
         result = sanitize_chart_analysis(payload(
             [zone(label="L" * 100, price_low={"unexpected": "object"}, price_high="H" * 40)],
