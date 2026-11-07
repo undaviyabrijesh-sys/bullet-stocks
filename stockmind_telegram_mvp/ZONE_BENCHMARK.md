@@ -66,7 +66,7 @@ Use the same IoU threshold across a benchmark release. Report aggregate and per-
 
 ## Batch manifest runner
 
-The batch runner verifies that each fixture still points to the exact annotated screenshot before scoring it. It reads at most the configured byte limit plus one byte, checks the SHA-256, actual image format, decoded image limit and recorded dimensions; rejects duplicate fixture IDs and paths that escape the manifest directory; then reports per-fixture results and micro-aggregated precision, recall, F1, IoU, center displacement and optional price-boundary errors. The default byte limit is 5 MiB, matching the Telegram bot's default upload cap. Use `--max-image-bytes` when the bot's `MAX_CHART_IMAGE_BYTES` setting has been overridden.
+The batch runner verifies that each fixture still points to the exact annotated screenshot before scoring it. It reads at most the configured byte limit plus one byte, checks the SHA-256, actual image format, decoded image limit and recorded dimensions; rejects duplicate fixture IDs, duplicate screenshot SHA-256 hashes (so identical image bytes cannot silently overweight the sample), and paths that escape the manifest directory; then reports per-fixture results and micro-aggregated precision, recall, F1, IoU, center displacement and optional price-boundary errors. The default byte limit is 5 MiB, matching the Telegram bot's default upload cap. Use `--max-image-bytes` when the bot's `MAX_CHART_IMAGE_BYTES` setting has been overridden.
 
 Create a UTF-8 JSONL file with one fixture object per line. The following is the schema shape only; values are placeholders, not a real chart annotation:
 
@@ -138,6 +138,8 @@ python -m stockmind_telegram_mvp.app.zone_benchmark stockmind_telegram_mvp/bench
 ~~~
 
 The JSON report is written to standard output and can be redirected to a versioned report file. Each fixture report includes a SHA-256 fingerprint of the exact manual reference-zone JSON, the price-axis calibration settings (when present), and the IoU threshold. These fingerprints allow paired model comparisons to prove that both reports used the same ground truth and scoring rules. In addition to overall and supply/demand metrics, it includes micro-aggregated breakdowns by asset class, symbol, exchange and timeframe. Missing context is retained as a `null` group so incomplete metadata is visible. Price-boundary errors are also aggregated within each context group when calibrated fixtures are available. A missing/empty manifest, malformed record, missing/invalid provenance, invalid market context, mixed prediction profiles, mixed annotation guideline versions, missing or unapproved annotation provenance, hash mismatch, changed dimensions, unsupported image or invalid manual annotation fails the run instead of emitting misleading aggregate metrics. The runner performs no AI request; predictions must be captured separately and paired with the exact source screenshot.
+
+Screenshot uniqueness is byte-level: the runner rejects two fixtures with the same SHA-256, but does not attempt perceptual matching of visually identical screenshots that were re-encoded or cropped differently.
 
 Aggregate precision/recall/F1 are micro-averaged from total TP/FP/FN counts. Mean IoU and center displacement are averaged across matched zones, not across screenshots. Price errors are averaged across scored zone boundaries; zones outside the calibrated y-range are counted as unscored rather than extrapolated.
 
