@@ -2,7 +2,7 @@ import math
 import warnings
 from io import BytesIO
 
-from PIL import Image, ImageDraw, UnidentifiedImageError
+from PIL import Image, ImageDraw, ImageOps, UnidentifiedImageError
 
 
 MAX_CHART_IMAGE_PIXELS = 25_000_000
@@ -61,6 +61,76 @@ def validate_chart_image(image_bytes: bytes) -> str:
         raise ValueError("The upload is not a valid JPEG, PNG or WEBP image. Please resend the chart.") from exc
 
     return SUPPORTED_IMAGE_MIME_TYPES[image_format]
+
+
+def prepare_chart_image(
+    image_bytes: bytes,
+    *,
+    max_output_bytes: int | None = None,
+) -> tuple[bytes, str]:
+    """Validate and normalize EXIF orientation before vision and overlay use.
+
+    The returned bytes are the canonical screenshot used by both the model and
+    renderer. Images without a rotation/flip tag are returned byte-for-byte
+    unchanged. Oriented images are re-encoded without EXIF orientation metadata,
+    so provider rendering, Pillow overlays and manual intake share one frame.
+    """
+    if max_output_bytes is not None and (
+        isinstance(max_output_bytes, bool)
+        or not isinstance(max_output_bytes, int)
+        or max_output_bytes < 1
+    ):
+        raise ValueError("max_output_bytes must be a positive integer or None")
+
+    mime_type = validate_chart_image(image_bytes)
+    if max_output_bytes is not None and len(image_bytes) > max_output_bytes:
+        raise ValueError(
+            f"Chart image exceeds the {max_output_bytes}-byte processing limit."
+        )
+
+    with Image.open(BytesIO(image_bytes)) as image:
+        orientation = image.getexif().get(274, 1)
+        if (
+            isinstance(orientation, bool)
+            or not isinstance(orientation, int)
+            or orientation not in range(1, 9)
+        ):
+            raise ValueError("The chart image contains invalid EXIF orientation metadata.")
+        if orientation == 1:
+            return image_bytes, mime_type
+
+        image_format = image.format
+        oriented = ImageOps.exif_transpose(image)
+        save_options = {}
+        icc_profile = image.info.get("icc_profile")
+        if icc_profile:
+            save_options["icc_profile"] = icc_profile
+
+        if image_format == "JPEG":
+            if oriented.mode not in {"L", "RGB", "CMYK"}:
+                oriented = oriented.convert("RGB")
+            save_options.update({"quality": 95, "optimize": True})
+        elif image_format == "WEBP":
+            if oriented.mode not in {"L", "RGB", "RGBA"}:
+                oriented = oriented.convert("RGB")
+            save_options.update({"quality": 95, "method": 6})
+        elif image_format == "PNG":
+            save_options["optimize"] = True
+        else:
+            raise ValueError("Please send a JPEG, PNG or WEBP chart image.")
+
+        output = BytesIO()
+        oriented.save(output, format=image_format, **save_options)
+        normalized_bytes = output.getvalue()
+
+    if max_output_bytes is not None and len(normalized_bytes) > max_output_bytes:
+        raise ValueError(
+            "Orientation-corrected chart exceeds the "
+            f"{max_output_bytes}-byte processing limit. Resize or re-export the screenshot."
+        )
+
+    normalized_mime_type = validate_chart_image(normalized_bytes)
+    return normalized_bytes, normalized_mime_type
 
 
 def _zone_overlay_label(zone: dict, zone_type: str) -> str:

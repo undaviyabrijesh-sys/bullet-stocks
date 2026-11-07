@@ -10,7 +10,7 @@ from aiogram.types import Message
 
 from .ai import ResearchAI
 from .crypto import BinanceMarketData
-from .overlay_engine import render_overlay, validate_chart_image
+from .overlay_engine import prepare_chart_image, render_overlay
 from .image_upload import BoundedBytesIO, UploadTooLargeError
 from .telegram_delivery import send_analysis_text, send_overlay_photo
 from .user_locks import UserLockRegistry
@@ -121,8 +121,11 @@ async def _run_research_locked(
 
     if image_bytes is not None:
         try:
-            # Inspect the actual file bytes; do not trust the Telegram MIME header.
-            image_mime_type = validate_chart_image(image_bytes)
+            # Inspect actual bytes and normalize EXIF orientation once. The exact
+            # same canonical bytes go to vision, hashing and Pillow overlay rendering.
+            image_bytes, image_mime_type = prepare_chart_image(
+                image_bytes, max_output_bytes=MAX_CHART_IMAGE_BYTES
+            )
         except ValueError as exc:
             await message.answer(str(exc))
             return

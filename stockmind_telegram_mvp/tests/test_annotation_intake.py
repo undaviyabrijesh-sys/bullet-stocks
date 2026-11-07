@@ -55,6 +55,29 @@ class AnnotationIntakeTests(unittest.TestCase):
         self.assertIsNone(draft["prediction_metadata"])
         self.assertNotIn(str(self.source), draft_path.read_text(encoding="utf-8"))
 
+    def test_exif_oriented_screenshot_is_normalized_before_hash_and_storage(self):
+        exif = Image.Exif()
+        exif[274] = 6
+        output = BytesIO()
+        Image.new("RGB", (64, 48), "white").save(output, format="PNG", exif=exif)
+        original = output.getvalue()
+        self.source.write_bytes(original)
+
+        result = prepare_annotation_draft(
+            self.source, self.output, "rotated-btc-1h"
+        )
+        stored = (self.output / result["image_file"]).read_bytes()
+        draft = json.loads(
+            (self.output / result["draft_file"]).read_text(encoding="utf-8")
+        )
+        with Image.open(BytesIO(stored)) as image:
+            self.assertEqual(image.size, (48, 64))
+            self.assertNotIn(274, image.getexif())
+        self.assertEqual(draft["image_width"], 48)
+        self.assertEqual(draft["image_height"], 64)
+        self.assertEqual(result["image_sha256"], hashlib.sha256(stored).hexdigest())
+        self.assertNotEqual(stored, original)
+
     def test_rejects_oversized_image_before_creating_outputs(self):
         with self.assertRaisesRegex(ValueError, "exceeds max_image_bytes"):
             prepare_annotation_draft(self.source, self.output, "chart-001", max_image_bytes=10)

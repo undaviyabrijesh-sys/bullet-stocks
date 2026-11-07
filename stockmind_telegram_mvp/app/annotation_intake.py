@@ -1,8 +1,8 @@
 """Create privacy-conscious, non-benchmark-ready drafts for manual chart annotation.
 
-The intake utility preserves original screenshot bytes, records a SHA-256 and
-image dimensions, and creates a separate draft JSON file. It never invents
-zones, predictions, prices, annotation identities or approval timestamps.
+The intake utility validates screenshots and normalizes EXIF orientation before
+storing them. It records a SHA-256 and dimensions for those exact canonical bytes
+and never invents zones, predictions, prices, identities or approval timestamps.
 """
 
 import argparse
@@ -14,7 +14,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from .overlay_engine import validate_chart_image
+from .overlay_engine import prepare_chart_image
 
 DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024
 _FIXTURE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -67,12 +67,12 @@ def prepare_annotation_draft(
     guideline_version="dns-manual-v1",
     max_image_bytes=DEFAULT_MAX_IMAGE_BYTES,
 ):
-    """Copy one validated screenshot and create a pending, non-scoring draft.
+    """Store one validated, orientation-normalized screenshot and pending draft.
 
-    The source image is copied byte-for-byte. Existing outputs are never
-    overwritten. The draft is intentionally not a benchmark JSONL record: it
-    must be manually annotated, independently reviewed, and paired with an
-    actual AI prediction before it can be scored.
+    Images without EXIF rotation are preserved byte-for-byte. When EXIF requires
+    a rotation or flip, the visual image is normalized before hashing and saving.
+    Existing outputs are never overwritten. The draft is not scoreable until it
+    is manually annotated, independently reviewed and paired with an AI result.
     """
     max_image_bytes = _positive_integer(max_image_bytes, "max_image_bytes")
     if not isinstance(fixture_id, str) or not _FIXTURE_ID_RE.fullmatch(fixture_id):
@@ -88,7 +88,9 @@ def prepare_annotation_draft(
         image_bytes = stream.read(max_image_bytes + 1)
     if len(image_bytes) > max_image_bytes:
         raise ValueError(f"source image exceeds max_image_bytes ({max_image_bytes})")
-    mime_type = validate_chart_image(image_bytes)
+    image_bytes, mime_type = prepare_chart_image(
+        image_bytes, max_output_bytes=max_image_bytes
+    )
 
     with Image.open(BytesIO(image_bytes)) as image:
         width, height = image.size

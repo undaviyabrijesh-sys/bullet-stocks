@@ -9,6 +9,7 @@ from stockmind_telegram_mvp.app.overlay_engine import (
     _zone_overlay_label,
     normalized_plot_bounds_to_pixel_box,
     normalized_zone_to_pixel_box,
+    prepare_chart_image,
     render_overlay,
     validate_chart_image,
 )
@@ -20,11 +21,61 @@ def sample_image(size=(640, 360), image_format="PNG"):
     return output.getvalue()
 
 
+def oriented_sample_image(image_format="PNG", orientation=6):
+    output = BytesIO()
+    exif = Image.Exif()
+    exif[274] = orientation
+    Image.new("RGB", (64, 48), "white").save(
+        output, format=image_format, exif=exif
+    )
+    return output.getvalue()
+
+
 class OverlayRendererTests(unittest.TestCase):
     def test_detects_actual_supported_image_format(self):
         self.assertEqual(validate_chart_image(sample_image()), "image/png")
         self.assertEqual(validate_chart_image(sample_image(image_format="JPEG")), "image/jpeg")
         self.assertEqual(validate_chart_image(sample_image(image_format="WEBP")), "image/webp")
+
+    def test_exif_orientation_is_normalized_for_every_supported_format(self):
+        expected_mime = {
+            "JPEG": "image/jpeg",
+            "PNG": "image/png",
+            "WEBP": "image/webp",
+        }
+        for image_format in expected_mime:
+            with self.subTest(image_format=image_format):
+                original = oriented_sample_image(image_format=image_format, orientation=6)
+                normalized, mime_type = prepare_chart_image(original)
+                with Image.open(BytesIO(normalized)) as image:
+                    self.assertEqual(image.size, (48, 64))
+                    self.assertNotIn(274, image.getexif())
+                self.assertEqual(mime_type, expected_mime[image_format])
+                self.assertEqual(validate_chart_image(normalized), mime_type)
+
+    def test_exif_orientation_one_preserves_original_bytes(self):
+        original = oriented_sample_image(orientation=1)
+        normalized, mime_type = prepare_chart_image(original)
+        self.assertEqual(normalized, original)
+        self.assertEqual(mime_type, "image/png")
+
+    def test_rejects_invalid_exif_orientation_instead_of_guessing(self):
+        original = oriented_sample_image(orientation=9)
+        with self.assertRaisesRegex(ValueError, "invalid EXIF orientation"):
+            prepare_chart_image(original)
+
+    def test_rejects_orientation_normalization_that_exceeds_byte_limit(self):
+        original = oriented_sample_image()
+        with self.assertRaisesRegex(ValueError, "Orientation-corrected chart exceeds"):
+            prepare_chart_image(original, max_output_bytes=1)
+
+    def test_rejects_invalid_normalized_output_limit(self):
+        original = sample_image()
+        for limit in (0, -1, True, 1.5):
+            with self.subTest(limit=limit), self.assertRaisesRegex(
+                ValueError, "max_output_bytes must be a positive integer"
+            ):
+                prepare_chart_image(original, max_output_bytes=limit)
 
     def test_rejects_truncated_pixel_data_or_container_before_vision_request(self):
         # Pillow's verify() alone accepts this truncated JPEG; full pixel decoding

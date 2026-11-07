@@ -348,3 +348,21 @@ accuracy. Each command creates one fixture record. Combine records from the
 same annotation inbox into a separate JSONL manifest to score a dataset.
 There are still no real manually reviewed chart fixtures in this repository;
 the tests use synthetic images and rectangles only.
+
+
+## Screenshot orientation and exact-byte matching
+
+Telegram chart uploads and local benchmark screenshots are passed through the same
+`prepare_chart_image` preprocessing step. It validates the encoded image and
+normalizes EXIF rotation/flip metadata before the bytes are sent to the vision model
+or used by the Pillow overlay renderer. This prevents a provider that honors EXIF
+orientation from producing coordinates in a different frame than the overlay.
+
+The annotation intake utility applies the same normalization before saving the
+screenshot, dimensions and SHA-256. The hash therefore identifies the canonical
+bytes stored in the inbox, not the original EXIF-bearing upload. For a benchmark,
+use the exact normalized image saved under `images/` as the screenshot submitted
+to the bot; do not independently re-export or recompress it. The model provenance
+hash is computed from the exact bytes sent to vision. If orientation normalization
+would exceed the configured byte limit, processing stops with an explicit error
+rather than sending mismatched or oversized data.
