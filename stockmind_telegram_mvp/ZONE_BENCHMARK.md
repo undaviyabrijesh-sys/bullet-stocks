@@ -60,7 +60,7 @@ The evaluator:
 - reports invalid, disabled or sub-minimum AI rectangles separately as ignored predictions; a sub-minimum prediction leaves its manual reference as a false negative;
 - treats a disabled/invalid AI rectangle as no drawn prediction, so a missed reference zone remains a false negative;
 - rejects malformed manual annotations rather than silently corrupting the benchmark;
-- scores only the first eight AI zones because that is the renderer's current limit.
+- scores up to eight drawable AI zones, matching the renderer; malformed or out-of-plot candidates do not consume that limit.
 
 Use the same IoU threshold across a benchmark release. Report aggregate and per-fixture results, and retain the fixture/image hash so future model changes can be compared on identical inputs.
 

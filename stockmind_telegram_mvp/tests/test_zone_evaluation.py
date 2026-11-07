@@ -143,6 +143,23 @@ class ZoneEvaluationTests(unittest.TestCase):
         self.assertEqual(result["overall"]["predicted"], 8)
         self.assertEqual(result["ignored_prediction_count"], 1)
 
+    def test_invalid_and_out_of_plot_predictions_do_not_consume_eight_zone_cap(self):
+        invalid = [prediction(x_start=0.8, x_end=0.2) for _ in range(4)]
+        outside_plot = [prediction(x_start=0.01, x_end=0.08) for _ in range(4)]
+        valid = [prediction() for _ in range(9)]
+
+        result = evaluate(
+            invalid + outside_plot + valid,
+            [zone()],
+            predicted_plot_bounds=PLOT_BOUNDS,
+            reference_plot_bounds=PLOT_BOUNDS,
+        )
+
+        self.assertEqual(result["overall"]["predicted"], 8)
+        self.assertEqual(result["ignored_prediction_count"], 9)
+        self.assertEqual(result["overall"]["true_positive"], 1)
+        self.assertEqual(result["overall"]["false_positive"], 7)
+
     def test_malformed_zone_type_is_ignored_for_prediction_and_rejected_for_reference(self):
         malformed = prediction(zone_type=["demand"])
         result = evaluate([malformed], [zone()])

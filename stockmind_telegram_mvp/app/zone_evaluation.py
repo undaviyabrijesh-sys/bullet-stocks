@@ -189,10 +189,11 @@ def evaluate_zone_predictions(
     even when no manual reference plot was supplied. Invalid manual reference
     annotations, including zones outside a supplied manual plot boundary, raise
     ValueError so a broken fixture cannot silently skew scores.
-    Only the first eight predictions are considered because the overlay renderer
-    draws at most eight. image_width and image_height must be the original
-    screenshot dimensions; predictions too small to pass the renderer's pixel
-    threshold are ignored and their reference zones remain false negatives.
+    At most eight drawable predictions are considered. Invalid or out-of-plot
+    candidates are skipped without consuming that cap, matching the renderer.
+    image_width and image_height must be the original screenshot dimensions;
+    predictions too small to pass the renderer's pixel threshold are ignored
+    and their reference zones remain false negatives.
 
     When price_axis_anchors are supplied, a manually reviewed
     price_axis_plot_bounds rectangle is also required. Every anchor y must fall
@@ -247,8 +248,8 @@ def evaluate_zone_predictions(
                 )
 
     valid_predictions = []
-    ignored_predictions = max(0, len(predicted_zones) - MAX_EVALUATED_ZONES)
-    for index, zone in enumerate(predicted_zones[:MAX_EVALUATED_ZONES]):
+    ignored_predictions = 0
+    for index, zone in enumerate(predicted_zones):
         validated = _valid_box(zone, prediction=True, image_width=image_width, image_height=image_height)
         if validated is None:
             ignored_predictions += 1
@@ -342,6 +343,9 @@ def evaluate_zone_predictions(
             or right > predicted_plot_box[2]
             or bottom > predicted_plot_box[3]
         ):
+            ignored_predictions += 1
+            continue
+        if len(drawable_predictions) >= MAX_EVALUATED_ZONES:
             ignored_predictions += 1
             continue
         drawable_predictions.append(zone)
