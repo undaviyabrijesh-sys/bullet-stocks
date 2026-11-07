@@ -700,9 +700,9 @@ class ResearchAI:
         ]
         tool_calls_used = 0
         tool_result_bytes = 0
-        # Reuse exact duplicate requests only within this answer call. The key includes
-        # the tool name and canonical JSON arguments, so different endpoints/parameters
-        # never share provider data accidentally.
+        # Reuse equivalent requests only within this answer call. The key includes
+        # the tool name and effective arguments after dispatch defaults and provider-safe
+        # symbol normalization, so distinct endpoints/parameters never share data.
         tool_result_cache = {}
 
         for _ in range(4):
