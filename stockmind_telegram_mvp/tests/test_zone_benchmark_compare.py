@@ -152,6 +152,32 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "macro_overall metrics do not match"):
             compare_benchmark_reports(baseline, candidate)
 
+    def test_rejects_boolean_macro_values_and_non_integer_counts(self):
+        cases = (
+            ("macro_overall", None, "precision", True),
+            ("macro_overall", None, "precision_coverage", True),
+            ("macro_overall", None, "fixture_count", 1.0),
+            ("macro_overall", None, "precision_fixture_count", 1.0),
+            ("macro_by_zone_type", "demand", "recall", False),
+        )
+        for aggregate_name, zone_type, field, invalid_value in cases:
+            with self.subTest(aggregate=aggregate_name, zone_type=zone_type, field=field):
+                baseline = self._report(
+                    "baseline", [{**_zone(), "draw_overlay": True}]
+                )
+                candidate = self._report("candidate", [])
+                aggregate = (
+                    candidate[aggregate_name][zone_type]
+                    if zone_type is not None
+                    else baseline[aggregate_name]
+                )
+                aggregate[field] = invalid_value
+
+                with self.assertRaisesRegex(
+                    ValueError, "macro_.*metrics do not match"
+                ):
+                    compare_benchmark_reports(baseline, candidate)
+
     def test_rejects_drawn_zone_evidence_outside_model_plot_bounds(self):
         bounds = {
             "x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9
