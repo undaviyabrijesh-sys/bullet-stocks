@@ -128,12 +128,12 @@ class ToolResultSerializationTests(unittest.TestCase):
 
 class ToolBudgetExecutionTests(unittest.IsolatedAsyncioTestCase):
     @staticmethod
-    def make_call(index):
+    def make_call(index, name="get_quote", arguments='{"symbol":"RELIANCE"}'):
         return SimpleNamespace(
             id=f"call-{index}",
             function=SimpleNamespace(
-                name="get_quote",
-                arguments='{"symbol":"RELIANCE"}',
+                name=name,
+                arguments=arguments,
             ),
         )
 
@@ -167,6 +167,133 @@ class ToolBudgetExecutionTests(unittest.IsolatedAsyncioTestCase):
         research.market_data = market_data
         research.crypto_data = None
         return research
+
+    async def test_identical_tool_requests_in_one_batch_execute_provider_once(self):
+        calls = [
+            self.make_call(
+                1,
+                name="search_stocks",
+                arguments='{"query":"Reliance","limit":10,"sector":"Energy"}',
+            ),
+            self.make_call(
+                2,
+                name="search_stocks",
+                arguments='{"sector":"Energy","limit":10,"query":"Reliance"}',
+            ),
+        ]
+        first_message = SimpleNamespace(
+            tool_calls=calls,
+            content=None,
+            model_dump=lambda **kwargs: self.assistant_dump(calls),
+        )
+        final_message = SimpleNamespace(
+            tool_calls=[], content="I reused the stock-search result."
+        )
+        create = AsyncMock(
+            side_effect=[
+                self.make_response(first_message),
+                self.make_response(final_message),
+            ]
+        )
+        search = AsyncMock(return_value={"data": [{"symbol": "RELIANCE"}]})
+        research = self.make_research(create, SimpleNamespace(search_stocks=search))
+
+        answer = await research.answer([], "Find Reliance")
+
+        self.assertEqual(answer, "I reused the stock-search result.")
+        search.assert_awaited_once_with(
+            "Reliance", limit=10, sector="Energy", industry=None
+        )
+        tool_messages = [
+            item for item in create.await_args_list[1].kwargs["messages"]
+            if item.get("role") == "tool"
+        ]
+        self.assertEqual(len(tool_messages), 2)
+        self.assertEqual(
+            json.loads(tool_messages[0]["content"])["data"][0]["symbol"],
+            "RELIANCE",
+        )
+        duplicate = json.loads(tool_messages[1]["content"])
+        self.assertTrue(duplicate["deduplicated"])
+        self.assertEqual(duplicate["reused_tool_call_id"], "call-1")
+        self.assertEqual(duplicate["scope"], "current_research_turn")
+
+    async def test_identical_tool_request_is_deduplicated_across_model_rounds(self):
+        first_call = self.make_call(1)
+        second_call = self.make_call(
+            2, arguments='{ "symbol" : "RELIANCE" }'
+        )
+        first_message = SimpleNamespace(
+            tool_calls=[first_call],
+            content=None,
+            model_dump=lambda **kwargs: self.assistant_dump([first_call]),
+        )
+        second_message = SimpleNamespace(
+            tool_calls=[second_call],
+            content=None,
+            model_dump=lambda **kwargs: self.assistant_dump([second_call]),
+        )
+        final_message = SimpleNamespace(
+            tool_calls=[], content="The repeated quote request was reused."
+        )
+        create = AsyncMock(
+            side_effect=[
+                self.make_response(first_message),
+                self.make_response(second_message),
+                self.make_response(final_message),
+            ]
+        )
+        quote = AsyncMock(return_value={"data": {"symbol": "RELIANCE", "price": "100"}})
+        research = self.make_research(create, SimpleNamespace(quote=quote))
+
+        answer = await research.answer([], "Get Reliance quote")
+
+        self.assertEqual(answer, "The repeated quote request was reused.")
+        quote.assert_awaited_once_with("RELIANCE")
+        final_messages = create.await_args_list[2].kwargs["messages"]
+        tool_messages = [item for item in final_messages if item.get("role") == "tool"]
+        self.assertEqual(len(tool_messages), 2)
+        duplicate = json.loads(tool_messages[1]["content"])
+        self.assertTrue(duplicate["deduplicated"])
+        self.assertEqual(duplicate["reused_tool_call_id"], "call-1")
+
+    async def test_different_arguments_are_not_deduplicated(self):
+        calls = [
+            self.make_call(1, arguments='{"symbol":"RELIANCE"}'),
+            self.make_call(2, arguments='{"symbol":"TCS"}'),
+        ]
+        first_message = SimpleNamespace(
+            tool_calls=calls,
+            content=None,
+            model_dump=lambda **kwargs: self.assistant_dump(calls),
+        )
+        final_message = SimpleNamespace(tool_calls=[], content="Both quotes were fetched.")
+        create = AsyncMock(
+            side_effect=[
+                self.make_response(first_message),
+                self.make_response(final_message),
+            ]
+        )
+        quote = AsyncMock(
+            side_effect=[
+                {"data": {"symbol": "RELIANCE"}},
+                {"data": {"symbol": "TCS"}},
+            ]
+        )
+        research = self.make_research(create, SimpleNamespace(quote=quote))
+
+        answer = await research.answer([], "Compare Reliance and TCS")
+
+        self.assertEqual(answer, "Both quotes were fetched.")
+        self.assertEqual(quote.await_count, 2)
+        tool_messages = [
+            item for item in create.await_args_list[1].kwargs["messages"]
+            if item.get("role") == "tool"
+        ]
+        self.assertEqual(
+            [json.loads(item["content"])["data"]["symbol"] for item in tool_messages],
+            ["RELIANCE", "TCS"],
+        )
 
     async def test_rejects_tool_batch_above_per_turn_call_limit_before_provider_calls(self):
         calls = [self.make_call(index) for index in range(MAX_TOOL_CALLS_PER_TURN + 1)]

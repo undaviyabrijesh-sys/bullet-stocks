@@ -661,6 +661,10 @@ class ResearchAI:
         ]
         tool_calls_used = 0
         tool_result_bytes = 0
+        # Reuse exact duplicate requests only within this answer call. The key includes
+        # the tool name and canonical JSON arguments, so different endpoints/parameters
+        # never share provider data accidentally.
+        tool_result_cache = {}
 
         for _ in range(4):
             request_options = {
@@ -692,58 +696,83 @@ class ResearchAI:
                 budget_exhausted = remaining_bytes < MIN_TOOL_RESULT_BUDGET_BYTES
 
                 if budget_exhausted:
-                    result = _tool_budget_error("result_bytes")
+                    serialized_result = json.dumps(
+                        _tool_budget_error("result_bytes"),
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
                 else:
                     try:
                         args = _parse_tool_arguments(call.function.arguments)
                     except ValueError as exc:
                         result = {"error": str(exc), "type": "InvalidToolArguments"}
                     else:
-                        try:
-                            if call.function.name == "search_stocks":
-                                result = await self.market_data.search_stocks(
-                                    args["query"],
-                                    limit=args.get("limit", 10),
-                                    sector=args.get("sector"),
-                                    industry=args.get("industry"),
-                                )
-                            elif call.function.name == "get_quote":
-                                result = await self.market_data.quote(args["symbol"])
-                            elif call.function.name == "get_live_quote":
-                                result = await self.market_data.live_quote(args["symbol"])
-                            elif call.function.name == "get_financials":
-                                result = await self.market_data.financials(
-                                    args["symbol"], args.get("section", "annual")
-                                )
-                            elif call.function.name == "get_price_history":
-                                result = await self.market_data.price_history(
-                                    args["symbol"], args.get("days", 90)
-                                )
-                            elif call.function.name == "get_intraday_stock_bars":
-                                result = await self.market_data.intraday_bars(
-                                    args["symbol"], interval=args.get("interval", 5),
-                                    date=args.get("date"), from_date=args.get("from_date"),
-                                    to_date=args.get("to_date"), limit=args.get("limit", 375)
-                                )
-                            elif call.function.name == "get_crypto_klines":
-                                result = await self.crypto_data.klines(
-                                    args["symbol"], args.get("interval", "15m"),
-                                    args.get("market", "spot"), args.get("limit", 100)
-                                )
-                            elif call.function.name == "get_crypto_ticker":
-                                result = await self.crypto_data.ticker(
-                                    args["symbol"], args.get("market", "spot")
-                                )
-                            else:
-                                result = {"error": "Unsupported tool"}
-                        except Exception as exc:
-                            result = _tool_error_payload(exc)
+                        cache_key = (
+                            call.function.name,
+                            json.dumps(
+                                args,
+                                sort_keys=True,
+                                ensure_ascii=False,
+                                separators=(",", ":"),
+                            ),
+                        )
+                        if cache_key in tool_result_cache:
+                            result = {
+                                "deduplicated": True,
+                                "reused_tool_call_id": tool_result_cache[cache_key],
+                                "scope": "current_research_turn",
+                                "instruction": (
+                                    "This exact tool request was already executed earlier "
+                                    "in this research turn. Reuse the preceding tool result "
+                                    "for the referenced tool call; no second provider request "
+                                    "was made."
+                                ),
+                            }
+                        else:
+                            try:
+                                if call.function.name == "search_stocks":
+                                    result = await self.market_data.search_stocks(
+                                        args["query"],
+                                        limit=args.get("limit", 10),
+                                        sector=args.get("sector"),
+                                        industry=args.get("industry"),
+                                    )
+                                elif call.function.name == "get_quote":
+                                    result = await self.market_data.quote(args["symbol"])
+                                elif call.function.name == "get_live_quote":
+                                    result = await self.market_data.live_quote(args["symbol"])
+                                elif call.function.name == "get_financials":
+                                    result = await self.market_data.financials(
+                                        args["symbol"], args.get("section", "annual")
+                                    )
+                                elif call.function.name == "get_price_history":
+                                    result = await self.market_data.price_history(
+                                        args["symbol"], args.get("days", 90)
+                                    )
+                                elif call.function.name == "get_intraday_stock_bars":
+                                    result = await self.market_data.intraday_bars(
+                                        args["symbol"], interval=args.get("interval", 5),
+                                        date=args.get("date"), from_date=args.get("from_date"),
+                                        to_date=args.get("to_date"), limit=args.get("limit", 375)
+                                    )
+                                elif call.function.name == "get_crypto_klines":
+                                    result = await self.crypto_data.klines(
+                                        args["symbol"], args.get("interval", "15m"),
+                                        args.get("market", "spot"), args.get("limit", 100)
+                                    )
+                                elif call.function.name == "get_crypto_ticker":
+                                    result = await self.crypto_data.ticker(
+                                        args["symbol"], args.get("market", "spot")
+                                    )
+                                else:
+                                    result = {"error": "Unsupported tool"}
+                            except Exception as exc:
+                                result = _tool_error_payload(exc)
 
-                if budget_exhausted:
-                    serialized_result = json.dumps(
-                        result, ensure_ascii=False, separators=(",", ":")
-                    )
-                else:
+                            # Cache failures too: repeating the same failing request in one
+                            # turn must not hammer a rate-limited or unavailable provider.
+                            tool_result_cache[cache_key] = call.id
+
                     serialized_result = _serialize_tool_result(
                         result,
                         call.function.name,
