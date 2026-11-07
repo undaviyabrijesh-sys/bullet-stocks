@@ -544,6 +544,7 @@ def evaluate_benchmark_manifest(manifest_path, *, max_image_bytes=DEFAULT_MAX_IM
 
     fixtures = []
     seen_ids = set()
+    seen_image_hashes = set()
     prediction_profile = None
     prediction_profile_sha256 = None
     annotation_guideline_version = None
@@ -574,6 +575,17 @@ def evaluate_benchmark_manifest(manifest_path, *, max_image_bytes=DEFAULT_MAX_IM
                         f"line {line_number}: duplicate fixture_id {fixture['fixture_id']!r}"
                     )
                 seen_ids.add(fixture["fixture_id"])
+
+                # A manifest represents distinct source screenshots. Reusing
+                # identical bytes under another fixture_id silently overweights
+                # that chart in micro-aggregated benchmark metrics.
+                image_hash = fixture["image_sha256"]
+                if image_hash in seen_image_hashes:
+                    raise ValueError(
+                        f"line {line_number}: duplicate screenshot image_sha256 "
+                        f"{image_hash!r}; each fixture must use a unique screenshot"
+                    )
+                seen_image_hashes.add(image_hash)
                 if prediction_profile_sha256 is None:
                     prediction_profile = fixture.pop("_prediction_profile")
                     prediction_profile_sha256 = fixture.pop("_prediction_profile_sha256")
