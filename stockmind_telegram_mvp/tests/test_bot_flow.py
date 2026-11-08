@@ -157,6 +157,21 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("0.02-second time budget expired", self.status.edit_text.await_args.args[0])
         self.assertEqual(list(bot_module.histories[self.user_id]), [])
 
+    async def test_text_deadline_is_reported_without_saving_a_successful_turn(self):
+        research = self.use_research(
+            answer=AsyncMock(side_effect=ResearchTurnDeadlineExceeded(0.02))
+        )
+
+        await bot_module.run_research(self.message, "Analyse BTC")
+
+        research.answer.assert_awaited_once()
+        self.status.edit_text.assert_awaited_once()
+        failure_message = self.status.edit_text.await_args.args[0]
+        self.assertIn("research turn", failure_message)
+        self.assertNotIn("chart analysis", failure_message)
+        self.assertIn("0.02-second time budget expired", failure_message)
+        self.assertEqual(list(bot_module.histories[self.user_id]), [])
+
     async def test_chart_analysis_is_saved_even_when_overlay_delivery_fails(self):
         result = {
             "analysis": "Visible demand structure; verify the price scale.",
