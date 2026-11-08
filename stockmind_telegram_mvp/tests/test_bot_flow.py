@@ -29,6 +29,65 @@ with environment_patch.dict(os.environ, _TEST_ENV):
     bot_module = importlib.import_module("stockmind_telegram_mvp.app.bot")
 
 
+class OverlayOutcomeMessageTests(unittest.TestCase):
+    def test_drawn_overlay_needs_no_unavailable_note(self):
+        self.assertEqual(
+            bot_module._overlay_unavailable_note(
+                {"plot_bounds": {"x_start": 0.1}, "zones": []}, 1
+            ),
+            "",
+        )
+
+    def test_missing_plot_boundary_is_distinguished_from_missing_zones(self):
+        note = bot_module._overlay_unavailable_note(
+            {"plot_bounds": None, "zones": [{"zone_type": "demand"}]}, 0
+        )
+        self.assertIn("main price-plot boundary", note)
+        self.assertIn("withheld all overlays", note)
+
+    def test_empty_zone_list_does_not_claim_that_no_zone_exists(self):
+        note = bot_module._overlay_unavailable_note(
+            {
+                "plot_bounds": {
+                    "x_start": 0.1, "x_end": 0.9,
+                    "y_top": 0.1, "y_bottom": 0.9,
+                },
+                "zones": [],
+            },
+            0,
+        )
+        self.assertIn("No distinct supply/demand zone was returned", note)
+        self.assertIn("does not prove that no zone exists", note)
+
+    def test_model_declined_geometry_is_distinguished_from_renderer_rejection(self):
+        note = bot_module._overlay_unavailable_note(
+            {
+                "plot_bounds": {
+                    "x_start": 0.1, "x_end": 0.9,
+                    "y_top": 0.1, "y_bottom": 0.9,
+                },
+                "zones": [{"zone_type": "demand", "draw_overlay": False}],
+            },
+            0,
+        )
+        self.assertIn("candidate areas", note)
+        self.assertIn("none had geometry approved", note)
+
+    def test_final_pixel_or_plot_rejection_is_reported_separately(self):
+        note = bot_module._overlay_unavailable_note(
+            {
+                "plot_bounds": {
+                    "x_start": 0.1, "x_end": 0.9,
+                    "y_top": 0.1, "y_bottom": 0.9,
+                },
+                "zones": [{"zone_type": "demand", "draw_overlay": True}],
+            },
+            0,
+        )
+        self.assertIn("final pixel-size and plot-boundary checks", note)
+        self.assertIn("sharper, uncropped screenshot", note)
+
+
 class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         bot_module.histories.clear()
@@ -268,7 +327,9 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
             )
 
         answer = self.status.edit_text.await_args.args[0]
-        self.assertIn("no zone location was clear enough", answer)
+        self.assertIn("main price-plot boundary", answer)
+        self.assertIn("withheld all overlays", answer)
+        self.assertNotIn("No distinct supply/demand zone was returned", answer)
         self.assertNotIn("couldn't render the overlay", answer)
         self.message.answer_photo.assert_not_awaited()
         self.assertEqual(bot_module.histories[self.user_id][-1]["content"], answer)
