@@ -678,9 +678,10 @@ class ResearchTurnDeadlineTests(unittest.IsolatedAsyncioTestCase):
             create, SimpleNamespace(quote=quote), timeout_seconds=0.02
         )
 
-        answer = await research.answer([], "Get Reliance quote")
+        with self.assertRaises(ResearchTurnDeadlineExceeded) as raised:
+            await research.answer([], "Get Reliance quote")
 
-        self.assertIn("time budget expired", answer)
+        self.assertEqual(raised.exception.timeout_seconds, 0.02)
         self.assertTrue(started.is_set())
         self.assertTrue(cancelled.is_set())
         create.assert_awaited_once()
@@ -725,9 +726,10 @@ class ResearchTurnDeadlineTests(unittest.IsolatedAsyncioTestCase):
             create, SimpleNamespace(quote=quote), timeout_seconds=0.02
         )
 
-        answer = await research.answer([], "Get Reliance quote")
+        with self.assertRaises(ResearchTurnDeadlineExceeded) as raised:
+            await research.answer([], "Get Reliance quote")
 
-        self.assertIn("time budget expired", answer)
+        self.assertEqual(raised.exception.timeout_seconds, 0.02)
         self.assertTrue(second_started.is_set())
         self.assertTrue(second_cancelled.is_set())
         self.assertEqual(create.await_count, 2)
