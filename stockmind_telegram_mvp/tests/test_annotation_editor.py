@@ -21,6 +21,7 @@ from stockmind_telegram_mvp.app.annotation_editor import (
     validate_price_axis_annotations,
     _write_new_json,
     fit_editor_image_size,
+    editor_control_rows,
     main as editor_main,
 )
 
@@ -101,6 +102,31 @@ class AnnotationEditorSizingTests(unittest.TestCase):
         for values in invalid:
             with self.subTest(values=values), self.assertRaises(ValueError):
                 fit_editor_image_size(*values)
+
+
+class AnnotationEditorControlLayoutTests(unittest.TestCase):
+    def test_wide_annotation_preview_keeps_controls_in_three_rows(self):
+        self.assertEqual(
+            editor_control_rows("annotate", 676),
+            ("identity", "drawing", "actions"),
+        )
+
+    def test_narrow_annotation_preview_stacks_axis_controls(self):
+        self.assertEqual(
+            editor_control_rows("annotate", 214),
+            ("identity", "drawing", "axis", "actions"),
+        )
+
+    def test_review_controls_use_compact_rows(self):
+        self.assertEqual(
+            editor_control_rows("review", 214),
+            ("identity", "actions"),
+        )
+
+    def test_rejects_invalid_mode_or_display_width(self):
+        for mode, width in (("unknown", 500), ("annotate", 0), ("review", True), ("review", 500.0)):
+            with self.subTest(mode=mode, width=width), self.assertRaises(ValueError):
+                editor_control_rows(mode, width)
 
 
 class AnnotationGeometryTests(unittest.TestCase):

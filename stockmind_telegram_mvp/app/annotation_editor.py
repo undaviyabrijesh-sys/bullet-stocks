@@ -62,6 +62,23 @@ def fit_editor_image_size(image_width, image_height, screen_width, screen_height
     )
 
 
+def editor_control_rows(mode, display_width):
+    """Return responsive control rows for the offline editor.
+
+    Narrow previews stack the drawing tool and axis controls separately so
+    their combined widget width cannot force the editor beyond a small screen.
+    """
+    if isinstance(display_width, bool) or not isinstance(display_width, int) or display_width <= 0:
+        raise ValueError("display_width must be a positive integer")
+    if mode == "annotate":
+        if display_width < 420:
+            return ("identity", "drawing", "axis", "actions")
+        return ("identity", "drawing", "actions")
+    if mode == "review":
+        return ("identity", "actions")
+    raise ValueError("mode must be 'annotate' or 'review'")
+
+
 def _utc_now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
@@ -447,21 +464,32 @@ class _DesktopEditor:
         root.geometry(f"{self.display_w + 40}x{self.display_h + 180}")
         controls = tk.Frame(root, padx=8, pady=8)
         controls.pack(fill="x")
-        tk.Label(controls, text="Anonymized ID:").pack(side="left")
-        tk.Entry(controls, textvariable=self.identity, width=18).pack(side="left", padx=(4, 12))
+        rows = {}
+        for index, row_name in enumerate(editor_control_rows(mode, self.display_w)):
+            row = tk.Frame(controls)
+            row.pack(fill="x", pady=(0, 4) if index else 0)
+            rows[row_name] = row
+
+        identity_row = rows["identity"]
+        tk.Label(identity_row, text="Anonymized ID:").pack(side="left")
+        tk.Entry(identity_row, textvariable=self.identity, width=18).pack(side="left", padx=(4, 12))
 
         if mode == "annotate":
-            tk.Label(controls, text="Draw:").pack(side="left")
-            tk.OptionMenu(controls, self.tool, "plot", "demand", "supply", "axis_anchor").pack(side="left")
-            tk.Label(controls, text="Axis scale:").pack(side="left", padx=(8, 2))
-            tk.OptionMenu(controls, self.axis_scale, "linear", "log").pack(side="left")
-            tk.Button(controls, text="Undo", command=self.undo).pack(side="left", padx=6)
-            tk.Button(controls, text="Save annotation draft", command=self.save_annotation).pack(side="left", padx=6)
+            drawing_row = rows["drawing"]
+            axis_row = rows.get("axis", drawing_row)
+            action_row = rows["actions"]
+            tk.Label(drawing_row, text="Draw:").pack(side="left")
+            tk.OptionMenu(drawing_row, self.tool, "plot", "demand", "supply", "axis_anchor").pack(side="left")
+            tk.Label(axis_row, text="Axis scale:").pack(side="left", padx=(8, 2))
+            tk.OptionMenu(axis_row, self.axis_scale, "linear", "log").pack(side="left")
+            tk.Button(action_row, text="Undo", command=self.undo).pack(side="left", padx=6)
+            tk.Button(action_row, text="Save annotation draft", command=self.save_annotation).pack(side="left", padx=6)
         else:
+            action_row = rows["actions"]
             if self.axis_anchors:
-                tk.Label(controls, text=f"Price-axis calibration: {self.axis_scale.get()} ({len(self.axis_anchors)} anchors)").pack(side="left", padx=6)
-            tk.Button(controls, text="Approve", command=lambda: self.save_review(True)).pack(side="left", padx=6)
-            tk.Button(controls, text="Reject", command=lambda: self.save_review(False)).pack(side="left", padx=6)
+                tk.Label(action_row, text=f"Price-axis calibration: {self.axis_scale.get()} ({len(self.axis_anchors)} anchors)").pack(side="left", padx=6)
+            tk.Button(action_row, text="Approve", command=lambda: self.save_review(True)).pack(side="left", padx=6)
+            tk.Button(action_row, text="Reject", command=lambda: self.save_review(False)).pack(side="left", padx=6)
 
         self.status = tk.StringVar(value=self._instructions())
         tk.Label(root, textvariable=self.status, anchor="w", padx=8).pack(fill="x")
