@@ -24,6 +24,7 @@ from stockmind_telegram_mvp.app.annotation_editor import (
     editor_control_rows,
     zoomed_editor_image_size,
     editor_canvas_point_to_normalized,
+    editor_canvas_point_inside_plot,
     main as editor_main,
 )
 
@@ -206,6 +207,77 @@ class AnnotationEditorZoomTests(unittest.TestCase):
 
 
 
+
+
+class AnnotationEditorAxisAnchorGeometryTests(unittest.TestCase):
+    def test_axis_anchor_point_must_be_inside_both_plot_dimensions(self):
+        self.assertTrue(
+            editor_canvas_point_inside_plot(500, 250, 1000, 500, PLOT)
+        )
+        self.assertFalse(
+            editor_canvas_point_inside_plot(950, 250, 1000, 500, PLOT)
+        )
+        self.assertFalse(
+            editor_canvas_point_inside_plot(500, 480, 1000, 500, PLOT)
+        )
+
+    def test_axis_anchor_point_on_plot_edges_is_allowed(self):
+        self.assertTrue(
+            editor_canvas_point_inside_plot(100, 50, 1000, 500, PLOT)
+        )
+        self.assertTrue(
+            editor_canvas_point_inside_plot(900, 450, 1000, 500, PLOT)
+        )
+
+    def test_axis_anchor_point_rejects_invalid_plot_geometry(self):
+        invalid_plot = {**PLOT, "x_start": 0.95}
+        with self.assertRaisesRegex(ValueError, "positive width"):
+            editor_canvas_point_inside_plot(500, 250, 1000, 500, invalid_plot)
+
+
+class AnnotationEditorAxisAnchorInteractionTests(unittest.TestCase):
+    def _editor(self, x, y):
+        from stockmind_telegram_mvp.app.annotation_editor import _DesktopEditor
+
+        editor = object.__new__(_DesktopEditor)
+        editor.drag_start = (x, y)
+        editor.preview_id = None
+        editor._canvas_point = lambda event: (event.x, event.y)
+        editor.tool = types.SimpleNamespace(get=lambda: "axis_anchor")
+        editor.plot_bounds = PLOT
+        editor.render_w = 1000
+        editor.render_h = 500
+        editor.axis_anchors = []
+        editor.undo_stack = []
+        editor.canvas = types.SimpleNamespace(delete=lambda _item: None)
+        editor.status = types.SimpleNamespace(set=lambda value: setattr(editor, "status_text", value))
+        editor.root = object()
+        editor.prompt_calls = []
+        editor.simpledialog = types.SimpleNamespace(
+            askstring=lambda *args, **kwargs: (
+                editor.prompt_calls.append((args, kwargs)) or "100"
+            )
+        )
+        editor._redraw = lambda: None
+        return editor
+
+    def test_click_in_price_label_margin_is_rejected_before_prompt(self):
+        editor = self._editor(950, 250)
+
+        editor._finish_draw(types.SimpleNamespace(x=950, y=250))
+
+        self.assertEqual(editor.prompt_calls, [])
+        self.assertEqual(editor.axis_anchors, [])
+        self.assertIn("inside the main price plot", editor.status_text)
+
+    def test_click_inside_plot_can_add_price_anchor(self):
+        editor = self._editor(500, 250)
+
+        editor._finish_draw(types.SimpleNamespace(x=500, y=250))
+
+        self.assertEqual(len(editor.prompt_calls), 1)
+        self.assertEqual(editor.axis_anchors, [{"y": 0.5, "price": 100.0}])
+        self.assertEqual(editor.undo_stack[0][0], "axis_anchor")
 
 
 class AnnotationEditorZoomInteractionTests(unittest.TestCase):
