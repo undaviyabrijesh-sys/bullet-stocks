@@ -351,11 +351,19 @@ def load_draft_and_image(draft_path, image_path=None):
 
 
 def _write_new_json(path, value):
+    """Create a JSON output without leaving a partial file after write failure."""
     path = Path(path).expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("x", encoding="utf-8", newline="\n") as stream:
-        json.dump(value, stream, ensure_ascii=False, indent=2, allow_nan=False)
-        stream.write("\n")
+    created = False
+    try:
+        with path.open("x", encoding="utf-8", newline="\n") as stream:
+            created = True
+            json.dump(value, stream, ensure_ascii=False, indent=2, allow_nan=False)
+            stream.write("\n")
+    except Exception:
+        if created:
+            path.unlink(missing_ok=True)
+        raise
     return path
 
 
