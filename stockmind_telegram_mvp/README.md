@@ -145,8 +145,10 @@ python -m stockmind_telegram_mvp.app.zone_benchmark \
   benchmark/inbox/btc-1h-001.fixture.jsonl
 ~~~
 
-The current Telegram bot does not automatically persist user screenshots or
-model results. The capture/assembly utility is intended for an explicitly
-controlled local research harness. It does not call providers or store the
-original image. A structurally valid fixture is not evidence of model
-accuracy; real screenshots still require independent manual review.
+Annotation intake uses exclusive file creation and removes any newly created
+partial image or draft when a write fails; pre-existing outputs are never
+overwritten. The current Telegram bot does not automatically persist user
+screenshots or model results. The capture/assembly utility is intended for an
+explicitly controlled local research harness. It does not call providers or
+store the original image. A structurally valid fixture is not evidence of
+model accuracy; real screenshots still require independent manual review.
