@@ -15,6 +15,9 @@ A multilingual Telegram research assistant for Indian equities and crypto, inclu
 - No order placement or trade execution
 
 ## Setup
+
+The runtime requires Python 3.11 or newer.
+
 1. Create a bot with Telegram's @BotFather.
 2. Create an OpenAI API key.
 3. Create a Tapetide token and confirm that your plan permits the intended beta data display and caching.
