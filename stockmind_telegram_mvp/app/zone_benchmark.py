@@ -14,7 +14,7 @@ from pathlib import Path, PurePosixPath
 
 from PIL import Image
 
-from .overlay_engine import validate_chart_image
+from .overlay_engine import prepare_chart_image
 from .zone_evaluation import evaluate_zone_predictions
 from .plot_evaluation import aggregate_plot_boundary_accuracy
 from .strict_json import loads as strict_json_loads
@@ -261,9 +261,18 @@ def _load_and_verify_image(record, manifest_dir, line_number, max_image_bytes):
     if actual_hash.lower() != expected_hash.lower():
         raise ValueError(f"line {line_number} ({fixture_id}): screenshot SHA-256 does not match")
 
-    # Reuse the production upload validator so the benchmark accepts only the
-    # same static image formats and decoded-pixel ceiling as the Telegram bot.
-    validate_chart_image(image_bytes)
+    # Enforce the same canonical EXIF frame used by Telegram inference and
+    # overlay rendering. A raw EXIF-rotated file can have valid dimensions and a
+    # matching hash while its visible coordinate frame differs from the model's.
+    # The benchmark must score the exact normalized bytes captured at intake.
+    canonical_bytes, _ = prepare_chart_image(
+        image_bytes, max_output_bytes=max_image_bytes
+    )
+    if canonical_bytes != image_bytes:
+        raise ValueError(
+            f"line {line_number} ({fixture_id}): screenshot is not EXIF-normalized; "
+            "run annotation_intake and use its canonical image"
+        )
     # Inspect the same bounded bytes that were hashed and validated; do not
     # reopen a path that could have changed between those operations.
     with Image.open(BytesIO(image_bytes)) as image:
