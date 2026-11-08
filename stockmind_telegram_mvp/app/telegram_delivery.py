@@ -20,10 +20,10 @@ def split_telegram_text(text: str, *, limit: int = TELEGRAM_TEXT_CHUNK_LIMIT) ->
     chunks = []
     remaining = text
     while len(remaining) > limit:
-        boundary = remaining.rfind("\\n\\n", 0, limit)
+        boundary = remaining.rfind("\n\n", 0, limit)
         separator_length = 2
         if boundary < limit // 2:
-            boundary = remaining.rfind("\\n", 0, limit)
+            boundary = remaining.rfind("\n", 0, limit)
             separator_length = 1
         if boundary < limit // 2:
             boundary = remaining.rfind(" ", 0, limit)

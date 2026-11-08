@@ -64,14 +64,14 @@ class AnalysisDeliveryTests(unittest.IsolatedAsyncioTestCase):
 
 
     def test_split_preserves_every_character_and_prefers_paragraph_boundaries(self):
-        text = ("First paragraph.\\n\\nSecond paragraph.\\n\\n" * 300)
+        text = ("First paragraph.\n\nSecond paragraph.\n\n" * 300)
 
         chunks = split_telegram_text(text)
 
         self.assertGreater(len(chunks), 1)
         self.assertTrue(all(len(chunk) <= 4000 for chunk in chunks))
         self.assertEqual("".join(chunks), text)
-        self.assertTrue(chunks[0].endswith("\\n\\n"))
+        self.assertTrue(chunks[0].endswith("\n\n"))
 
     def test_split_handles_long_unbroken_tokens_without_data_loss(self):
         text = "X" * 8001
@@ -90,7 +90,7 @@ class AnalysisDeliveryTests(unittest.IsolatedAsyncioTestCase):
             split_telegram_text(b"text")
 
     async def test_long_analysis_edits_first_chunk_then_replies_with_remainder(self):
-        text = ("BTC structure and invalidation.\\n\\n" * 300)
+        text = ("BTC structure and invalidation.\n\n" * 300)
         chunks = split_telegram_text(text)
         message = SimpleNamespace(answer=AsyncMock())
         status = SimpleNamespace(edit_text=AsyncMock())

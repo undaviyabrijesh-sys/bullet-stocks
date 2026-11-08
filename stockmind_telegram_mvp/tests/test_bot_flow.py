@@ -66,7 +66,7 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_long_research_answer_is_not_truncated_before_telegram_delivery(self):
-        answer = ("BTC setup: confirmation, invalidation and risk notes.\\n\\n" * 180)
+        answer = ("BTC setup: confirmation, invalidation and risk notes.\n\n" * 180)
         chunks = split_telegram_text(answer)
         research = self.use_research(answer=AsyncMock(return_value=answer))
 
