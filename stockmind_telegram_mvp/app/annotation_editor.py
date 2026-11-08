@@ -416,7 +416,7 @@ def review_annotation_draft(draft, reviewer_id, *, approve, reviewed_at=None):
 
 
 def load_draft_and_image(draft_path, image_path=None):
-    """Load a draft and verify its selected screenshot hash and dimensions."""
+    """Load a draft and verify screenshot hash, canonical orientation and dimensions."""
     draft_path = Path(draft_path).expanduser().resolve()
     with draft_path.open("rb") as stream:
         draft_bytes = stream.read(1024 * 1024 + 1)
@@ -441,12 +441,19 @@ def load_draft_and_image(draft_path, image_path=None):
     if len(image_bytes) > 5 * 1024 * 1024:
         raise ValueError("chart screenshot exceeds the 5 MiB annotation editor limit")
 
-    from .overlay_engine import validate_chart_image
-    validate_chart_image(image_bytes)
+    from .overlay_engine import prepare_chart_image
+    canonical_bytes, _ = prepare_chart_image(
+        image_bytes, max_output_bytes=5 * 1024 * 1024
+    )
     import hashlib
     digest = hashlib.sha256(image_bytes).hexdigest()
     if digest != draft.get("image_sha256"):
         raise ValueError("selected screenshot SHA-256 does not match the annotation draft")
+    if canonical_bytes != image_bytes:
+        raise ValueError(
+            "selected screenshot is not EXIF-normalized; run annotation_intake "
+            "and use its canonical image"
+        )
     # Decode the exact bytes whose hash was checked above. Reopening the path
     # here would allow a file replacement between verification and decoding.
     with Image.open(BytesIO(image_bytes)) as image:

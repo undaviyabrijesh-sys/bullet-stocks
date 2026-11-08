@@ -650,27 +650,51 @@ class DraftImageVerificationTests(unittest.TestCase):
             data = self._png()
             draft_path, _ = self._draft_file(root, data)
             stub = types.ModuleType("stockmind_telegram_mvp.app.overlay_engine")
-            stub.validate_chart_image = lambda image_bytes: "image/png"
+            stub.prepare_chart_image = lambda image_bytes, **kwargs: (image_bytes, "image/png")
             with patch.dict(sys.modules, {stub.__name__: stub}):
                 draft, image = load_draft_and_image(draft_path)
             self.assertEqual(draft["fixture_id"], "btc-1h-001")
             self.assertEqual(image.size, (32, 24))
 
-    def test_decodes_the_exact_bytes_that_passed_hash_validation(self):
+    def test_rejects_noncanonical_exif_oriented_screenshot(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            encoded = BytesIO()
+            exif = Image.Exif()
+            exif[274] = 6
+            Image.new("RGB", (32, 24), "white").save(
+                encoded, format="JPEG", quality=95, exif=exif
+            )
+            draft_path, _ = self._draft_file(root, encoded.getvalue())
+
+            with self.assertRaisesRegex(ValueError, "not EXIF-normalized"):
+                load_draft_and_image(draft_path)
+
+    def test_accepts_canonical_screenshot_without_reencoding(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            draft_path, _ = self._draft_file(root, self._png())
+
+            draft, image = load_draft_and_image(draft_path)
+
+            self.assertEqual(draft["fixture_id"], "btc-1h-001")
+            self.assertEqual(image.size, (32, 24))
+
+    def test_decodes_the_exact_bytes_prepared_and_hash_checked(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             original = self._png()
             draft_path, image_path = self._draft_file(root, original)
             stub = types.ModuleType("stockmind_telegram_mvp.app.overlay_engine")
 
-            def replace_path_after_validation(image_bytes):
+            def replace_path_after_preparation(image_bytes, **kwargs):
                 self.assertEqual(image_bytes, original)
                 replacement = BytesIO()
                 Image.new("RGB", (32, 24), "red").save(replacement, format="PNG")
                 image_path.write_bytes(replacement.getvalue())
-                return "image/png"
+                return image_bytes, "image/png"
 
-            stub.validate_chart_image = replace_path_after_validation
+            stub.prepare_chart_image = replace_path_after_preparation
             with patch.dict(sys.modules, {stub.__name__: stub}):
                 _, image = load_draft_and_image(draft_path)
 
@@ -683,7 +707,7 @@ class DraftImageVerificationTests(unittest.TestCase):
             draft_path, image_path = self._draft_file(root, self._png())
             image_path.write_bytes(self._png((33, 24)))
             stub = types.ModuleType("stockmind_telegram_mvp.app.overlay_engine")
-            stub.validate_chart_image = lambda image_bytes: "image/png"
+            stub.prepare_chart_image = lambda image_bytes, **kwargs: (image_bytes, "image/png")
             with patch.dict(sys.modules, {stub.__name__: stub}), self.assertRaisesRegex(ValueError, "SHA-256"):
                 load_draft_and_image(draft_path)
 
