@@ -64,7 +64,9 @@ misreported as the overall turn deadline. Chart-image analysis also applies the
 same overall deadline around its vision request, in addition to the per-request
 OpenAI timeout. Whichever local deadline expires first stops the coroutine;
 a chart timeout is reported as an incomplete analysis and is not saved as a
-successful assistant turn. Cancellation cannot guarantee that an upstream
+successful assistant turn. Text-turn deadline exceptions are also propagated
+to Telegram and are not appended to conversation history as completed answers.
+Cancellation cannot guarantee that an upstream
 provider stopped processing or billing a request it had already received.
 
 ## Chart screenshot analysis
