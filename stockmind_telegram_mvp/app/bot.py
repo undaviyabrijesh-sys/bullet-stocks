@@ -79,6 +79,21 @@ def _consume_daily_query(user_id: int, today: str) -> bool:
     return True
 
 
+def _research_admission_error(user_id: int) -> str | None:
+    """Return a non-consuming beta/quota rejection before expensive image work.
+
+    This is only an early preflight: _admit_beta_user and
+    _consume_daily_query remain the authoritative checks after image validation.
+    """
+    if user_id not in beta_users and len(beta_users) >= BETA_USER_LIMIT:
+        return "The 10-person beta is currently full. Please try again later."
+
+    today = datetime.now(IST).date().isoformat()
+    if usage_day.get(user_id) == today and usage.get(user_id, 0) >= DAILY_QUERY_LIMIT:
+        return "You've reached today's beta research limit. It resets at midnight IST."
+    return None
+
+
 bot = Bot(TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
@@ -125,6 +140,12 @@ async def _run_research_locked(
     if user is None:
         return
 
+    user_id = user.id
+    admission_error = _research_admission_error(user_id)
+    if admission_error:
+        await message.answer(admission_error)
+        return
+
     if image_bytes is not None:
         try:
             # Inspect actual bytes and normalize EXIF orientation once. The exact
@@ -136,7 +157,6 @@ async def _run_research_locked(
             await message.answer(str(exc))
             return
 
-    user_id = user.id
     if not _admit_beta_user(user_id):
         await message.answer("The 10-person beta is currently full. Please try again later.")
         return
@@ -257,6 +277,12 @@ async def handle_chart_photo(message: Message):
         await message.answer("That screenshot is too large. Please send an image under 5 MB.")
         return
 
+    if message.from_user is not None:
+        admission_error = _research_admission_error(message.from_user.id)
+        if admission_error:
+            await message.answer(admission_error)
+            return
+
     try:
         telegram_file = await bot.get_file(photo.file_id)
         if not telegram_file.file_path:
@@ -291,6 +317,12 @@ async def handle_chart_document(message: Message):
     if document.file_size and document.file_size > MAX_CHART_IMAGE_BYTES:
         await message.answer("That image is too large. Please send an image under 5 MB.")
         return
+
+    if message.from_user is not None:
+        admission_error = _research_admission_error(message.from_user.id)
+        if admission_error:
+            await message.answer(admission_error)
+            return
 
     try:
         telegram_file = await bot.get_file(document.file_id)
