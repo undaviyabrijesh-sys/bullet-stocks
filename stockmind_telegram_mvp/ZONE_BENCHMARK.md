@@ -352,6 +352,8 @@ the tests use synthetic images and rectangles only.
 
 ## Screenshot orientation and exact-byte matching
 
+EXIF orientation values include mirrored, transposed and transverse images as well as rotations. The normalization contract covers values 2 through 8; value 1 remains byte-for-byte unchanged. Tests use an asymmetric color grid to verify exact pixel placement, not only output dimensions, so a mirrored or transposed frame cannot pass a rotation-only check.
+
 Telegram chart uploads and local benchmark screenshots are passed through the same
 `prepare_chart_image` preprocessing step. It validates the encoded image and
 normalizes EXIF rotation/flip metadata before the bytes are sent to the vision model

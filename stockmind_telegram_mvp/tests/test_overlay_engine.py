@@ -418,5 +418,56 @@ class OverlayRendererTests(unittest.TestCase):
             render_overlay(b"not an image", [])
 
 
+class ExifOrientationMatrixTests(unittest.TestCase):
+    def test_normalizes_all_non_identity_exif_orientation_values(self):
+        palette = {
+            "A": (255, 0, 0),
+            "B": (0, 255, 0),
+            "C": (0, 0, 255),
+            "D": (255, 255, 0),
+            "E": (255, 0, 255),
+            "F": (0, 255, 255),
+        }
+        source = Image.new("RGB", (3, 2))
+        source.putdata([
+            palette["A"], palette["B"], palette["C"],
+            palette["D"], palette["E"], palette["F"],
+        ])
+        expected_rows = {
+            2: ("CBA", "FED"),
+            3: ("FED", "CBA"),
+            4: ("DEF", "ABC"),
+            5: ("AD", "BE", "CF"),
+            6: ("DA", "EB", "FC"),
+            7: ("FC", "EB", "DA"),
+            8: ("CF", "BE", "AD"),
+        }
+
+        for orientation, rows in expected_rows.items():
+            with self.subTest(orientation=orientation):
+                exif = Image.Exif()
+                exif[274] = orientation
+                encoded = BytesIO()
+                source.save(encoded, format="PNG", exif=exif)
+
+                normalized, mime_type = prepare_chart_image(encoded.getvalue())
+
+                expected_pixels = tuple(
+                    tuple(palette[label] for label in row)
+                    for row in rows
+                )
+                with Image.open(BytesIO(normalized)) as image:
+                    self.assertEqual(image.size, (len(rows[0]), len(rows)))
+                    actual_pixels = tuple(
+                        tuple(image.getpixel((x, y)) for x in range(image.width))
+                        for y in range(image.height)
+                    )
+                    self.assertEqual(actual_pixels, expected_pixels)
+                    self.assertNotIn(274, image.getexif())
+                self.assertEqual(mime_type, "image/png")
+
+
+
+
 if __name__ == "__main__":
     unittest.main()
