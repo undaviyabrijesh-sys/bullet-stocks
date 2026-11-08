@@ -367,6 +367,13 @@ hash is computed from the exact bytes sent to vision. If orientation normalizati
 would exceed the configured byte limit, processing stops with an explicit error
 rather than sending mismatched or oversized data.
 
+The benchmark runner independently enforces this contract: it calls the same
+preparation routine and rejects a fixture image if EXIF normalization would change
+its bytes. This prevents a hand-built manifest from scoring model coordinates
+against a raw, rotated screenshot. Re-run `annotation_intake` and use the
+canonical image it writes; do not simply update the manifest hash around an
+EXIF-bearing source file.
+
 
 ## Direct overlay renderer orientation contract
 
