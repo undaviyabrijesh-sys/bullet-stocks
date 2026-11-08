@@ -773,20 +773,10 @@ class ResearchAI:
         return result
 
     async def answer(self, history: list[dict], user_text: str) -> str:
-        timeout_seconds = getattr(
-            self, "turn_timeout_seconds", DEFAULT_RESEARCH_TURN_TIMEOUT_SECONDS
+        """Run one text research turn and propagate deadline failures to the caller."""
+        return await self._await_with_turn_deadline(
+            self._answer_within_deadline(history, user_text)
         )
-        try:
-            return await self._await_with_turn_deadline(
-                self._answer_within_deadline(history, user_text)
-            )
-        except ResearchTurnDeadlineExceeded:
-            return (
-                "I stopped this research turn after its "
-                f"{timeout_seconds:g}-second time budget expired. "
-                "A provider request may already have been received; no further model "
-                "or market-data calls were started. Please retry with a narrower question."
-            )
 
     async def _answer_within_deadline(self, history: list[dict], user_text: str) -> str:
         messages = [
