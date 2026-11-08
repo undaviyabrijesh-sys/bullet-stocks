@@ -13,6 +13,24 @@ from stockmind_telegram_mvp.app.ai import (
 from stockmind_telegram_mvp.app.strict_json import loads as strict_json_loads
 
 
+class AIClientConfigurationTests(unittest.TestCase):
+    def test_openai_client_uses_explicit_timeout_and_bounded_retries(self):
+        with patch("stockmind_telegram_mvp.app.ai.AsyncOpenAI") as client_factory:
+            research = ResearchAI("test-key", "test-model", None, None)
+
+        client_factory.assert_called_once()
+        options = client_factory.call_args.kwargs
+        self.assertEqual(options["api_key"], "test-key")
+        self.assertEqual(options["max_retries"], 1)
+
+        timeout = options["timeout"]
+        self.assertEqual(timeout.connect, 10.0)
+        self.assertEqual(timeout.read, 90.0)
+        self.assertEqual(timeout.write, 90.0)
+        self.assertEqual(timeout.pool, 90.0)
+        self.assertEqual(research.model, "test-model")
+
+
 class ToolArgumentParsingTests(unittest.IsolatedAsyncioTestCase):
     def test_parses_json_object(self):
         self.assertEqual(_parse_tool_arguments('{"symbol":"RELIANCE"}'), {"symbol": "RELIANCE"})
