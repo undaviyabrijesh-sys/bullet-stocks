@@ -235,6 +235,10 @@ CHART_PROMPT_SHA256 = hashlib.sha256(
 MAX_CHART_ZONES = 8
 
 # Bound both provider spend and the amount of market data copied into model context.
+OPENAI_REQUEST_TIMEOUT_SECONDS = 90.0
+OPENAI_CONNECT_TIMEOUT_SECONDS = 10.0
+OPENAI_MAX_RETRIES = 1
+
 MAX_TOOL_CALLS_PER_TURN = 6
 MAX_TOOL_RESULT_BYTES = 12 * 1024
 MAX_TOOL_RESULT_BYTES_PER_TURN = 36 * 1024
@@ -657,7 +661,14 @@ class ResearchAI:
     def __init__(
         self, api_key: str, model: str, market_data, crypto_data, vision_model: str | None = None
     ):
-        self.client = AsyncOpenAI(api_key=api_key)
+        self.client = AsyncOpenAI(
+            api_key=api_key,
+            timeout=httpx.Timeout(
+                OPENAI_REQUEST_TIMEOUT_SECONDS,
+                connect=OPENAI_CONNECT_TIMEOUT_SECONDS,
+            ),
+            max_retries=OPENAI_MAX_RETRIES,
+        )
         self.model = model
         self.vision_model = vision_model or model
         self.market_data = market_data
