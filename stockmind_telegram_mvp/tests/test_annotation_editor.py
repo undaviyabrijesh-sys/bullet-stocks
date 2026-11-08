@@ -479,7 +479,7 @@ class DraftImageVerificationTests(unittest.TestCase):
 
 
 class AnnotationEditorCliExitTests(unittest.TestCase):
-    def _run_editor(self, mode, *, save_output):
+    def _run_editor(self, mode, *, save_output, external_output=False):
         with tempfile.TemporaryDirectory() as temp:
             draft_path = Path(temp) / "chart.draft.json"
             draft_path.write_text("{}", encoding="utf-8")
@@ -498,8 +498,15 @@ class AnnotationEditorCliExitTests(unittest.TestCase):
             tkinter_stub.Tk = lambda: root
 
             def fake_editor(_root, _draft_value, _image, _mode, output_path):
+                editor = types.SimpleNamespace(saved=False)
                 if save_output:
                     output_path.write_text("{}", encoding="utf-8")
+                    editor.saved = True
+                elif external_output:
+                    # Simulate another process creating the path after the
+                    # editor has started; that is not this session's save.
+                    output_path.write_text("{}", encoding="utf-8")
+                return editor
 
             stderr = __import__("io").StringIO()
             with (
@@ -530,6 +537,15 @@ class AnnotationEditorCliExitTests(unittest.TestCase):
                 exit_code, stderr = self._run_editor(mode, save_output=True)
                 self.assertEqual(exit_code, 0)
                 self.assertEqual(stderr, "")
+
+    def test_external_output_created_after_launch_does_not_count_as_editor_save(self):
+        for mode in ("annotate", "review"):
+            with self.subTest(mode=mode):
+                exit_code, stderr = self._run_editor(
+                    mode, save_output=False, external_output=True
+                )
+                self.assertEqual(exit_code, 1)
+                self.assertIn("this session did not create an output", stderr)
 
 
 if __name__ == "__main__":

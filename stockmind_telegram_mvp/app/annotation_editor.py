@@ -419,6 +419,10 @@ class _DesktopEditor:
         self.draft = draft
         self.mode = mode
         self.output_path = output_path
+        # Only a successful save initiated by this editor session counts.
+        # File existence alone is insufficient: another process could create
+        # the output after main() performs its initial no-overwrite check.
+        self.saved = False
         self.image_width, self.image_height = image.size
         self.plot_bounds = draft.get("reference_plot_bounds")
         self.zones = copy.deepcopy(draft.get("reference_zones", []))
@@ -630,6 +634,7 @@ class _DesktopEditor:
                 price_axis_scale=self.axis_scale.get(),
             )
             _write_new_json(self.output_path, updated)
+            self.saved = True
         except (OSError, ValueError) as exc:
             self.messagebox.showerror("Cannot save annotation", str(exc))
             return
@@ -642,6 +647,7 @@ class _DesktopEditor:
                 self.draft, self.identity.get().strip(), approve=approve
             )
             _write_new_json(self.output_path, updated)
+            self.saved = True
         except (OSError, ValueError) as exc:
             self.messagebox.showerror("Cannot save review", str(exc))
             return
@@ -668,11 +674,11 @@ def main(argv=None):
             raise FileExistsError(f"output already exists; refusing to overwrite: {output}")
         import tkinter as tk
         root = tk.Tk()
-        _DesktopEditor(root, draft, image, args.mode, output)
+        editor = _DesktopEditor(root, draft, image, args.mode, output)
         root.mainloop()
-        if not output.is_file():
+        if not editor.saved:
             print(
-                "Annotation editor closed without saving; no output was created.",
+                "Annotation editor closed without saving; this session did not create an output.",
                 file=sys.stderr,
             )
             return 1
