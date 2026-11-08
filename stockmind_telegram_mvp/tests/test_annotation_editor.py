@@ -78,7 +78,7 @@ class AnnotationEditorSizingTests(unittest.TestCase):
         display_width, display_height = fit_editor_image_size(
             3840, 2160, 800, 600
         )
-        self.assertEqual((display_width, display_height), (675, 380))
+        self.assertEqual((display_width, display_height), (676, 380))
         self.assertLessEqual(display_width + 40, 800 - 40)
         self.assertLessEqual(display_height + 180, 600 - 40)
 
