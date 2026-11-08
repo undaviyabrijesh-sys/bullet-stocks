@@ -22,6 +22,7 @@ from .config import (
     OPENAI_API_KEY,
     OPENAI_MODEL,
     OPENAI_VISION_MODEL,
+    RESEARCH_TURN_TIMEOUT_SECONDS,
     TAPETIDE_TOKEN,
     TELEGRAM_BOT_TOKEN,
 )
@@ -35,7 +36,12 @@ ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 market = TapetideClient(TAPETIDE_TOKEN)
 crypto_market = BinanceMarketData()
 research = ResearchAI(
-    OPENAI_API_KEY, OPENAI_MODEL, market, crypto_market, vision_model=OPENAI_VISION_MODEL
+    OPENAI_API_KEY,
+    OPENAI_MODEL,
+    market,
+    crypto_market,
+    vision_model=OPENAI_VISION_MODEL,
+    turn_timeout_seconds=RESEARCH_TURN_TIMEOUT_SECONDS,
 )
 
 # Prototype-only in-memory state. Persist this before external beta testing.

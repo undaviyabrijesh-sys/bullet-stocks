@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import hashlib
 import json
@@ -238,6 +239,7 @@ MAX_CHART_ZONES = 8
 OPENAI_REQUEST_TIMEOUT_SECONDS = 90.0
 OPENAI_CONNECT_TIMEOUT_SECONDS = 10.0
 OPENAI_MAX_RETRIES = 1
+DEFAULT_RESEARCH_TURN_TIMEOUT_SECONDS = 120.0
 
 MAX_TOOL_CALLS_PER_TURN = 6
 MAX_TOOL_RESULT_BYTES = 12 * 1024
@@ -659,8 +661,22 @@ TOOLS = [
 
 class ResearchAI:
     def __init__(
-        self, api_key: str, model: str, market_data, crypto_data, vision_model: str | None = None
+        self,
+        api_key: str,
+        model: str,
+        market_data,
+        crypto_data,
+        vision_model: str | None = None,
+        turn_timeout_seconds: float = DEFAULT_RESEARCH_TURN_TIMEOUT_SECONDS,
     ):
+        if (
+            isinstance(turn_timeout_seconds, bool)
+            or not isinstance(turn_timeout_seconds, (int, float))
+            or not math.isfinite(turn_timeout_seconds)
+            or turn_timeout_seconds <= 0
+        ):
+            raise ValueError("Research turn timeout must be a finite positive number of seconds.")
+        self.turn_timeout_seconds = float(turn_timeout_seconds)
         self.client = AsyncOpenAI(
             api_key=api_key,
             timeout=httpx.Timeout(
@@ -725,6 +741,25 @@ class ResearchAI:
         return result
 
     async def answer(self, history: list[dict], user_text: str) -> str:
+        timeout_seconds = getattr(
+            self, "turn_timeout_seconds", DEFAULT_RESEARCH_TURN_TIMEOUT_SECONDS
+        )
+        timeout_scope = asyncio.timeout(timeout_seconds)
+        try:
+            async with timeout_scope:
+                return await self._answer_within_deadline(history, user_text)
+        except TimeoutError:
+            # Do not turn a provider's own TimeoutError into a turn-deadline message.
+            if not timeout_scope.expired():
+                raise
+            return (
+                "I stopped this research turn after its "
+                f"{timeout_seconds:g}-second time budget expired. "
+                "A provider request may already have been received; no further model "
+                "or market-data calls were started. Please retry with a narrower question."
+            )
+
+    async def _answer_within_deadline(self, history: list[dict], user_text: str) -> str:
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             *history,

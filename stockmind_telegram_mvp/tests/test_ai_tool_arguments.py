@@ -1,3 +1,4 @@
+import asyncio
 import json
 import unittest
 from types import SimpleNamespace
@@ -29,6 +30,20 @@ class AIClientConfigurationTests(unittest.TestCase):
         self.assertEqual(timeout.write, 90.0)
         self.assertEqual(timeout.pool, 90.0)
         self.assertEqual(research.model, "test-model")
+        self.assertEqual(research.turn_timeout_seconds, 120.0)
+
+    def test_research_turn_timeout_must_be_finite_and_positive(self):
+        with patch("stockmind_telegram_mvp.app.ai.AsyncOpenAI"):
+            for value in (0, -1, float("inf"), float("nan"), True):
+                with self.subTest(value=repr(value)):
+                    with self.assertRaisesRegex(ValueError, "finite positive"):
+                        ResearchAI(
+                            "test-key",
+                            "test-model",
+                            None,
+                            None,
+                            turn_timeout_seconds=value,
+                        )
 
 
 class ToolArgumentParsingTests(unittest.IsolatedAsyncioTestCase):
@@ -600,6 +615,134 @@ class ToolBudgetExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             json.loads(tool_messages[1]["content"])["type"], "ToolBudgetExceeded"
         )
+
+
+class ResearchTurnDeadlineTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def make_call():
+        return SimpleNamespace(
+            id="call-deadline",
+            function=SimpleNamespace(
+                name="get_quote",
+                arguments='{"symbol":"RELIANCE"}',
+            ),
+        )
+
+    @staticmethod
+    def make_response(message):
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    @staticmethod
+    def make_research(create, market_data, timeout_seconds):
+        research = object.__new__(ResearchAI)
+        research.model = "gpt-4o-mini"
+        research.turn_timeout_seconds = timeout_seconds
+        research.client = SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        )
+        research.market_data = market_data
+        research.crypto_data = None
+        return research
+
+    async def test_deadline_cancels_inflight_market_data_and_stops_followup_calls(self):
+        call = self.make_call()
+        message = SimpleNamespace(
+            tool_calls=[call],
+            content=None,
+            model_dump=lambda **kwargs: {
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": call.id,
+                    "type": "function",
+                    "function": {
+                        "name": call.function.name,
+                        "arguments": call.function.arguments,
+                    },
+                }],
+            },
+        )
+        create = AsyncMock(return_value=self.make_response(message))
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def slow_quote(symbol):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+        quote = AsyncMock(side_effect=slow_quote)
+        research = self.make_research(
+            create, SimpleNamespace(quote=quote), timeout_seconds=0.02
+        )
+
+        answer = await research.answer([], "Get Reliance quote")
+
+        self.assertIn("time budget expired", answer)
+        self.assertTrue(started.is_set())
+        self.assertTrue(cancelled.is_set())
+        create.assert_awaited_once()
+        quote.assert_awaited_once_with("RELIANCE")
+
+    async def test_deadline_covers_followup_model_round_after_tool_call(self):
+        call = self.make_call()
+        first_message = SimpleNamespace(
+            tool_calls=[call],
+            content=None,
+            model_dump=lambda **kwargs: {
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": call.id,
+                    "type": "function",
+                    "function": {
+                        "name": call.function.name,
+                        "arguments": call.function.arguments,
+                    },
+                }],
+            },
+        )
+        second_started = asyncio.Event()
+        second_cancelled = asyncio.Event()
+        create_count = 0
+
+        async def create_call(**kwargs):
+            nonlocal create_count
+            create_count += 1
+            if create_count == 1:
+                return self.make_response(first_message)
+            second_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                second_cancelled.set()
+                raise
+
+        create = AsyncMock(side_effect=create_call)
+        quote = AsyncMock(return_value={"data": {"symbol": "RELIANCE", "price": 100}})
+        research = self.make_research(
+            create, SimpleNamespace(quote=quote), timeout_seconds=0.02
+        )
+
+        answer = await research.answer([], "Get Reliance quote")
+
+        self.assertIn("time budget expired", answer)
+        self.assertTrue(second_started.is_set())
+        self.assertTrue(second_cancelled.is_set())
+        self.assertEqual(create.await_count, 2)
+        quote.assert_awaited_once_with("RELIANCE")
+
+    async def test_provider_timeout_is_not_misreported_as_turn_deadline(self):
+        create = AsyncMock(side_effect=TimeoutError("provider request timed out"))
+        research = self.make_research(
+            create, SimpleNamespace(), timeout_seconds=5
+        )
+
+        with self.assertRaisesRegex(TimeoutError, "provider request timed out"):
+            await research.answer([], "Get a market update")
+
+        create.assert_awaited_once()
 
 
 if __name__ == "__main__":

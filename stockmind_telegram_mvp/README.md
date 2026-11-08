@@ -42,17 +42,23 @@ Windows activation: `.venv\\Scripts\\activate`.
 - MAX_HISTORY_MESSAGES (default: 12)
 - OPENAI_VISION_MODEL (defaults to OPENAI_MODEL; must support image input and structured outputs; default GPT-6 Luna)
 - MAX_CHART_IMAGE_BYTES (default: 5 MB)
+- RESEARCH_TURN_TIMEOUT_SECONDS (default: 120 seconds; finite positive number)
 
 ## Provider request bounds
 
 The OpenAI client uses an explicit 90-second HTTPX timeout for each request,
-with a 10-second connection timeout and at most one SDK retry. This replaces
-the SDK's much longer default request timeout and limits automatic retry
-amplification. The timeout applies per Chat Completions request, not to the
-entire research turn: a turn may contain multiple model rounds and separate
-market-data calls. Provider adapters retain their own transport timeouts.
-A timeout is reported as a provider failure; StockMind does not invent a
-fallback price or chart level.
+with a 10-second connection timeout and at most one SDK retry. In addition,
+each text research turn has one overall deadline controlled by
+`RESEARCH_TURN_TIMEOUT_SECONDS` (default 120 seconds). The same deadline
+covers every model round and every awaited market-data provider call; it is
+not reset between steps. When it expires, StockMind cancels the in-flight
+coroutine and does not start further model or market-data calls. The caller
+receives a clear timeout response rather than a partial answer presented as
+complete. A provider may already have received an in-flight request, so
+cancellation does not guarantee that upstream processing or billing stopped.
+A provider's own timeout is preserved as a provider failure rather than being
+misreported as the overall turn deadline. Chart-image analysis remains one
+vision request and is bounded by the per-request OpenAI timeout.
 
 ## Chart screenshot analysis
 
