@@ -1,5 +1,6 @@
 import copy
 import hashlib
+from contextlib import redirect_stderr
 import json
 import sys
 import tempfile
@@ -20,6 +21,7 @@ from stockmind_telegram_mvp.app.annotation_editor import (
     validate_price_axis_annotations,
     _write_new_json,
     fit_editor_image_size,
+    main as editor_main,
 )
 
 
@@ -474,6 +476,60 @@ class DraftImageVerificationTests(unittest.TestCase):
             draft_path.write_text(json.dumps(draft), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "safe relative path"):
                 load_draft_and_image(draft_path)
+
+
+class AnnotationEditorCliExitTests(unittest.TestCase):
+    def _run_editor(self, mode, *, save_output):
+        with tempfile.TemporaryDirectory() as temp:
+            draft_path = Path(temp) / "chart.draft.json"
+            draft_path.write_text("{}", encoding="utf-8")
+            draft = _draft()
+            if mode == "review":
+                draft = apply_manual_annotations(
+                    draft,
+                    PLOT,
+                    [ZONE],
+                    "ann-001",
+                    annotated_at="2026-11-08T09:00:00Z",
+                )
+
+            root = types.SimpleNamespace(mainloop=lambda: None)
+            tkinter_stub = types.ModuleType("tkinter")
+            tkinter_stub.Tk = lambda: root
+
+            def fake_editor(_root, _draft_value, _image, _mode, output_path):
+                if save_output:
+                    output_path.write_text("{}", encoding="utf-8")
+
+            stderr = __import__("io").StringIO()
+            with (
+                patch(
+                    "stockmind_telegram_mvp.app.annotation_editor.load_draft_and_image",
+                    return_value=(draft, object()),
+                ),
+                patch(
+                    "stockmind_telegram_mvp.app.annotation_editor._DesktopEditor",
+                    side_effect=fake_editor,
+                ),
+                patch.dict(sys.modules, {"tkinter": tkinter_stub}),
+                redirect_stderr(stderr),
+            ):
+                exit_code = editor_main([str(draft_path), "--mode", mode])
+            return exit_code, stderr.getvalue()
+
+    def test_closing_annotation_or_review_without_saving_returns_nonzero(self):
+        for mode in ("annotate", "review"):
+            with self.subTest(mode=mode):
+                exit_code, stderr = self._run_editor(mode, save_output=False)
+                self.assertEqual(exit_code, 1)
+                self.assertIn("closed without saving", stderr)
+
+    def test_saving_annotation_or_review_returns_zero(self):
+        for mode in ("annotate", "review"):
+            with self.subTest(mode=mode):
+                exit_code, stderr = self._run_editor(mode, save_output=True)
+                self.assertEqual(exit_code, 0)
+                self.assertEqual(stderr, "")
 
 
 if __name__ == "__main__":

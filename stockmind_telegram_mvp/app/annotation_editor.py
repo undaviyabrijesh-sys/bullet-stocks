@@ -11,6 +11,7 @@ import copy
 import json
 import math
 import re
+import sys
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path, PurePosixPath
@@ -669,6 +670,12 @@ def main(argv=None):
         root = tk.Tk()
         _DesktopEditor(root, draft, image, args.mode, output)
         root.mainloop()
+        if not output.is_file():
+            print(
+                "Annotation editor closed without saving; no output was created.",
+                file=sys.stderr,
+            )
+            return 1
         return 0
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         parser.error(str(exc))
