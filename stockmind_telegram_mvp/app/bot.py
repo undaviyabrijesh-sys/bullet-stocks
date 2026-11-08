@@ -53,6 +53,51 @@ usage_day = {}
 beta_users = set()
 
 
+def _overlay_unavailable_note(chart_result: dict, drawn_count: int) -> str:
+    """Explain why an otherwise successful chart analysis has no overlay."""
+    if drawn_count:
+        return ""
+
+    plot_bounds = chart_result.get("plot_bounds")
+    zones = chart_result.get("zones")
+    if not isinstance(plot_bounds, dict):
+        return (
+            "\n\nI could not locate the main price-plot boundary confidently, "
+            "so I withheld all overlays. Keep the full candle panel and its edges "
+            "visible in the screenshot."
+        )
+
+    if not isinstance(zones, (list, tuple)) or not zones:
+        return (
+            "\n\nNo distinct supply/demand zone was returned from the visible "
+            "chart. This does not prove that no zone exists; cropped history or "
+            "unclear candles may hide it."
+        )
+
+    zone_objects = [zone for zone in zones if isinstance(zone, dict)]
+    if not zone_objects:
+        return (
+            "\n\nThe chart response contained no valid zone objects, so no "
+            "overlay was drawn. Verify the written analysis against the screenshot."
+        )
+
+    drawable_candidates = [
+        zone for zone in zone_objects if zone.get("draw_overlay") is True
+    ]
+    if not drawable_candidates:
+        return (
+            "\n\nThe analysis lists candidate areas, but none had geometry "
+            "approved for drawing. Verify the written descriptions against the "
+            "original screenshot; no overlay was guessed."
+        )
+
+    return (
+        "\n\nThe model supplied zone coordinates, but none passed the final "
+        "pixel-size and plot-boundary checks. No overlay was drawn; use a sharper, "
+        "uncropped screenshot and verify the written analysis."
+    )
+
+
 def _admit_beta_user(user_id: int) -> bool:
     """Admit a user once without exceeding the process-local beta cap.
 
@@ -201,7 +246,7 @@ async def _run_research_locked(
                     "Please verify the described zones against the original screenshot."
                 )
             elif not drawn_count:
-                answer += "\n\nI did not draw an overlay because no zone location was clear enough."
+                answer += _overlay_unavailable_note(chart_result, drawn_count)
         else:
             answer = await research.answer(list(histories[user_id]), user_text)
 
