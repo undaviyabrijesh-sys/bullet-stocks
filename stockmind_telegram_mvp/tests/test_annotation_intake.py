@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from io import BytesIO
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -115,6 +116,37 @@ class AnnotationIntakeTests(unittest.TestCase):
         prepare_annotation_draft(self.source, self.output, "chart-001")
         with self.assertRaises(FileExistsError):
             prepare_annotation_draft(self.source, self.output, "chart-001")
+
+    def test_removes_partial_image_when_image_write_fails(self):
+        destination = self.output / "images" / "partial-write.png"
+        real_open = open
+
+        class PartialWriter:
+            def __init__(self, stream):
+                self.stream = stream
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                self.stream.close()
+
+            def write(self, value):
+                self.stream.write(value[: max(1, len(value) // 2)])
+                raise OSError("simulated disk full")
+
+        def failing_open(path, mode="r", *args, **kwargs):
+            stream = real_open(path, mode, *args, **kwargs)
+            if path == destination and mode == "xb":
+                return PartialWriter(stream)
+            return stream
+
+        with patch.object(Path, "open", autospec=True, side_effect=failing_open):
+            with self.assertRaisesRegex(OSError, "simulated disk full"):
+                prepare_annotation_draft(self.source, self.output, "partial-write")
+
+        self.assertFalse(destination.exists())
+        self.assertFalse((self.output / "partial-write.draft.json").exists())
 
     def test_rejects_boolean_or_non_positive_byte_limit(self):
         for invalid in (True, 0, -1, 1.5):
