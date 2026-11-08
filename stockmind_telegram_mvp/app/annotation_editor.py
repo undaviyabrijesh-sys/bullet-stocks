@@ -2,7 +2,8 @@
 
 The editor never calls a model, market-data provider, Telegram, or network
 service. Annotation and review are separate state transitions and always write
-a new JSON file rather than modifying the intake draft in place.
+a new JSON file rather than modifying the intake draft in place. Failed writes
+remove a partially created output, and existing files are never overwritten.
 """
 
 import argparse
