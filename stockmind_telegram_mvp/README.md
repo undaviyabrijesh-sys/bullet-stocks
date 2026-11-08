@@ -43,6 +43,17 @@ Windows activation: `.venv\\Scripts\\activate`.
 - OPENAI_VISION_MODEL (defaults to OPENAI_MODEL; must support image input and structured outputs; default GPT-6 Luna)
 - MAX_CHART_IMAGE_BYTES (default: 5 MB)
 
+## Provider request bounds
+
+The OpenAI client uses an explicit 90-second HTTPX timeout for each request,
+with a 10-second connection timeout and at most one SDK retry. This replaces
+the SDK's much longer default request timeout and limits automatic retry
+amplification. The timeout applies per Chat Completions request, not to the
+entire research turn: a turn may contain multiple model rounds and separate
+market-data calls. Provider adapters retain their own transport timeouts.
+A timeout is reported as a provider failure; StockMind does not invent a
+fallback price or chart level.
+
 ## Chart screenshot analysis
 
 Send a chart screenshot as a Telegram photo or JPEG/PNG/WEBP image document, with a caption such as "BTC 1H — mark demand and supply" or "Is my demand zone still fresh?". Keep the price scale, timeframe and enough candles visible; include the symbol, exchange and timeframe in the caption when they are not shown.
