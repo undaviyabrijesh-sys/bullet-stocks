@@ -397,6 +397,27 @@ class DraftImageVerificationTests(unittest.TestCase):
             self.assertEqual(draft["fixture_id"], "btc-1h-001")
             self.assertEqual(image.size, (32, 24))
 
+    def test_decodes_the_exact_bytes_that_passed_hash_validation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            original = self._png()
+            draft_path, image_path = self._draft_file(root, original)
+            stub = types.ModuleType("stockmind_telegram_mvp.app.overlay_engine")
+
+            def replace_path_after_validation(image_bytes):
+                self.assertEqual(image_bytes, original)
+                replacement = BytesIO()
+                Image.new("RGB", (32, 24), "red").save(replacement, format="PNG")
+                image_path.write_bytes(replacement.getvalue())
+                return "image/png"
+
+            stub.validate_chart_image = replace_path_after_validation
+            with patch.dict(sys.modules, {stub.__name__: stub}):
+                _, image = load_draft_and_image(draft_path)
+
+            self.assertEqual(image.size, (32, 24))
+            self.assertEqual(image.getpixel((0, 0)), (255, 255, 255))
+
     def test_rejects_screenshot_hash_mismatch(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
