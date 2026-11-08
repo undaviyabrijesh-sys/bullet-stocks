@@ -204,6 +204,56 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
         self.message.answer_photo.assert_awaited_once()
         self.assertEqual(bot_module.histories[self.user_id][-1]["content"], result["analysis"])
 
+    async def test_chart_analysis_reports_overlay_render_failure_separately(self):
+        result = {
+            "analysis": "Visible demand structure; verify the price scale.",
+            "plot_bounds": {"x_start": 0.08, "x_end": 0.94, "y_top": 0.12, "y_bottom": 0.9},
+            "zones": [{"zone_type": "demand", "draw_overlay": True}],
+        }
+        research = self.use_research(analyze_chart_image=AsyncMock(return_value=result))
+
+        with patch.object(
+            bot_module, "prepare_chart_image",
+            return_value=(b"normalized-chart", "image/png"),
+        ), patch.object(
+            bot_module, "_render_overlay_prepared",
+            side_effect=RuntimeError("renderer failed"),
+        ):
+            await bot_module.run_research(
+                self.message, "Map BTC 1H DNS", b"chart-bytes", "image/png"
+            )
+
+        answer = self.status.edit_text.await_args.args[0]
+        self.assertIn("chart analysis completed", answer)
+        self.assertIn("couldn't render the overlay", answer)
+        self.assertNotIn("no zone location was clear enough", answer)
+        self.message.answer_photo.assert_not_awaited()
+        self.assertEqual(bot_module.histories[self.user_id][-1]["content"], answer)
+
+    async def test_missing_drawable_zones_keep_the_uncertainty_message(self):
+        result = {
+            "analysis": "The chart is too unclear to locate a reliable zone.",
+            "plot_bounds": None,
+            "zones": [],
+        }
+        research = self.use_research(analyze_chart_image=AsyncMock(return_value=result))
+
+        with patch.object(
+            bot_module, "prepare_chart_image",
+            return_value=(b"normalized-chart", "image/png"),
+        ), patch.object(
+            bot_module, "_render_overlay_prepared", return_value=(None, 0)
+        ):
+            await bot_module.run_research(
+                self.message, "Map BTC 1H DNS", b"chart-bytes", "image/png"
+            )
+
+        answer = self.status.edit_text.await_args.args[0]
+        self.assertIn("no zone location was clear enough", answer)
+        self.assertNotIn("couldn't render the overlay", answer)
+        self.message.answer_photo.assert_not_awaited()
+        self.assertEqual(bot_module.histories[self.user_id][-1]["content"], answer)
+
     async def test_successful_answer_is_kept_when_text_delivery_is_ambiguous(self):
         research = self.use_research(answer=AsyncMock(return_value="Research completed."))
         self.status.edit_text.side_effect = TimeoutError("Telegram request timed out")
