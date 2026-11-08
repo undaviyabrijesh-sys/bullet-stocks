@@ -18,6 +18,7 @@ from stockmind_telegram_mvp.app.annotation_editor import (
     validate_manual_geometry,
     validate_price_axis_anchor_points,
     validate_price_axis_annotations,
+    _write_new_json,
 )
 
 
@@ -320,6 +321,49 @@ class AnnotationWorkflowTests(unittest.TestCase):
         annotated = apply_manual_annotations(_draft(), PLOT, [], "ann-001", annotated_at="2026-11-07T12:00:00Z")
         with self.assertRaisesRegex(ValueError, "boolean"):
             review_annotation_draft(annotated, "rev-002", approve=1, reviewed_at="2026-11-07T12:05:00Z")
+
+
+class AnnotationFilePersistenceTests(unittest.TestCase):
+    def test_partial_output_is_removed_when_json_write_fails(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "annotation.json"
+
+            def fail_after_partial_write(value, stream, **kwargs):
+                stream.write("{")
+                raise OSError("simulated disk full")
+
+            with patch(
+                "stockmind_telegram_mvp.app.annotation_editor.json.dump",
+                side_effect=fail_after_partial_write,
+            ):
+                with self.assertRaisesRegex(OSError, "simulated disk full"):
+                    _write_new_json(output, {"status": "pending_review"})
+
+            self.assertFalse(output.exists())
+
+    def test_existing_output_is_preserved(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "annotation.json"
+            output.write_text("existing annotation\\n", encoding="utf-8")
+
+            with self.assertRaises(FileExistsError):
+                _write_new_json(output, {"status": "pending_review"})
+
+            self.assertEqual(
+                output.read_text(encoding="utf-8"),
+                "existing annotation\\n",
+            )
+
+    def test_successful_output_is_valid_json(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "annotation.json"
+            result = _write_new_json(output, {"status": "pending_review"})
+
+            self.assertEqual(result, output)
+            self.assertEqual(
+                json.loads(output.read_text(encoding="utf-8")),
+                {"status": "pending_review"},
+            )
 
 
 class DraftImageVerificationTests(unittest.TestCase):
