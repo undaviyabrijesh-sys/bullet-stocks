@@ -379,6 +379,40 @@ class OverlayRendererTests(unittest.TestCase):
         self.assertEqual(_zone_overlay_label({"label": " "}, "supply"), "SUPPLY")
         self.assertEqual(_zone_overlay_label({"label": "X" * 80}, "demand"), "X" * 32)
 
+    def test_public_renderer_always_prepares_image_before_drawing(self):
+        canonical = sample_image()
+        zones = [{
+            "zone_type": "demand", "draw_overlay": True,
+            "x_start": 0.2, "x_end": 0.6, "y_top": 0.3, "y_bottom": 0.5,
+        }]
+        bounds = {
+            "x_start": 0.05, "x_end": 0.95,
+            "y_top": 0.05, "y_bottom": 0.95,
+        }
+
+        with patch.object(
+            overlay_engine, "prepare_chart_image",
+            return_value=(canonical, "image/png"),
+        ) as prepare, patch.object(
+            overlay_engine, "_render_overlay_prepared",
+            return_value=(b"overlay-jpeg", 1),
+        ) as render:
+            result, count = render_overlay(
+                b"untrusted-input",
+                zones,
+                plot_bounds=bounds,
+                require_plot_bounds=True,
+            )
+
+        self.assertEqual((result, count), (b"overlay-jpeg", 1))
+        prepare.assert_called_once_with(b"untrusted-input")
+        render.assert_called_once_with(
+            canonical,
+            zones,
+            plot_bounds=bounds,
+            require_plot_bounds=True,
+        )
+
     def test_rejects_invalid_image_bytes(self):
         with self.assertRaises(ValueError):
             render_overlay(b"not an image", [])

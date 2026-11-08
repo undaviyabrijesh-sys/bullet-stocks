@@ -10,7 +10,7 @@ from aiogram.types import Message
 
 from .ai import ResearchAI
 from .crypto import BinanceMarketData
-from .overlay_engine import prepare_chart_image, render_overlay
+from .overlay_engine import prepare_chart_image, _render_overlay_prepared
 from .image_upload import BoundedBytesIO, UploadTooLargeError
 from .telegram_delivery import send_analysis_text, send_overlay_photo
 from .user_locks import UserLockRegistry
@@ -157,10 +157,9 @@ async def _run_research_locked(
             )
             answer = chart_result.get("analysis") or "I could not read the chart reliably."
             try:
-                overlay_image, drawn_count = render_overlay(
+                overlay_image, drawn_count = _render_overlay_prepared(
                 image_bytes,
                 chart_result.get("zones", []),
-                validated=True,
                 plot_bounds=chart_result.get("plot_bounds"),
                 require_plot_bounds=True,
             )

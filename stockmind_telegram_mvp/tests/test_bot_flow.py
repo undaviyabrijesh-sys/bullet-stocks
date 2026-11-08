@@ -146,7 +146,7 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
             bot_module, "prepare_chart_image",
             return_value=(b"normalized-chart", "image/png"),
         ) as prepare, patch.object(
-            bot_module, "render_overlay", return_value=(b"overlay-jpeg", 1)
+            bot_module, "_render_overlay_prepared", return_value=(b"overlay-jpeg", 1)
         ) as render:
             await bot_module.run_research(self.message, "Map BTC 1H DNS", b"chart-bytes", "image/png")
 

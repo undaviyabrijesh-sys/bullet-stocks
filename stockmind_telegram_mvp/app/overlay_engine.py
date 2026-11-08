@@ -246,23 +246,38 @@ def render_overlay(
     image_bytes: bytes,
     zones: list[dict],
     *,
-    validated: bool = False,
     plot_bounds: dict | None = None,
     require_plot_bounds: bool = False,
 ) -> tuple[bytes | None, int]:
-    """Draw validated, normalized rectangles onto a copy of the uploaded chart.
+    """Safely prepare an uploaded image, then render its normalized zones.
 
-    validated=True is reserved for callers that have just run prepare_chart_image
-    on these exact bytes before sending them to AI. Ordinary direct callers are
-    normalized here so EXIF orientation cannot shift overlay coordinates.
-    At most MAX_OVERLAY_ZONES drawable rectangles are emitted; rejected candidates
-    do not consume that limit.
+    This public entry point always validates and normalizes image bytes. Callers
+    cannot disable those checks with a boolean flag.
     """
-    if not validated:
-        # Direct renderer callers receive the same EXIF-safe coordinate frame as
-        # Telegram and annotation intake. The bot may skip this duplicate decode
-        # only after it has prepared these exact canonical bytes for vision.
-        image_bytes, _ = prepare_chart_image(image_bytes)
+    canonical_image_bytes, _ = prepare_chart_image(image_bytes)
+    return _render_overlay_prepared(
+        canonical_image_bytes,
+        zones,
+        plot_bounds=plot_bounds,
+        require_plot_bounds=require_plot_bounds,
+    )
+
+
+def _render_overlay_prepared(
+    image_bytes: bytes,
+    zones: list[dict],
+    *,
+    plot_bounds: dict | None = None,
+    require_plot_bounds: bool = False,
+) -> tuple[bytes | None, int]:
+    """Render bytes already prepared by prepare_chart_image in this call flow.
+
+    Internal fast path for the Telegram handler: it avoids decoding the same
+    screenshot twice after that handler has prepared the exact bytes submitted
+    to the vision model. External/direct callers should use render_overlay().
+    At most MAX_OVERLAY_ZONES drawable rectangles are emitted; rejected
+    candidates do not consume that limit.
+    """
     if not isinstance(zones, (list, tuple)):
         return None, 0
 

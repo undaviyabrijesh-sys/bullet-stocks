@@ -370,9 +370,12 @@ rather than sending mismatched or oversized data.
 
 ## Direct overlay renderer orientation contract
 
-`render_overlay` normalizes EXIF orientation for ordinary callers before
-converting normalized coordinates to pixels. This keeps direct/offline rendering
-consistent with Telegram chart processing and annotation intake. The internal
-`validated=True` fast path is only for callers that have already run
-`prepare_chart_image` on the exact same bytes; validation without orientation
-normalization is not sufficient for that fast path.
+The public `render_overlay` entry point always validates and normalizes the
+supplied screenshot before converting normalized coordinates to pixels. There
+is no public boolean flag that disables image validation or EXIF normalization.
+
+The Telegram handler has already run `prepare_chart_image` on the exact bytes
+sent to the vision provider. To avoid decoding a large screenshot a second time,
+that internal handler uses `_render_overlay_prepared` with those same canonical
+bytes. This underscore-prefixed helper is an internal fast path; direct callers
+and offline tools should use `render_overlay`.
