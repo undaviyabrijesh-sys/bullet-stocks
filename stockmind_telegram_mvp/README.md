@@ -123,9 +123,16 @@ The offline editor scales only the on-screen preview, never the source screensho
 or its normalized annotation coordinates. The preview is capped at 1200 × 760
 pixels and is further fitted to the detected display size, reserving space for
 the window controls and status text. Annotation controls are arranged in
-separate identity, drawing and action rows; narrow previews stack axis controls
-on their own row. This avoids a long single-row toolbar forcing the window
-wider than small laptop and remote-desktop displays.
+separate identity, drawing, view and action rows; narrow previews stack axis
+controls on their own row.
+
+The annotation and review windows include 100%, 150%, 200%, 300% and 400% zoom
+levels plus horizontal and vertical scrollbars. Zoom is rendered from the
+original in-memory screenshot, not from the already reduced preview. Drawing
+coordinates are converted from the scrolled canvas back to normalized
+full-screenshot coordinates, so a box drawn after zooming or panning is saved
+in the same coordinate frame as the original image and AI prediction. Changing
+zoom during an active drag is blocked to avoid mixing coordinate frames.
 
 After an annotation has been independently approved, save the actual
 ResearchAI.analyze_chart_image result as JSON. The result includes

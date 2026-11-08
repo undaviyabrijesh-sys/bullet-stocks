@@ -65,18 +65,57 @@ def fit_editor_image_size(image_width, image_height, screen_width, screen_height
 def editor_control_rows(mode, display_width):
     """Return responsive control rows for the offline editor.
 
-    Narrow previews stack the drawing tool and axis controls separately so
-    their combined widget width cannot force the editor beyond a small screen.
+    Narrow previews stack the drawing tool and axis controls separately. A
+    dedicated view row keeps zoom controls available in both annotation and
+    review modes without crowding the save/decision controls.
     """
     if isinstance(display_width, bool) or not isinstance(display_width, int) or display_width <= 0:
         raise ValueError("display_width must be a positive integer")
     if mode == "annotate":
         if display_width < 420:
-            return ("identity", "drawing", "axis", "actions")
-        return ("identity", "drawing", "actions")
+            return ("identity", "drawing", "axis", "view", "actions")
+        return ("identity", "drawing", "view", "actions")
     if mode == "review":
-        return ("identity", "actions")
+        return ("identity", "view", "actions")
     raise ValueError("mode must be 'annotate' or 'review'")
+
+
+EDITOR_ZOOM_LEVELS = (1.0, 1.5, 2.0, 3.0, 4.0)
+
+
+def zoomed_editor_image_size(image_width, image_height, zoom):
+    """Return the rendered image size for a bounded, source-relative zoom."""
+    for field, value in (("image_width", image_width), ("image_height", image_height)):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{field} must be a positive integer")
+    if isinstance(zoom, bool) or not isinstance(zoom, (int, float)):
+        raise ValueError("zoom must be a finite number between 1 and 4")
+    try:
+        zoom = float(zoom)
+    except (OverflowError, TypeError, ValueError) as exc:
+        raise ValueError("zoom must be a finite number between 1 and 4") from exc
+    if not math.isfinite(zoom) or not 1.0 <= zoom <= 4.0:
+        raise ValueError("zoom must be a finite number between 1 and 4")
+    return max(1, round(image_width * zoom)), max(1, round(image_height * zoom))
+
+
+def editor_canvas_point_to_normalized(x, y, render_width, render_height):
+    """Map scrolled/zoomed canvas coordinates to source-image normalized space."""
+    for field, value in (("render_width", render_width), ("render_height", render_height)):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{field} must be a positive integer")
+    normalized = []
+    for field, value, dimension in (("x", x, render_width), ("y", y, render_height)):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{field} must be a finite number")
+        try:
+            value = float(value)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise ValueError(f"{field} must be a finite number") from exc
+        if not math.isfinite(value):
+            raise ValueError(f"{field} must be a finite number")
+        normalized.append(min(1.0, max(0.0, value / dimension)))
+    return tuple(normalized)
 
 
 def _utc_now():
@@ -450,6 +489,10 @@ class _DesktopEditor:
         self.drag_start = None
         self.preview_id = None
         self.undo_stack = []
+        self.source_image = image.copy()
+        self.zoom_index = 0
+        self.zoom_factor = EDITOR_ZOOM_LEVELS[self.zoom_index]
+        self.zoom_label = tk.StringVar(value="100%")
 
         self.display_w, self.display_h = fit_editor_image_size(
             image.width,
@@ -457,11 +500,14 @@ class _DesktopEditor:
             root.winfo_screenwidth(),
             root.winfo_screenheight(),
         )
-        display_image = image.convert("RGB").resize((self.display_w, self.display_h), Image.Resampling.LANCZOS)
+        self.render_w, self.render_h = self.display_w, self.display_h
+        display_image = self.source_image.convert("RGB").resize(
+            (self.render_w, self.render_h), Image.Resampling.LANCZOS
+        )
         self.photo = ImageTk.PhotoImage(display_image)
 
         root.title(f"StockMind annotation — {draft['fixture_id']} — {mode}")
-        root.geometry(f"{self.display_w + 40}x{self.display_h + 180}")
+        root.geometry(f"{self.display_w + 40}x{self.display_h + 220}")
         controls = tk.Frame(root, padx=8, pady=8)
         controls.pack(fill="x")
         rows = {}
@@ -491,11 +537,39 @@ class _DesktopEditor:
             tk.Button(action_row, text="Approve", command=lambda: self.save_review(True)).pack(side="left", padx=6)
             tk.Button(action_row, text="Reject", command=lambda: self.save_review(False)).pack(side="left", padx=6)
 
+        view_row = rows["view"]
+        tk.Label(view_row, text="Zoom:").pack(side="left", padx=(0, 4))
+        tk.Button(view_row, text="−", command=self.zoom_out, width=3).pack(side="left", padx=2)
+        tk.Label(view_row, textvariable=self.zoom_label, width=6, anchor="center").pack(side="left", padx=2)
+        tk.Button(view_row, text="+", command=self.zoom_in, width=3).pack(side="left", padx=2)
+        tk.Button(view_row, text="Reset", command=self.reset_zoom).pack(side="left", padx=4)
+
         self.status = tk.StringVar(value=self._instructions())
         tk.Label(root, textvariable=self.status, anchor="w", padx=8).pack(fill="x")
-        self.canvas = tk.Canvas(root, width=self.display_w, height=self.display_h, highlightthickness=0, cursor="crosshair")
-        self.canvas.pack(padx=8, pady=8)
-        self.canvas.create_image(0, 0, image=self.photo, anchor="nw")
+        canvas_frame = tk.Frame(root)
+        canvas_frame.pack(fill="both", expand=True, padx=8, pady=8)
+        self.canvas = tk.Canvas(
+            canvas_frame,
+            width=self.display_w,
+            height=self.display_h,
+            highlightthickness=0,
+            cursor="crosshair",
+        )
+        vertical_scrollbar = tk.Scrollbar(
+            canvas_frame, orient="vertical", command=self.canvas.yview
+        )
+        horizontal_scrollbar = tk.Scrollbar(
+            canvas_frame, orient="horizontal", command=self.canvas.xview
+        )
+        self.canvas.configure(
+            xscrollcommand=horizontal_scrollbar.set,
+            yscrollcommand=vertical_scrollbar.set,
+            scrollregion=(0, 0, self.render_w, self.render_h),
+        )
+        vertical_scrollbar.pack(side="right", fill="y")
+        horizontal_scrollbar.pack(side="bottom", fill="x")
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.image_item = self.canvas.create_image(0, 0, image=self.photo, anchor="nw")
         self._redraw()
         if mode == "annotate":
             self.canvas.bind("<ButtonPress-1>", self._start_draw)
@@ -509,13 +583,16 @@ class _DesktopEditor:
             return (
                 "Draw the price-plot boundary, then supply/demand bands. "
                 "Optional: choose axis_anchor, click 3..20 price levels inside the plot, "
-                "and enter their exact visible labels. Empty zone lists are allowed."
+                "and enter their exact visible labels. Use zoom and scrollbars for precise edges."
             )
-        return "Review the original screenshot, zones and any manually entered price-axis anchors. Use a separate reviewer ID."
+        return (
+            "Review the screenshot and manual price anchors. Use zoom and scrollbars "
+            "to inspect boundaries, and a separate reviewer ID."
+        )
 
     def _coords(self, box):
-        return (box["x_start"] * self.display_w, box["y_top"] * self.display_h,
-                box["x_end"] * self.display_w, box["y_bottom"] * self.display_h)
+        return (box["x_start"] * self.render_w, box["y_top"] * self.render_h,
+                box["x_end"] * self.render_w, box["y_bottom"] * self.render_h)
 
     def _redraw(self):
         self.canvas.delete("overlay")
@@ -529,28 +606,79 @@ class _DesktopEditor:
         if self.plot_bounds:
             plot_x1, _, plot_x2, _ = self._coords(self.plot_bounds)
             for anchor in self.axis_anchors:
-                y = anchor["y"] * self.display_h
+                y = anchor["y"] * self.render_h
                 self.canvas.create_line(plot_x1, y, plot_x2, y, fill="#F59E0B", dash=(3, 3), width=1, tags="overlay")
                 self.canvas.create_oval(plot_x2 - 4, y - 4, plot_x2 + 4, y + 4, outline="#F59E0B", fill="#F59E0B", tags="overlay")
                 self.canvas.create_text(plot_x2 - 6, y - 5, text=f"{anchor['price']:g}", fill="#F59E0B", anchor="se", tags="overlay")
 
+    def _canvas_point(self, event):
+        """Convert viewport event coordinates into the scrolled image canvas."""
+        x = self.canvas.canvasx(event.x)
+        y = self.canvas.canvasy(event.y)
+        return (
+            max(0.0, min(float(self.render_w), float(x))),
+            max(0.0, min(float(self.render_h), float(y))),
+        )
+
+    def _set_zoom(self, index):
+        if self.drag_start is not None:
+            self.status.set("Finish or cancel the current drawing before changing zoom.")
+            return
+        index = max(0, min(len(EDITOR_ZOOM_LEVELS) - 1, index))
+        if index == self.zoom_index:
+            return
+
+        viewport_width = max(1, self.canvas.winfo_width())
+        viewport_height = max(1, self.canvas.winfo_height())
+        center_x = self.canvas.canvasx(viewport_width / 2) / self.render_w
+        center_y = self.canvas.canvasy(viewport_height / 2) / self.render_h
+
+        self.zoom_index = index
+        self.zoom_factor = EDITOR_ZOOM_LEVELS[index]
+        self.render_w, self.render_h = zoomed_editor_image_size(
+            self.display_w, self.display_h, self.zoom_factor
+        )
+        resized = self.source_image.convert("RGB").resize(
+            (self.render_w, self.render_h), Image.Resampling.LANCZOS
+        )
+        self.photo = ImageTk.PhotoImage(resized)
+        self.canvas.itemconfigure(self.image_item, image=self.photo)
+        self.canvas.configure(scrollregion=(0, 0, self.render_w, self.render_h))
+        self.zoom_label.set(f"{self.zoom_factor:.0%}")
+
+        self.canvas.xview_moveto(
+            max(0.0, min(1.0, center_x - viewport_width / (2 * self.render_w)))
+        )
+        self.canvas.yview_moveto(
+            max(0.0, min(1.0, center_y - viewport_height / (2 * self.render_h)))
+        )
+        self._redraw()
+
+    def zoom_in(self):
+        self._set_zoom(self.zoom_index + 1)
+
+    def zoom_out(self):
+        self._set_zoom(self.zoom_index - 1)
+
+    def reset_zoom(self):
+        self._set_zoom(0)
+
     def _start_draw(self, event):
-        self.drag_start = (max(0, min(self.display_w, event.x)), max(0, min(self.display_h, event.y)))
+        self.drag_start = self._canvas_point(event)
         if self.preview_id is not None:
             self.canvas.delete(self.preview_id)
         if self.tool.get() == "axis_anchor":
             y = self.drag_start[1]
-            self.preview_id = self.canvas.create_line(0, y, self.display_w, y, fill="#F59E0B", dash=(3, 3))
+            self.preview_id = self.canvas.create_line(0, y, self.render_w, y, fill="#F59E0B", dash=(3, 3))
         else:
             self.preview_id = self.canvas.create_rectangle(*self.drag_start, *self.drag_start, outline="#F59E0B", width=2, dash=(3, 3))
 
     def _move_draw(self, event):
         if self.drag_start is None or self.preview_id is None:
             return
-        x = max(0, min(self.display_w, event.x))
-        y = max(0, min(self.display_h, event.y))
+        x, y = self._canvas_point(event)
         if self.tool.get() == "axis_anchor":
-            self.canvas.coords(self.preview_id, 0, y, self.display_w, y)
+            self.canvas.coords(self.preview_id, 0, y, self.render_w, y)
         else:
             self.canvas.coords(self.preview_id, self.drag_start[0], self.drag_start[1], x, y)
 
@@ -558,8 +686,7 @@ class _DesktopEditor:
         if self.drag_start is None:
             return
         x0, y0 = self.drag_start
-        x1 = max(0, min(self.display_w, event.x))
-        y1 = max(0, min(self.display_h, event.y))
+        x1, y1 = self._canvas_point(event)
         self.drag_start = None
         if self.preview_id is not None:
             self.canvas.delete(self.preview_id)
@@ -568,7 +695,9 @@ class _DesktopEditor:
             if self.plot_bounds is None:
                 self.status.set("Draw the price-plot boundary before adding price-axis anchors.")
                 return
-            y = y1 / self.display_h
+            _, y = editor_canvas_point_to_normalized(
+                0, y1, self.render_w, self.render_h
+            )
             if not self.plot_bounds["y_top"] <= y <= self.plot_bounds["y_bottom"]:
                 self.status.set("Price-axis anchors must be placed inside the main price plot.")
                 return
@@ -602,11 +731,17 @@ class _DesktopEditor:
         if right - left < 2 or bottom - top < 2:
             self.status.set("Rectangle too small; drag a larger area.")
             return
+        x_start, y_top = editor_canvas_point_to_normalized(
+            left, top, self.render_w, self.render_h
+        )
+        x_end, y_bottom = editor_canvas_point_to_normalized(
+            right, bottom, self.render_w, self.render_h
+        )
         box = {
-            "x_start": left / self.display_w,
-            "x_end": right / self.display_w,
-            "y_top": top / self.display_h,
-            "y_bottom": bottom / self.display_h,
+            "x_start": x_start,
+            "x_end": x_end,
+            "y_top": y_top,
+            "y_bottom": y_bottom,
         }
         if self.tool.get() == "plot":
             try:

@@ -22,6 +22,8 @@ from stockmind_telegram_mvp.app.annotation_editor import (
     _write_new_json,
     fit_editor_image_size,
     editor_control_rows,
+    zoomed_editor_image_size,
+    editor_canvas_point_to_normalized,
     main as editor_main,
 )
 
@@ -83,14 +85,14 @@ class AnnotationEditorSizingTests(unittest.TestCase):
         )
         self.assertEqual((display_width, display_height), (676, 380))
         self.assertLessEqual(display_width + 40, 800 - 40)
-        self.assertLessEqual(display_height + 180, 600 - 40)
+        self.assertLessEqual(display_height + 220, 600 - 40)
 
     def test_portrait_chart_preview_fits_available_height(self):
         display_width, display_height = fit_editor_image_size(
             900, 1600, 800, 600
         )
         self.assertLessEqual(display_width + 40, 800 - 40)
-        self.assertLessEqual(display_height + 180, 600 - 40)
+        self.assertLessEqual(display_height + 220, 600 - 40)
 
     def test_rejects_non_positive_or_non_integer_dimensions(self):
         invalid = (
@@ -108,25 +110,73 @@ class AnnotationEditorControlLayoutTests(unittest.TestCase):
     def test_wide_annotation_preview_keeps_controls_in_three_rows(self):
         self.assertEqual(
             editor_control_rows("annotate", 676),
-            ("identity", "drawing", "actions"),
+            ("identity", "drawing", "view", "actions"),
         )
 
     def test_narrow_annotation_preview_stacks_axis_controls(self):
         self.assertEqual(
             editor_control_rows("annotate", 214),
-            ("identity", "drawing", "axis", "actions"),
+            ("identity", "drawing", "axis", "view", "actions"),
         )
 
     def test_review_controls_use_compact_rows(self):
         self.assertEqual(
             editor_control_rows("review", 214),
-            ("identity", "actions"),
+            ("identity", "view", "actions"),
         )
 
     def test_rejects_invalid_mode_or_display_width(self):
         for mode, width in (("unknown", 500), ("annotate", 0), ("review", True), ("review", 500.0)):
             with self.subTest(mode=mode, width=width), self.assertRaises(ValueError):
                 editor_control_rows(mode, width)
+
+
+
+
+class AnnotationEditorZoomTests(unittest.TestCase):
+    def test_zoomed_image_size_scales_from_the_same_preview_dimensions(self):
+        self.assertEqual(zoomed_editor_image_size(1200, 675, 1.0), (1200, 675))
+        self.assertEqual(zoomed_editor_image_size(1200, 675, 2.0), (2400, 1350))
+        self.assertEqual(zoomed_editor_image_size(1200, 675, 4.0), (4800, 2700))
+
+    def test_zoom_rejects_invalid_dimensions_and_levels(self):
+        for width, height, zoom in (
+            (0, 100, 2.0),
+            (100, True, 2.0),
+            (100, 100, True),
+            (100, 100, 0.99),
+            (100, 100, 4.01),
+            (100, 100, float("nan")),
+            (100, 100, float("inf")),
+            (100, 100, "2"),
+        ):
+            with self.subTest(width=width, height=height, zoom=zoom), self.assertRaises(ValueError):
+                zoomed_editor_image_size(width, height, zoom)
+
+    def test_same_source_point_maps_to_same_normalized_coordinates_at_any_zoom(self):
+        self.assertEqual(
+            editor_canvas_point_to_normalized(600, 337.5, 1200, 675),
+            (0.5, 0.5),
+        )
+        self.assertEqual(
+            editor_canvas_point_to_normalized(1200, 675, 2400, 1350),
+            (0.5, 0.5),
+        )
+
+    def test_scrolled_canvas_coordinates_are_clamped_to_image_edges(self):
+        self.assertEqual(
+            editor_canvas_point_to_normalized(-20, 1400, 1200, 1350),
+            (0.0, 1.0),
+        )
+        self.assertEqual(
+            editor_canvas_point_to_normalized(1300, -10, 1200, 1350),
+            (1.0, 0.0),
+        )
+
+    def test_canvas_mapping_rejects_boolean_and_non_finite_coordinates(self):
+        for x, y in ((True, 1), (1, False), (float("nan"), 1), (1, float("inf")), ("1", 1)):
+            with self.subTest(x=x, y=y), self.assertRaises(ValueError):
+                editor_canvas_point_to_normalized(x, y, 1200, 675)
 
 
 class AnnotationGeometryTests(unittest.TestCase):
