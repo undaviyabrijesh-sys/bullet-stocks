@@ -71,7 +71,8 @@ def prepare_annotation_draft(
 
     Images without EXIF rotation are preserved byte-for-byte. When EXIF requires
     a rotation or flip, the visual image is normalized before hashing and saving.
-    Existing outputs are never overwritten. The draft is not scoreable until it
+    Existing outputs are never overwritten. If either output write fails, any
+    newly created partial files are removed. The draft is not scoreable until it
     is manually annotated, independently reviewed and paired with an AI result.
     """
     max_image_bytes = _positive_integer(max_image_bytes, "max_image_bytes")
@@ -148,9 +149,10 @@ def prepare_annotation_draft(
     image_created = False
     draft_created = False
     try:
-        with destination_image.open("xb") as stream:
-            stream.write(image_bytes)
+        image_stream = destination_image.open("xb")
         image_created = True
+        with image_stream:
+            image_stream.write(image_bytes)
         draft_stream = destination_draft.open("x", encoding="utf-8", newline="\n")
         draft_created = True
         with draft_stream:
