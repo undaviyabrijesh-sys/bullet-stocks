@@ -4,7 +4,11 @@ from unittest.mock import AsyncMock
 
 from aiogram.types import BufferedInputFile
 
-from stockmind_telegram_mvp.app.telegram_delivery import send_analysis_text, send_overlay_photo
+from stockmind_telegram_mvp.app.telegram_delivery import (
+    send_analysis_text,
+    send_overlay_photo,
+    split_telegram_text,
+)
 
 
 class AnalysisDeliveryTests(unittest.IsolatedAsyncioTestCase):
@@ -57,6 +61,62 @@ class AnalysisDeliveryTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(delivered)
         message.answer.assert_awaited_once_with("Analysis complete")
+
+
+    def test_split_preserves_every_character_and_prefers_paragraph_boundaries(self):
+        text = ("First paragraph.\\n\\nSecond paragraph.\\n\\n" * 300)
+
+        chunks = split_telegram_text(text)
+
+        self.assertGreater(len(chunks), 1)
+        self.assertTrue(all(len(chunk) <= 4000 for chunk in chunks))
+        self.assertEqual("".join(chunks), text)
+        self.assertTrue(chunks[0].endswith("\\n\\n"))
+
+    def test_split_handles_long_unbroken_tokens_without_data_loss(self):
+        text = "X" * 8001
+
+        chunks = split_telegram_text(text)
+
+        self.assertEqual([len(chunk) for chunk in chunks], [4000, 4000, 1])
+        self.assertEqual("".join(chunks), text)
+
+    def test_split_rejects_invalid_limits_and_non_text(self):
+        with self.assertRaises(ValueError):
+            split_telegram_text("text", limit=0)
+        with self.assertRaises(ValueError):
+            split_telegram_text("text", limit=True)
+        with self.assertRaises(TypeError):
+            split_telegram_text(b"text")
+
+    async def test_long_analysis_edits_first_chunk_then_replies_with_remainder(self):
+        text = ("BTC structure and invalidation.\\n\\n" * 300)
+        chunks = split_telegram_text(text)
+        message = SimpleNamespace(answer=AsyncMock())
+        status = SimpleNamespace(edit_text=AsyncMock())
+
+        delivered = await send_analysis_text(message, status, text)
+
+        self.assertTrue(delivered)
+        status.edit_text.assert_awaited_once_with(chunks[0])
+        self.assertEqual(
+            [call.args[0] for call in message.answer.await_args_list],
+            chunks[1:],
+        )
+        self.assertEqual("".join([status.edit_text.await_args.args[0]] + [
+            call.args[0] for call in message.answer.await_args_list
+        ]), text)
+
+    async def test_failed_followup_chunk_reports_partial_delivery_without_retry(self):
+        text = "A" * 8500
+        message = SimpleNamespace(answer=AsyncMock(side_effect=RuntimeError("Telegram unavailable")))
+        status = SimpleNamespace(edit_text=AsyncMock())
+
+        delivered = await send_analysis_text(message, status, text)
+
+        self.assertFalse(delivered)
+        status.edit_text.assert_awaited_once_with("A" * 4000)
+        message.answer.assert_awaited_once_with("A" * 4000)
 
 
 class OverlayDeliveryTests(unittest.IsolatedAsyncioTestCase):

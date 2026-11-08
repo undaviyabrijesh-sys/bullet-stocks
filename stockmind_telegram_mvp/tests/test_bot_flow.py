@@ -15,6 +15,7 @@ from unittest.mock import patch as environment_patch
 
 
 from stockmind_telegram_mvp.app.ai import ResearchTurnDeadlineExceeded
+from stockmind_telegram_mvp.app.telegram_delivery import split_telegram_text
 
 
 _TEST_ENV = {
@@ -63,6 +64,22 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
                 {"role": "assistant", "content": "BTC structure is unclear."},
             ],
         )
+
+    async def test_long_research_answer_is_not_truncated_before_telegram_delivery(self):
+        answer = ("BTC setup: confirmation, invalidation and risk notes.\\n\\n" * 180)
+        chunks = split_telegram_text(answer)
+        research = self.use_research(answer=AsyncMock(return_value=answer))
+
+        await bot_module.run_research(self.message, "Analyse BTC")
+
+        research.answer.assert_awaited_once()
+        self.status.edit_text.assert_awaited_once_with(chunks[0])
+        delivered_chunks = [self.status.edit_text.await_args.args[0]] + [
+            call.args[0] for call in self.message.answer.await_args_list
+        ]
+        self.assertEqual(delivered_chunks, chunks)
+        self.assertEqual("".join(delivered_chunks), answer)
+        self.assertEqual(bot_module.histories[self.user_id][-1]["content"], answer)
 
     async def test_same_user_requests_are_serialized_and_second_sees_first_turn(self):
         first_started = asyncio.Event()

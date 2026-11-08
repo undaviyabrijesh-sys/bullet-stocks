@@ -240,7 +240,7 @@ async def _run_research_locked(
             logger.warning("StockMind research failed and Telegram could not deliver the error message")
         return
 
-    if not await send_analysis_text(message, status, answer[:4000]):
+    if not await send_analysis_text(message, status, answer):
         logger.warning("StockMind analysis succeeded, but Telegram text delivery failed")
 
     # Deliver the overlay after the written analysis has been committed to chat.
