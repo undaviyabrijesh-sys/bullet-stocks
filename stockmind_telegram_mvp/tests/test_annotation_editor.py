@@ -19,6 +19,7 @@ from stockmind_telegram_mvp.app.annotation_editor import (
     validate_price_axis_anchor_points,
     validate_price_axis_annotations,
     _write_new_json,
+    fit_editor_image_size,
 )
 
 
@@ -62,6 +63,42 @@ def _draft():
         "predicted_zones": None,
         "prediction_metadata": None,
     }
+
+
+
+
+class AnnotationEditorSizingTests(unittest.TestCase):
+    def test_large_chart_preview_respects_content_caps_on_desktop(self):
+        self.assertEqual(
+            fit_editor_image_size(3840, 2160, 1920, 1080),
+            (1200, 675),
+        )
+
+    def test_large_chart_preview_fits_small_remote_desktop(self):
+        display_width, display_height = fit_editor_image_size(
+            3840, 2160, 800, 600
+        )
+        self.assertEqual((display_width, display_height), (675, 380))
+        self.assertLessEqual(display_width + 40, 800 - 40)
+        self.assertLessEqual(display_height + 180, 600 - 40)
+
+    def test_portrait_chart_preview_fits_available_height(self):
+        display_width, display_height = fit_editor_image_size(
+            900, 1600, 800, 600
+        )
+        self.assertLessEqual(display_width + 40, 800 - 40)
+        self.assertLessEqual(display_height + 180, 600 - 40)
+
+    def test_rejects_non_positive_or_non_integer_dimensions(self):
+        invalid = (
+            (0, 100, 800, 600),
+            (100, True, 800, 600),
+            (100, 100, 0, 600),
+            (100, 100, 800, 600.0),
+        )
+        for values in invalid:
+            with self.subTest(values=values), self.assertRaises(ValueError):
+                fit_editor_image_size(*values)
 
 
 class AnnotationGeometryTests(unittest.TestCase):

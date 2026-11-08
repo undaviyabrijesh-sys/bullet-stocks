@@ -29,6 +29,38 @@ _FIXTURE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _BOX_FIELDS = {"x_start", "x_end", "y_top", "y_bottom"}
 
 
+
+def fit_editor_image_size(image_width, image_height, screen_width, screen_height):
+    """Fit the annotation preview inside the usable desktop area.
+
+    The editor window reserves 40 px horizontally and 220 px vertically for
+    window margins, controls and status text. The source image is never
+    modified; only its on-screen preview is scaled.
+    """
+    for field, value in (
+        ("image_width", image_width),
+        ("image_height", image_height),
+        ("screen_width", screen_width),
+        ("screen_height", screen_height),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{field} must be a positive integer")
+
+    available_width = max(1, screen_width - 80)
+    available_height = max(1, screen_height - 220)
+    scale = min(
+        1.0,
+        1200 / image_width,
+        760 / image_height,
+        available_width / image_width,
+        available_height / image_height,
+    )
+    return (
+        max(1, round(image_width * scale)),
+        max(1, round(image_height * scale)),
+    )
+
+
 def _utc_now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
@@ -397,16 +429,17 @@ class _DesktopEditor:
         self.preview_id = None
         self.undo_stack = []
 
-        screen_w = max(800, root.winfo_screenwidth() - 100)
-        screen_h = max(600, root.winfo_screenheight() - 180)
-        scale = min(1.0, 1200 / image.width, 760 / image.height, screen_w / image.width, screen_h / image.height)
-        self.display_w = max(1, round(image.width * scale))
-        self.display_h = max(1, round(image.height * scale))
+        self.display_w, self.display_h = fit_editor_image_size(
+            image.width,
+            image.height,
+            root.winfo_screenwidth(),
+            root.winfo_screenheight(),
+        )
         display_image = image.convert("RGB").resize((self.display_w, self.display_h), Image.Resampling.LANCZOS)
         self.photo = ImageTk.PhotoImage(display_image)
 
         root.title(f"StockMind annotation — {draft['fixture_id']} — {mode}")
-        root.geometry(f"{self.display_w + 40}x{min(self.display_h + 180, screen_h + 180)}")
+        root.geometry(f"{self.display_w + 40}x{self.display_h + 180}")
         controls = tk.Frame(root, padx=8, pady=8)
         controls.pack(fill="x")
         tk.Label(controls, text="Anonymized ID:").pack(side="left")

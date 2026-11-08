@@ -117,6 +117,15 @@ The optional offline benchmark in `app/zone_evaluation.py` scores AI overlay geo
 
 ## Offline annotation-to-benchmark assembly
 
+## Desktop annotation editor display sizing
+
+The offline editor scales only the on-screen preview, never the source screenshot
+or its normalized annotation coordinates. The preview is capped at 1200 × 760
+pixels and is further fitted to the detected display size, reserving space for
+the window controls and status text. This keeps the editor window within small
+laptop and remote-desktop displays instead of relying on fixed minimum screen
+dimensions.
+
 After an annotation has been independently approved, save the actual
 ResearchAI.analyze_chart_image result as JSON. The result includes
 source_image_sha256, which binds it to the exact screenshot bytes used by the
