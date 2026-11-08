@@ -83,7 +83,7 @@ class AnnotationEditorSizingTests(unittest.TestCase):
         display_width, display_height = fit_editor_image_size(
             3840, 2160, 800, 600
         )
-        self.assertEqual((display_width, display_height), (676, 380))
+        self.assertEqual((display_width, display_height), (604, 340))
         self.assertLessEqual(display_width + 40, 800 - 40)
         self.assertLessEqual(display_height + 220, 600 - 40)
 
@@ -177,6 +177,99 @@ class AnnotationEditorZoomTests(unittest.TestCase):
         for x, y in ((True, 1), (1, False), (float("nan"), 1), (1, float("inf")), ("1", 1)):
             with self.subTest(x=x, y=y), self.assertRaises(ValueError):
                 editor_canvas_point_to_normalized(x, y, 1200, 675)
+
+
+
+
+
+class AnnotationEditorZoomInteractionTests(unittest.TestCase):
+    class FakeCanvas:
+        def __init__(self):
+            self.configured = {}
+            self.x_position = None
+            self.y_position = None
+            self.image = None
+
+        def winfo_width(self):
+            return 600
+
+        def winfo_height(self):
+            return 400
+
+        def canvasx(self, value):
+            return value + 200
+
+        def canvasy(self, value):
+            return value + 100
+
+        def itemconfigure(self, item, **kwargs):
+            self.image = kwargs.get("image")
+
+        def configure(self, **kwargs):
+            self.configured.update(kwargs)
+
+        def xview_moveto(self, value):
+            self.x_position = value
+
+        def yview_moveto(self, value):
+            self.y_position = value
+
+        def delete(self, tag):
+            pass
+
+    def _editor(self):
+        from stockmind_telegram_mvp.app.annotation_editor import _DesktopEditor
+
+        editor = object.__new__(_DesktopEditor)
+        editor.drag_start = None
+        editor.zoom_index = 0
+        editor.zoom_factor = 1.0
+        editor.zoom_label = types.SimpleNamespace(set=lambda value: setattr(editor, "zoom_text", value))
+        editor.display_w = 1200
+        editor.display_h = 675
+        editor.render_w = 1200
+        editor.render_h = 675
+        editor.source_image = Image.new("RGB", (1600, 900), "white")
+        editor.ImageTk = types.SimpleNamespace(PhotoImage=lambda image: image.copy())
+        editor.photo = None
+        editor.canvas = self.FakeCanvas()
+        editor.image_item = 1
+        editor.plot_bounds = None
+        editor.zones = []
+        editor.axis_anchors = []
+        editor.status = types.SimpleNamespace(set=lambda value: setattr(editor, "status_text", value))
+        return editor
+
+    def test_zoom_in_renders_from_source_and_preserves_view_center(self):
+        editor = self._editor()
+
+        editor.zoom_in()
+
+        self.assertEqual(editor.zoom_factor, 1.5)
+        self.assertEqual((editor.render_w, editor.render_h), (1800, 1012))
+        self.assertEqual(editor.photo.size, (1800, 1012))
+        self.assertEqual(editor.canvas.configured["scrollregion"], (0, 0, 1800, 1012))
+        self.assertEqual(editor.zoom_text, "150%")
+        self.assertAlmostEqual(editor.canvas.x_position, 0.25)
+        self.assertAlmostEqual(editor.canvas.y_position, 0.2468, places=3)
+
+    def test_canvas_event_coordinates_include_scroll_offsets(self):
+        editor = self._editor()
+
+        self.assertEqual(
+            editor._canvas_point(types.SimpleNamespace(x=100, y=50)),
+            (300.0, 150.0),
+        )
+
+    def test_zoom_change_is_blocked_during_an_active_drag(self):
+        editor = self._editor()
+        editor.drag_start = (100.0, 100.0)
+
+        editor.zoom_in()
+
+        self.assertEqual(editor.zoom_index, 0)
+        self.assertEqual((editor.render_w, editor.render_h), (1200, 675))
+        self.assertIn("current drawing", editor.status_text)
 
 
 class AnnotationGeometryTests(unittest.TestCase):

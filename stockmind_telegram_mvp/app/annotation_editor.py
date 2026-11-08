@@ -34,8 +34,8 @@ _BOX_FIELDS = {"x_start", "x_end", "y_top", "y_bottom"}
 def fit_editor_image_size(image_width, image_height, screen_width, screen_height):
     """Fit the annotation preview inside the usable desktop area.
 
-    The editor window reserves 40 px horizontally and 220 px vertically for
-    window margins, controls and status text. The source image is never
+    The editor window reserves 40 px horizontally and 260 px vertically for
+    window margins, controls, scrollbars and status text. The source image is never
     modified; only its on-screen preview is scaled.
     """
     for field, value in (
@@ -48,7 +48,7 @@ def fit_editor_image_size(image_width, image_height, screen_width, screen_height
             raise ValueError(f"{field} must be a positive integer")
 
     available_width = max(1, screen_width - 80)
-    available_height = max(1, screen_height - 220)
+    available_height = max(1, screen_height - 260)
     scale = min(
         1.0,
         1200 / image_width,
@@ -469,6 +469,7 @@ class _DesktopEditor:
         from PIL import ImageTk
 
         self.tk = tk
+        self.ImageTk = ImageTk
         self.messagebox = messagebox
         self.simpledialog = simpledialog
         self.root = root
@@ -504,7 +505,7 @@ class _DesktopEditor:
         display_image = self.source_image.convert("RGB").resize(
             (self.render_w, self.render_h), Image.Resampling.LANCZOS
         )
-        self.photo = ImageTk.PhotoImage(display_image)
+        self.photo = self.ImageTk.PhotoImage(display_image)
 
         root.title(f"StockMind annotation — {draft['fixture_id']} — {mode}")
         root.geometry(f"{self.display_w + 40}x{self.display_h + 220}")
@@ -641,7 +642,7 @@ class _DesktopEditor:
         resized = self.source_image.convert("RGB").resize(
             (self.render_w, self.render_h), Image.Resampling.LANCZOS
         )
-        self.photo = ImageTk.PhotoImage(resized)
+        self.photo = self.ImageTk.PhotoImage(resized)
         self.canvas.itemconfigure(self.image_item, image=self.photo)
         self.canvas.configure(scrollregion=(0, 0, self.render_w, self.render_h))
         self.zoom_label.set(f"{self.zoom_factor:.0%}")
