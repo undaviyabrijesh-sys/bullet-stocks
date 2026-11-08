@@ -182,16 +182,25 @@ async def _run_research_locked(
                 list(histories[user_id]), user_text, image_bytes, image_mime_type
             )
             answer = chart_result.get("analysis") or "I could not read the chart reliably."
+            overlay_render_failed = False
             try:
                 overlay_image, drawn_count = _render_overlay_prepared(
-                image_bytes,
-                chart_result.get("zones", []),
-                plot_bounds=chart_result.get("plot_bounds"),
-                require_plot_bounds=True,
-            )
+                    image_bytes,
+                    chart_result.get("zones", []),
+                    plot_bounds=chart_result.get("plot_bounds"),
+                    require_plot_bounds=True,
+                )
             except Exception:
+                logger.exception("Chart analysis completed, but overlay rendering failed")
                 overlay_image, drawn_count = None, 0
-            if not drawn_count:
+                overlay_render_failed = True
+
+            if overlay_render_failed:
+                answer += (
+                    "\n\nThe chart analysis completed, but I couldn't render the overlay. "
+                    "Please verify the described zones against the original screenshot."
+                )
+            elif not drawn_count:
                 answer += "\n\nI did not draw an overlay because no zone location was clear enough."
         else:
             answer = await research.answer(list(histories[user_id]), user_text)
