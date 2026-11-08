@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 from stockmind_telegram_mvp.app.ai import (
     MAX_TOOL_CALLS_PER_TURN,
     ResearchAI,
+    ResearchTurnDeadlineExceeded,
     _canonical_tool_arguments,
     _parse_tool_arguments,
     _serialize_tool_result,
