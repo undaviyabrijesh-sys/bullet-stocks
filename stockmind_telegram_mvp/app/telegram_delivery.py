@@ -3,33 +3,55 @@
 TELEGRAM_TEXT_CHUNK_LIMIT = 4000
 
 
+def _telegram_text_units(text: str) -> int:
+    """Count UTF-16 code units, the coordinate unit used by Telegram entities."""
+    return sum(2 if ord(character) > 0xFFFF else 1 for character in text)
+
+
+def _prefix_end_within_limit(text: str, limit: int) -> int:
+    """Return a character index whose prefix fits the UTF-16 unit budget."""
+    units = 0
+    for index, character in enumerate(text):
+        units += 2 if ord(character) > 0xFFFF else 1
+        if units > limit:
+            return index
+    return len(text)
+
+
 def split_telegram_text(text: str, *, limit: int = TELEGRAM_TEXT_CHUNK_LIMIT) -> list[str]:
     """Split text below Telegram's message limit without dropping any characters.
 
-    Prefer paragraph, line and word boundaries. Long unbroken tokens fall back
-    to a hard split. A conservative 4,000-character default leaves headroom
-    below Telegram's 4,096-character text limit.
+    Telegram entity offsets use UTF-16 code units, so supplementary Unicode
+    characters (including many emoji) count as two. Prefer paragraph, line and
+    word boundaries. Long unbroken tokens fall back to a hard split without
+    cutting a Unicode code point. A 4,000-unit default leaves headroom below
+    Telegram's 4,096-character text limit.
     """
     if not isinstance(text, str):
         raise TypeError("text must be a string")
     if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
         raise ValueError("limit must be a positive integer")
-    if len(text) <= limit:
+    if _telegram_text_units(text) <= limit:
         return [text]
 
     chunks = []
     remaining = text
-    while len(remaining) > limit:
-        boundary = remaining.rfind("\n\n", 0, limit)
+    while _telegram_text_units(remaining) > limit:
+        max_end = _prefix_end_within_limit(remaining, limit)
+        if max_end == 0:
+            raise ValueError("limit is too small for the next Unicode character")
+        preferred_floor = _prefix_end_within_limit(remaining, max(1, limit // 2))
+
+        boundary = remaining.rfind("\n\n", 0, max_end)
         separator_length = 2
-        if boundary < limit // 2:
-            boundary = remaining.rfind("\n", 0, limit)
+        if boundary < preferred_floor:
+            boundary = remaining.rfind("\n", 0, max_end)
             separator_length = 1
-        if boundary < limit // 2:
-            boundary = remaining.rfind(" ", 0, limit)
+        if boundary < preferred_floor:
+            boundary = remaining.rfind(" ", 0, max_end)
             separator_length = 1
-        if boundary < limit // 2:
-            boundary = limit
+        if boundary < preferred_floor:
+            boundary = max_end
             separator_length = 0
 
         end = boundary + separator_length
@@ -39,7 +61,6 @@ def split_telegram_text(text: str, *, limit: int = TELEGRAM_TEXT_CHUNK_LIMIT) ->
     if remaining:
         chunks.append(remaining)
     return chunks
-
 
 async def send_analysis_text(message, status, text: str) -> bool:
     """Deliver a completed analysis without confusing transport errors with AI errors.

@@ -179,3 +179,8 @@ prefers paragraph, line and word boundaries and never drops characters. If a
 later chunk fails, delivery is reported as partial rather than silently
 truncating the answer. Ambiguous Telegram transport failures are not retried,
 because the platform may already have accepted the message.
+
+
+The 4,000-character chunk budget is measured in UTF-16 code units so
+supplementary Unicode characters (including emoji) cannot exceed Telegram's
+entity-length accounting or be split in the middle of a code point.
