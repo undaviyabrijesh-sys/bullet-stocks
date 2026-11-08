@@ -12,6 +12,7 @@ import json
 import math
 import re
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path, PurePosixPath
 
 from PIL import Image
@@ -343,7 +344,9 @@ def load_draft_and_image(draft_path, image_path=None):
     digest = hashlib.sha256(image_bytes).hexdigest()
     if digest != draft.get("image_sha256"):
         raise ValueError("selected screenshot SHA-256 does not match the annotation draft")
-    with Image.open(image_path) as image:
+    # Decode the exact bytes whose hash was checked above. Reopening the path
+    # here would allow a file replacement between verification and decoding.
+    with Image.open(BytesIO(image_bytes)) as image:
         width, height = image.size
         image_copy = image.copy()
     if width != draft.get("image_width") or height != draft.get("image_height"):
