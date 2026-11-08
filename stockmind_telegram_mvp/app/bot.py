@@ -182,14 +182,23 @@ async def _run_research_locked(
         histories[user_id].append({"role": "user", "content": history_text})
         histories[user_id].append({"role": "assistant", "content": answer})
     except ResearchTurnDeadlineExceeded as exc:
-        failure_message = (
-            "I stopped this chart analysis after its "
-            f"{exc.timeout_seconds:g}-second time budget expired. "
-            "No completed zone analysis or overlay was produced. "
-            "Please retry; this request was not treated as a successful analysis."
-        )
+        if image_bytes is not None:
+            failure_message = (
+                "I stopped this chart analysis after its "
+                f"{exc.timeout_seconds:g}-second time budget expired. "
+                "No completed zone analysis or overlay was produced. "
+                "Please retry; this request was not treated as a successful analysis."
+            )
+        else:
+            failure_message = (
+                "I stopped this research turn after its "
+                f"{exc.timeout_seconds:g}-second time budget expired. "
+                "No completed research answer was produced. A provider request may already "
+                "have been received; no further model or market-data calls were started. "
+                "Please retry with a narrower question."
+            )
         if not await send_analysis_text(message, status, failure_message):
-            logger.warning("StockMind chart analysis timed out and Telegram could not deliver the timeout message")
+            logger.warning("StockMind research deadline expired and Telegram could not deliver the timeout message")
         return
     except Exception:
         logger.exception("StockMind research request failed")
