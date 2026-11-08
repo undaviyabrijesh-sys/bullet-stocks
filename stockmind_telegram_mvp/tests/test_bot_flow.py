@@ -74,8 +74,10 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
 
         research.answer.assert_awaited_once()
         self.status.edit_text.assert_awaited_once_with(chunks[0])
+        # message.answer is first used for the progress status; subsequent
+        # calls are the additional answer chunks.
         delivered_chunks = [self.status.edit_text.await_args.args[0]] + [
-            call.args[0] for call in self.message.answer.await_args_list
+            call.args[0] for call in self.message.answer.await_args_list[1:]
         ]
         self.assertEqual(delivered_chunks, chunks)
         self.assertEqual("".join(delivered_chunks), answer)
