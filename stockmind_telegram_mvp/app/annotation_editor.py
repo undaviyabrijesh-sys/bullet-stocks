@@ -766,6 +766,19 @@ class _DesktopEditor:
         self.drag_start_inside_image = editor_canvas_point_inside_image(
             raw_x, raw_y, self.render_w, self.render_h
         )
+        if not self.drag_start_inside_image:
+            # A rectangle may be dragged beyond an image edge after a valid
+            # start, but beginning in blank canvas space must never be clamped
+            # into a plausible plot/zone at the screenshot boundary.
+            if self.preview_id is not None:
+                self.canvas.delete(self.preview_id)
+                self.preview_id = None
+            self.drag_start = None
+            self.status.set(
+                "Start drawing inside the screenshot image. Rectangle drags may "
+                "finish outside and are clipped to the image edge."
+            )
+            return
         self.drag_start = self._canvas_point(event)
         if self.preview_id is not None:
             self.canvas.delete(self.preview_id)

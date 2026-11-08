@@ -902,5 +902,78 @@ class AnnotationEditorCliExitTests(unittest.TestCase):
                 self.assertIn("this session did not create an output", stderr)
 
 
+
+class AnnotationEditorDrawingStartInteractionTests(unittest.TestCase):
+    class FakeCanvas:
+        def __init__(self):
+            self.created = []
+            self.deleted = []
+
+        def create_rectangle(self, *coords, **kwargs):
+            self.created.append(("rectangle", coords, kwargs))
+            return len(self.created)
+
+        def create_line(self, *coords, **kwargs):
+            self.created.append(("line", coords, kwargs))
+            return len(self.created)
+
+        def delete(self, item):
+            self.deleted.append(item)
+
+    def _editor(self, tool):
+        from stockmind_telegram_mvp.app.annotation_editor import _DesktopEditor
+
+        editor = object.__new__(_DesktopEditor)
+        editor.render_w = 1000
+        editor.render_h = 500
+        editor.image_width = 1600
+        editor.image_height = 900
+        editor.drag_start = None
+        editor.drag_start_inside_image = False
+        editor.preview_id = None
+        editor.tool = types.SimpleNamespace(get=lambda: tool)
+        editor.canvas = self.FakeCanvas()
+        editor.status = types.SimpleNamespace(
+            set=lambda value: setattr(editor, "status_text", value)
+        )
+        editor._canvas_event_point = lambda event: (float(event.x), float(event.y))
+        editor._canvas_point = lambda event: (
+            max(0.0, min(float(editor.render_w), float(event.x))),
+            max(0.0, min(float(editor.render_h), float(event.y))),
+        )
+        editor.plot_bounds = None
+        editor.zones = []
+        editor.axis_anchors = []
+        editor.undo_stack = []
+        editor.mode = "annotate"
+        editor._instructions = lambda: "Draw the price-plot boundary."
+        editor._redraw = lambda: None
+        return editor
+
+    def test_blank_canvas_press_cannot_start_any_drawing_tool(self):
+        for tool in ("plot", "supply", "demand", "axis_anchor"):
+            with self.subTest(tool=tool):
+                editor = self._editor(tool)
+
+                editor._start_draw(types.SimpleNamespace(x=1001, y=250))
+
+                self.assertIsNone(editor.drag_start)
+                self.assertFalse(editor.drag_start_inside_image)
+                self.assertIsNone(editor.preview_id)
+                self.assertEqual(editor.canvas.created, [])
+                self.assertIn("Start drawing inside", editor.status_text)
+
+    def test_rectangle_drag_can_still_finish_outside_and_clip_to_image_edge(self):
+        editor = self._editor("plot")
+
+        editor._start_draw(types.SimpleNamespace(x=500, y=250))
+        editor._finish_draw(types.SimpleNamespace(x=1100, y=300))
+
+        self.assertEqual(editor.plot_bounds["x_start"], 0.5)
+        self.assertEqual(editor.plot_bounds["x_end"], 1.0)
+        self.assertEqual(editor.plot_bounds["y_top"], 0.5)
+        self.assertEqual(editor.plot_bounds["y_bottom"], 0.6)
+        self.assertEqual(editor.undo_stack[-1][0], "plot")
+
 if __name__ == "__main__":
     unittest.main()

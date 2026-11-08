@@ -135,8 +135,11 @@ at their actual pixel resolution instead of being enlarged to suggest detail
 that is not present. Drawing coordinates are converted from the scrolled
 canvas back to normalized full-screenshot coordinates, so a box drawn after
 zooming or panning is saved in the same coordinate frame as the original image
-and AI prediction. Changing zoom during an active drag is blocked to avoid
-mixing coordinate frames.
+and AI prediction. Drawing must begin inside the screenshot; rectangle drags may
+finish outside the image and are clipped to its edge. Price-axis anchors are
+stricter: both the press and release must remain inside the image and the marked
+main price plot. Changing zoom during an active drag is blocked to avoid mixing
+coordinate frames.
 
 After an annotation has been independently approved, save the actual
 ResearchAI.analyze_chart_image result as JSON. The result includes
