@@ -167,6 +167,23 @@ def _validate_box(box, field):
     return values
 
 
+def editor_canvas_point_inside_plot(x, y, render_width, render_height, plot_bounds):
+    """Return whether a scrolled canvas point lies inside the marked price plot.
+
+    The point is expressed in the same rendered-canvas coordinates used by
+    drawing events. Both axes are checked so a click in the right-side price
+    label margin cannot be mistaken for an in-plot calibration point.
+    """
+    plot = _validate_box(plot_bounds, "reference_plot_bounds")
+    x_normalized, y_normalized = editor_canvas_point_to_normalized(
+        x, y, render_width, render_height
+    )
+    return (
+        plot["x_start"] <= x_normalized <= plot["x_end"]
+        and plot["y_top"] <= y_normalized <= plot["y_bottom"]
+    )
+
+
 def validate_manual_geometry(plot_bounds, zones):
     """Validate normalized human-drawn bounds and zones against the screenshot."""
     plot = _validate_box(plot_bounds, "reference_plot_bounds")
@@ -744,12 +761,17 @@ class _DesktopEditor:
             if self.plot_bounds is None:
                 self.status.set("Draw the price-plot boundary before adding price-axis anchors.")
                 return
+            if not editor_canvas_point_inside_plot(
+                x1, y1, self.render_w, self.render_h, self.plot_bounds
+            ):
+                self.status.set(
+                    "Price-axis anchors must be clicked inside the main price plot, "
+                    "not in the price-label margin."
+                )
+                return
             _, y = editor_canvas_point_to_normalized(
                 0, y1, self.render_w, self.render_h
             )
-            if not self.plot_bounds["y_top"] <= y <= self.plot_bounds["y_bottom"]:
-                self.status.set("Price-axis anchors must be placed inside the main price plot.")
-                return
             raw_price = self.simpledialog.askstring(
                 "Manual price-axis anchor",
                 "Enter the exact visible price label aligned with this horizontal level (no commas):",
