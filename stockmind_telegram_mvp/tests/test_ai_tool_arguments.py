@@ -34,7 +34,7 @@ class AIClientConfigurationTests(unittest.TestCase):
 
     def test_research_turn_timeout_must_be_finite_and_positive(self):
         with patch("stockmind_telegram_mvp.app.ai.AsyncOpenAI"):
-            for value in (0, -1, float("inf"), float("nan"), True):
+            for value in (0, -1, float("inf"), float("nan"), True, 10 ** 1000):
                 with self.subTest(value=repr(value)):
                     with self.assertRaisesRegex(ValueError, "finite positive"):
                         ResearchAI(

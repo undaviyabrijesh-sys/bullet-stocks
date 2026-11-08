@@ -669,14 +669,19 @@ class ResearchAI:
         vision_model: str | None = None,
         turn_timeout_seconds: float = DEFAULT_RESEARCH_TURN_TIMEOUT_SECONDS,
     ):
-        if (
-            isinstance(turn_timeout_seconds, bool)
-            or not isinstance(turn_timeout_seconds, (int, float))
-            or not math.isfinite(turn_timeout_seconds)
-            or turn_timeout_seconds <= 0
+        if isinstance(turn_timeout_seconds, bool) or not isinstance(
+            turn_timeout_seconds, (int, float)
         ):
             raise ValueError("Research turn timeout must be a finite positive number of seconds.")
-        self.turn_timeout_seconds = float(turn_timeout_seconds)
+        try:
+            normalized_timeout = float(turn_timeout_seconds)
+        except OverflowError as exc:
+            raise ValueError(
+                "Research turn timeout must be a finite positive number of seconds."
+            ) from exc
+        if not math.isfinite(normalized_timeout) or normalized_timeout <= 0:
+            raise ValueError("Research turn timeout must be a finite positive number of seconds.")
+        self.turn_timeout_seconds = normalized_timeout
         self.client = AsyncOpenAI(
             api_key=api_key,
             timeout=httpx.Timeout(
