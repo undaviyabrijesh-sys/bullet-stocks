@@ -7,6 +7,7 @@ import asyncio
 import importlib
 import os
 import unittest
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -323,6 +324,84 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(bot_module.usage_day[user_id], "2026-11-07")
         self.assertEqual(bot_module.usage[user_id], 1)
+
+    async def test_full_beta_rejects_chart_before_image_normalization(self):
+        bot_module.beta_users.add(self.user_id + 1)
+        with patch.object(bot_module, "BETA_USER_LIMIT", 1), patch.object(
+            bot_module, "prepare_chart_image"
+        ) as prepare:
+            await bot_module.run_research(
+                self.message, "Analyse this chart", b"untrusted-image", "image/png"
+            )
+
+        prepare.assert_not_called()
+        self.message.answer.assert_awaited_once_with(
+            "The 10-person beta is currently full. Please try again later."
+        )
+        self.assertNotIn(self.user_id, bot_module.beta_users)
+        self.assertNotIn(self.user_id, bot_module.usage)
+
+    async def test_daily_limit_rejects_chart_before_image_normalization(self):
+        today = datetime.now(bot_module.IST).date().isoformat()
+        bot_module.usage_day[self.user_id] = today
+        bot_module.usage[self.user_id] = 1
+
+        with patch.object(bot_module, "DAILY_QUERY_LIMIT", 1), patch.object(
+            bot_module, "prepare_chart_image"
+        ) as prepare:
+            await bot_module.run_research(
+                self.message, "Analyse this chart", b"untrusted-image", "image/png"
+            )
+
+        prepare.assert_not_called()
+        self.message.answer.assert_awaited_once_with(
+            "You've reached today's beta research limit. It resets at midnight IST."
+        )
+        self.assertEqual(bot_module.usage[self.user_id], 1)
+
+    async def test_full_beta_photo_is_rejected_before_telegram_download(self):
+        bot_module.beta_users.add(self.user_id + 1)
+        photo_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=self.user_id),
+            photo=[SimpleNamespace(file_id="telegram-file-id", file_size=1024)],
+            caption="BTC 1H",
+            answer=AsyncMock(),
+        )
+
+        with patch.object(bot_module, "BETA_USER_LIMIT", 1), patch.object(
+            bot_module.bot, "get_file", new=AsyncMock()
+        ) as get_file:
+            await bot_module.handle_chart_photo(photo_message)
+
+        get_file.assert_not_awaited()
+        photo_message.answer.assert_awaited_once_with(
+            "The 10-person beta is currently full. Please try again later."
+        )
+
+    async def test_daily_limit_document_is_rejected_before_telegram_download(self):
+        today = datetime.now(bot_module.IST).date().isoformat()
+        bot_module.usage_day[self.user_id] = today
+        bot_module.usage[self.user_id] = 1
+        document_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=self.user_id),
+            document=SimpleNamespace(
+                mime_type="image/png",
+                file_size=1024,
+                file_id="telegram-file-id",
+            ),
+            caption="BTC 1H",
+            answer=AsyncMock(),
+        )
+
+        with patch.object(bot_module, "DAILY_QUERY_LIMIT", 1), patch.object(
+            bot_module.bot, "get_file", new=AsyncMock()
+        ) as get_file:
+            await bot_module.handle_chart_document(document_message)
+
+        get_file.assert_not_awaited()
+        document_message.answer.assert_awaited_once_with(
+            "You've reached today's beta research limit. It resets at midnight IST."
+        )
 
 
 class BotModuleResourceCleanup(unittest.TestCase):
