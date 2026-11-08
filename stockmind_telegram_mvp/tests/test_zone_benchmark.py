@@ -612,6 +612,46 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "dimensions"):
             evaluate_benchmark_manifest(self.manifest)
 
+    def test_rejects_noncanonical_exif_oriented_screenshot(self):
+        record = self._record("exif-rotated")
+        image_file = self.root / record["image_file"].replace(".png", ".jpg")
+        exif = Image.Exif()
+        exif[274] = 6
+        output = BytesIO()
+        Image.new("RGB", (40, 30), "white").save(
+            output, format="JPEG", quality=95, exif=exif
+        )
+        image_bytes = output.getvalue()
+        image_file.write_bytes(image_bytes)
+        record["image_file"] = image_file.name
+        record["image_sha256"] = hashlib.sha256(image_bytes).hexdigest()
+        # The encoded dimensions remain 40x30, but the canonical visual frame
+        # becomes 30x40 after EXIF orientation is applied.
+        self._write(record)
+
+        with self.assertRaisesRegex(ValueError, "not EXIF-normalized"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_accepts_exif_orientation_one_without_reencoding(self):
+        record = self._record("exif-normal")
+        image_file = self.root / record["image_file"].replace(".png", ".jpg")
+        exif = Image.Exif()
+        exif[274] = 1
+        output = BytesIO()
+        Image.new("RGB", (40, 30), "white").save(
+            output, format="JPEG", quality=95, exif=exif
+        )
+        image_bytes = output.getvalue()
+        image_file.write_bytes(image_bytes)
+        record["image_file"] = image_file.name
+        record["image_sha256"] = hashlib.sha256(image_bytes).hexdigest()
+        self._write(record)
+
+        result = evaluate_benchmark_manifest(self.manifest)
+
+        self.assertEqual(result["fixture_count"], 1)
+        self.assertEqual(result["overall"]["true_positive"], 1)
+
     def test_rejects_paths_that_escape_manifest_directory(self):
         self._write(self._record(image_file="../chart.png"))
 
