@@ -139,6 +139,32 @@ class AnnotationEditorZoomTests(unittest.TestCase):
         self.assertEqual(zoomed_editor_image_size(1200, 675, 2.0), (2400, 1350))
         self.assertEqual(zoomed_editor_image_size(1200, 675, 4.0), (4800, 2700))
 
+    def test_zoom_is_capped_at_original_source_dimensions(self):
+        self.assertEqual(
+            zoomed_editor_image_size(
+                1200, 675, 4.0, max_width=1600, max_height=900
+            ),
+            (1600, 900),
+        )
+        self.assertEqual(
+            zoomed_editor_image_size(
+                720, 405, 4.0, max_width=800, max_height=450
+            ),
+            (800, 450),
+        )
+
+    def test_source_dimension_caps_reject_invalid_values(self):
+        for max_width, max_height in (
+            (0, 900),
+            (1600, True),
+            (-1, 900),
+            ("1600", 900),
+        ):
+            with self.subTest(max_width=max_width, max_height=max_height), self.assertRaises(ValueError):
+                zoomed_editor_image_size(
+                    1200, 675, 2.0, max_width=max_width, max_height=max_height
+                )
+
     def test_zoom_rejects_invalid_dimensions_and_levels(self):
         for width, height, zoom in (
             (0, 100, 2.0),
@@ -227,9 +253,11 @@ class AnnotationEditorZoomInteractionTests(unittest.TestCase):
         editor.zoom_label = types.SimpleNamespace(set=lambda value: setattr(editor, "zoom_text", value))
         editor.display_w = 1200
         editor.display_h = 675
+        editor.image_width = 2400
+        editor.image_height = 1350
         editor.render_w = 1200
         editor.render_h = 675
-        editor.source_image = Image.new("RGB", (1600, 900), "white")
+        editor.source_image = Image.new("RGB", (2400, 1350), "white")
         editor.ImageTk = types.SimpleNamespace(PhotoImage=lambda image: image.copy())
         editor.photo = None
         editor.canvas = self.FakeCanvas()
@@ -252,6 +280,29 @@ class AnnotationEditorZoomInteractionTests(unittest.TestCase):
         self.assertEqual(editor.zoom_text, "150%")
         self.assertAlmostEqual(editor.canvas.x_position, 0.25)
         self.assertAlmostEqual(editor.canvas.y_position, 0.2468, places=3)
+
+    def test_zoom_stops_at_native_resolution_and_reports_the_effective_scale(self):
+        editor = self._editor()
+        editor.image_width = 1600
+        editor.image_height = 900
+        editor.source_image = Image.new("RGB", (1600, 900), "white")
+
+        editor.zoom_in()
+
+        self.assertAlmostEqual(editor.zoom_factor, 1600 / 1200)
+        self.assertEqual((editor.render_w, editor.render_h), (1600, 900))
+        self.assertEqual(editor.zoom_text, "133%")
+
+        editor.zoom_in()
+
+        self.assertEqual(editor.zoom_index, 1)
+        self.assertIn("native resolution", editor.status_text.lower())
+        self.assertEqual((editor.render_w, editor.render_h), (1600, 900))
+
+        editor.zoom_out()
+
+        self.assertEqual(editor.zoom_index, 0)
+        self.assertEqual((editor.render_w, editor.render_h), (1200, 675))
 
     def test_canvas_event_coordinates_include_scroll_offsets(self):
         editor = self._editor()

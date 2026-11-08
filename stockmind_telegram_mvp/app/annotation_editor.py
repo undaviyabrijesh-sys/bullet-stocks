@@ -83,8 +83,10 @@ def editor_control_rows(mode, display_width):
 EDITOR_ZOOM_LEVELS = (1.0, 1.5, 2.0, 3.0, 4.0)
 
 
-def zoomed_editor_image_size(image_width, image_height, zoom):
-    """Return the rendered image size for a bounded, source-relative zoom."""
+def zoomed_editor_image_size(
+    image_width, image_height, zoom, *, max_width=None, max_height=None
+):
+    """Return a zoomed preview size without exceeding optional source dimensions."""
     for field, value in (("image_width", image_width), ("image_height", image_height)):
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
             raise ValueError(f"{field} must be a positive integer")
@@ -96,7 +98,19 @@ def zoomed_editor_image_size(image_width, image_height, zoom):
         raise ValueError("zoom must be a finite number between 1 and 4") from exc
     if not math.isfinite(zoom) or not 1.0 <= zoom <= 4.0:
         raise ValueError("zoom must be a finite number between 1 and 4")
-    return max(1, round(image_width * zoom)), max(1, round(image_height * zoom))
+
+    scale = zoom
+    for field, value, dimension in (
+        ("max_width", max_width, image_width),
+        ("max_height", max_height, image_height),
+    ):
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{field} must be a positive integer when provided")
+        scale = min(scale, value / dimension)
+
+    return max(1, round(image_width * scale)), max(1, round(image_height * scale))
 
 
 def editor_canvas_point_to_normalized(x, y, render_width, render_height):
@@ -629,16 +643,38 @@ class _DesktopEditor:
         if index == self.zoom_index:
             return
 
+        requested_zoom = EDITOR_ZOOM_LEVELS[index]
+        # Never enlarge pixels beyond the screenshot's native resolution.
+        # The presets are relative to the fit-to-window preview, so the
+        # effective maximum varies with each source image and display.
+        max_native_zoom = min(
+            self.image_width / self.display_w,
+            self.image_height / self.display_h,
+        )
+        effective_zoom = min(requested_zoom, max_native_zoom)
+        target_size = zoomed_editor_image_size(
+            self.display_w,
+            self.display_h,
+            effective_zoom,
+            max_width=self.image_width,
+            max_height=self.image_height,
+        )
+        if target_size == (self.render_w, self.render_h):
+            if requested_zoom > max_native_zoom:
+                self.status.set(
+                    f"Maximum zoom reached at the screenshot's native resolution "
+                    f"({self.zoom_factor:.0%})."
+                )
+            return
+
         viewport_width = max(1, self.canvas.winfo_width())
         viewport_height = max(1, self.canvas.winfo_height())
         center_x = self.canvas.canvasx(viewport_width / 2) / self.render_w
         center_y = self.canvas.canvasy(viewport_height / 2) / self.render_h
 
         self.zoom_index = index
-        self.zoom_factor = EDITOR_ZOOM_LEVELS[index]
-        self.render_w, self.render_h = zoomed_editor_image_size(
-            self.display_w, self.display_h, self.zoom_factor
-        )
+        self.zoom_factor = effective_zoom
+        self.render_w, self.render_h = target_size
         resized = self.source_image.convert("RGB").resize(
             (self.render_w, self.render_h), Image.Resampling.LANCZOS
         )
@@ -646,6 +682,11 @@ class _DesktopEditor:
         self.canvas.itemconfigure(self.image_item, image=self.photo)
         self.canvas.configure(scrollregion=(0, 0, self.render_w, self.render_h))
         self.zoom_label.set(f"{self.zoom_factor:.0%}")
+        if effective_zoom < requested_zoom:
+            self.status.set(
+                f"Native screenshot resolution reached ({self.zoom_factor:.0%}); "
+                "further zoom would only enlarge pixels."
+            )
 
         self.canvas.xview_moveto(
             max(0.0, min(1.0, center_x - viewport_width / (2 * self.render_w)))
