@@ -172,8 +172,8 @@ model accuracy; real screenshots still require independent manual review.
 ## Telegram response delivery
 
 Research answers are retained in full in the conversation history. Before
-delivery, long answers are split into Telegram-safe messages (4,000 characters
-per chunk, below Telegram's 4,096-character limit). The first chunk edits the
+delivery, long answers are split into Telegram-safe messages (4,000 UTF-16
+code units per chunk, below Telegram's 4,096-character limit). The first chunk edits the
 progress message when possible; remaining chunks are sent as replies. Splitting
 prefers paragraph, line and word boundaries and never drops characters. If a
 later chunk fails, delivery is reported as partial rather than silently
