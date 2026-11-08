@@ -132,6 +132,31 @@ def editor_canvas_point_to_normalized(x, y, render_width, render_height):
     return tuple(normalized)
 
 
+def editor_canvas_point_inside_image(x, y, render_width, render_height):
+    """Return whether a raw canvas point is within the screenshot pixel area.
+
+    Unlike editor_canvas_point_to_normalized, this check never clamps. It is
+    used for point tools such as price-axis anchors, where clicks in blank
+    canvas space must not be snapped onto a screenshot edge.
+    """
+    for field, value in (("render_width", render_width), ("render_height", render_height)):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{field} must be a positive integer")
+    coordinates = []
+    for field, value in (("x", x), ("y", y)):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{field} must be a finite number")
+        try:
+            value = float(value)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise ValueError(f"{field} must be a finite number") from exc
+        if not math.isfinite(value):
+            raise ValueError(f"{field} must be a finite number")
+        coordinates.append(value)
+    point_x, point_y = coordinates
+    return 0.0 <= point_x <= render_width and 0.0 <= point_y <= render_height
+
+
 def _utc_now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
@@ -526,6 +551,7 @@ class _DesktopEditor:
         self.tool = tk.StringVar(value="plot" if self.plot_bounds is None else "demand")
         self.identity = tk.StringVar()
         self.drag_start = None
+        self.drag_start_inside_image = False
         self.preview_id = None
         self.undo_stack = []
         self.source_image = image.copy()
@@ -650,13 +676,19 @@ class _DesktopEditor:
                 self.canvas.create_oval(plot_x2 - 4, y - 4, plot_x2 + 4, y + 4, outline="#F59E0B", fill="#F59E0B", tags="overlay")
                 self.canvas.create_text(plot_x2 - 6, y - 5, text=f"{anchor['price']:g}", fill="#F59E0B", anchor="se", tags="overlay")
 
-    def _canvas_point(self, event):
-        """Convert viewport event coordinates into the scrolled image canvas."""
-        x = self.canvas.canvasx(event.x)
-        y = self.canvas.canvasy(event.y)
+    def _canvas_event_point(self, event):
+        """Return unclamped viewport coordinates in the scrolled image canvas."""
         return (
-            max(0.0, min(float(self.render_w), float(x))),
-            max(0.0, min(float(self.render_h), float(y))),
+            float(self.canvas.canvasx(event.x)),
+            float(self.canvas.canvasy(event.y)),
+        )
+
+    def _canvas_point(self, event):
+        """Convert viewport coordinates to the image canvas, clamping drags to edges."""
+        x, y = self._canvas_event_point(event)
+        return (
+            max(0.0, min(float(self.render_w), x)),
+            max(0.0, min(float(self.render_h), y)),
         )
 
     def _set_zoom(self, index):
@@ -730,6 +762,10 @@ class _DesktopEditor:
         self._set_zoom(0)
 
     def _start_draw(self, event):
+        raw_x, raw_y = self._canvas_event_point(event)
+        self.drag_start_inside_image = editor_canvas_point_inside_image(
+            raw_x, raw_y, self.render_w, self.render_h
+        )
         self.drag_start = self._canvas_point(event)
         if self.preview_id is not None:
             self.canvas.delete(self.preview_id)
@@ -752,12 +788,24 @@ class _DesktopEditor:
         if self.drag_start is None:
             return
         x0, y0 = self.drag_start
+        raw_x1, raw_y1 = self._canvas_event_point(event)
+        end_inside_image = editor_canvas_point_inside_image(
+            raw_x1, raw_y1, self.render_w, self.render_h
+        )
+        start_inside_image = self.drag_start_inside_image
+        self.drag_start_inside_image = False
         x1, y1 = self._canvas_point(event)
         self.drag_start = None
         if self.preview_id is not None:
             self.canvas.delete(self.preview_id)
             self.preview_id = None
         if self.tool.get() == "axis_anchor":
+            if not start_inside_image or not end_inside_image:
+                self.status.set(
+                    "Price-axis anchors must be clicked within the screenshot image; "
+                    "blank canvas space outside the image is not a chart point."
+                )
+                return
             if self.plot_bounds is None:
                 self.status.set("Draw the price-plot boundary before adding price-axis anchors.")
                 return

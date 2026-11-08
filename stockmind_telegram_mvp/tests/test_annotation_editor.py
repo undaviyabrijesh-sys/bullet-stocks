@@ -24,6 +24,7 @@ from stockmind_telegram_mvp.app.annotation_editor import (
     editor_control_rows,
     zoomed_editor_image_size,
     editor_canvas_point_to_normalized,
+    editor_canvas_point_inside_image,
     editor_canvas_point_inside_plot,
     main as editor_main,
 )
@@ -210,6 +211,19 @@ class AnnotationEditorZoomTests(unittest.TestCase):
 
 
 class AnnotationEditorAxisAnchorGeometryTests(unittest.TestCase):
+    def test_raw_canvas_point_must_be_inside_image_without_edge_clamping(self):
+        self.assertTrue(editor_canvas_point_inside_image(0, 0, 1000, 500))
+        self.assertTrue(editor_canvas_point_inside_image(1000, 500, 1000, 500))
+        self.assertFalse(editor_canvas_point_inside_image(-0.01, 250, 1000, 500))
+        self.assertFalse(editor_canvas_point_inside_image(1000.01, 250, 1000, 500))
+        self.assertFalse(editor_canvas_point_inside_image(500, -0.01, 1000, 500))
+        self.assertFalse(editor_canvas_point_inside_image(500, 500.01, 1000, 500))
+
+    def test_raw_canvas_point_rejects_invalid_values(self):
+        for point in ((True, 1), (1, False), (float("nan"), 1), (1, float("inf"))):
+            with self.subTest(point=point), self.assertRaises(ValueError):
+                editor_canvas_point_inside_image(*point, 1000, 500)
+
     def test_axis_anchor_point_must_be_inside_both_plot_dimensions(self):
         self.assertTrue(
             editor_canvas_point_inside_plot(500, 250, 1000, 500, PLOT)
@@ -236,15 +250,19 @@ class AnnotationEditorAxisAnchorGeometryTests(unittest.TestCase):
 
 
 class AnnotationEditorAxisAnchorInteractionTests(unittest.TestCase):
-    def _editor(self, x, y):
+    def _editor(self, x, y, *, plot=PLOT, start_inside=True):
         from stockmind_telegram_mvp.app.annotation_editor import _DesktopEditor
 
         editor = object.__new__(_DesktopEditor)
         editor.drag_start = (x, y)
+        editor.drag_start_inside_image = start_inside
         editor.preview_id = None
-        editor._canvas_point = lambda event: (event.x, event.y)
+        editor._canvas_event_point = lambda event: (event.x, event.y)
+        editor._canvas_point = lambda event: (
+            max(0, min(1000, event.x)), max(0, min(500, event.y))
+        )
         editor.tool = types.SimpleNamespace(get=lambda: "axis_anchor")
-        editor.plot_bounds = PLOT
+        editor.plot_bounds = plot
         editor.render_w = 1000
         editor.render_h = 500
         editor.axis_anchors = []
@@ -278,6 +296,26 @@ class AnnotationEditorAxisAnchorInteractionTests(unittest.TestCase):
         self.assertEqual(len(editor.prompt_calls), 1)
         self.assertEqual(editor.axis_anchors, [{"y": 0.5, "price": 100.0}])
         self.assertEqual(editor.undo_stack[0][0], "axis_anchor")
+
+    def test_release_in_blank_canvas_is_not_clamped_into_edge_plot(self):
+        edge_plot = {"x_start": 0.1, "x_end": 1.0, "y_top": 0.1, "y_bottom": 1.0}
+        editor = self._editor(500, 250, plot=edge_plot)
+
+        editor._finish_draw(types.SimpleNamespace(x=1001, y=250))
+
+        self.assertEqual(editor.prompt_calls, [])
+        self.assertEqual(editor.axis_anchors, [])
+        self.assertIn("within the screenshot image", editor.status_text)
+
+    def test_press_in_blank_canvas_cannot_become_edge_anchor(self):
+        edge_plot = {"x_start": 0.1, "x_end": 1.0, "y_top": 0.1, "y_bottom": 1.0}
+        editor = self._editor(1001, 250, plot=edge_plot, start_inside=False)
+
+        editor._finish_draw(types.SimpleNamespace(x=1001, y=250))
+
+        self.assertEqual(editor.prompt_calls, [])
+        self.assertEqual(editor.axis_anchors, [])
+        self.assertIn("within the screenshot image", editor.status_text)
 
 
 class AnnotationEditorZoomInteractionTests(unittest.TestCase):
