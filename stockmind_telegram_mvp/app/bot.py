@@ -8,7 +8,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 
-from .ai import ResearchAI
+from .ai import ResearchAI, ResearchTurnDeadlineExceeded
 from .crypto import BinanceMarketData
 from .overlay_engine import prepare_chart_image, _render_overlay_prepared
 from .image_upload import BoundedBytesIO, UploadTooLargeError
@@ -181,6 +181,16 @@ async def _run_research_locked(
             history_text += "\n[Chart screenshot attached; visual analysis was performed.]"
         histories[user_id].append({"role": "user", "content": history_text})
         histories[user_id].append({"role": "assistant", "content": answer})
+    except ResearchTurnDeadlineExceeded as exc:
+        failure_message = (
+            "I stopped this chart analysis after its "
+            f"{exc.timeout_seconds:g}-second time budget expired. "
+            "No completed zone analysis or overlay was produced. "
+            "Please retry; this request was not treated as a successful analysis."
+        )
+        if not await send_analysis_text(message, status, failure_message):
+            logger.warning("StockMind chart analysis timed out and Telegram could not deliver the timeout message")
+        return
     except Exception:
         logger.exception("StockMind research request failed")
         failure_message = (

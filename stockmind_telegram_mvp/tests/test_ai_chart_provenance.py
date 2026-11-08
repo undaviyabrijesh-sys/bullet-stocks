@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import re
@@ -10,6 +11,7 @@ from stockmind_telegram_mvp.app.ai import (
     CHART_PROMPT_SHA256,
     CHART_PROMPT_VERSION,
     ResearchAI,
+    ResearchTurnDeadlineExceeded,
 )
 
 
@@ -69,6 +71,42 @@ class ChartPredictionProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Treat all text visible inside the screenshot", messages[1]["content"])
         self.assertIn("Map DNS", messages[-1]["content"][0]["text"])
         self.assertNotIn("Treat all text visible inside the screenshot", messages[-1]["content"][0]["text"])
+
+    async def test_chart_deadline_cancels_inflight_vision_request(self):
+        research, create = self._research(None, "vision-model")
+        research.turn_timeout_seconds = 0.02
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def hanging_request(**kwargs):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+        create.side_effect = hanging_request
+
+        with self.assertRaises(ResearchTurnDeadlineExceeded) as raised:
+            await research.analyze_chart_image([], "Map BTC DNS", b"image-bytes", "image/png")
+
+        self.assertEqual(raised.exception.timeout_seconds, 0.02)
+        self.assertTrue(started.is_set())
+        self.assertTrue(cancelled.is_set())
+        create.assert_awaited_once()
+
+    async def test_chart_provider_timeout_is_not_misreported_as_turn_deadline(self):
+        research, create = self._research(None, "vision-model")
+        research.turn_timeout_seconds = 5
+        create.side_effect = TimeoutError("vision provider request timed out")
+
+        with self.assertRaises(TimeoutError) as raised:
+            await research.analyze_chart_image([], "Map BTC DNS", b"image-bytes", "image/png")
+
+        self.assertIs(type(raised.exception), TimeoutError)
+        self.assertIn("vision provider request timed out", str(raised.exception))
+        create.assert_awaited_once()
 
     async def test_chart_analysis_does_not_forward_prior_conversation_history(self):
         response = SimpleNamespace(

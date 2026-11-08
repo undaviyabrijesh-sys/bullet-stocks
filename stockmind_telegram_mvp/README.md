@@ -60,8 +60,12 @@ receives a clear timeout response rather than a partial answer presented as
 complete. A provider may already have received an in-flight request, so
 cancellation does not guarantee that upstream processing or billing stopped.
 A provider's own timeout is preserved as a provider failure rather than being
-misreported as the overall turn deadline. Chart-image analysis remains one
-vision request and is bounded by the per-request OpenAI timeout.
+misreported as the overall turn deadline. Chart-image analysis also applies the
+same overall deadline around its vision request, in addition to the per-request
+OpenAI timeout. Whichever local deadline expires first stops the coroutine;
+a chart timeout is reported as an incomplete analysis and is not saved as a
+successful assistant turn. Cancellation cannot guarantee that an upstream
+provider stopped processing or billing a request it had already received.
 
 ## Chart screenshot analysis
 

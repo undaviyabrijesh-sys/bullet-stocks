@@ -13,6 +13,9 @@ from unittest.mock import AsyncMock, patch
 from unittest.mock import patch as environment_patch
 
 
+from stockmind_telegram_mvp.app.ai import ResearchTurnDeadlineExceeded
+
+
 _TEST_ENV = {
     "TELEGRAM_BOT_TOKEN": "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
     "OPENAI_API_KEY": "stockmind-test-key",
@@ -132,6 +135,27 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
         reset_message.answer.assert_awaited_once_with(
             "Conversation context cleared. Ask a new research question."
         )
+
+    async def test_chart_deadline_is_reported_without_saving_a_successful_turn(self):
+        research = self.use_research(
+            analyze_chart_image=AsyncMock(
+                side_effect=ResearchTurnDeadlineExceeded(0.02)
+            )
+        )
+
+        with patch.object(
+            bot_module,
+            "prepare_chart_image",
+            return_value=(b"normalized-chart", "image/png"),
+        ):
+            await bot_module.run_research(
+                self.message, "Map BTC 1H DNS", b"chart-bytes", "image/png"
+            )
+
+        research.analyze_chart_image.assert_awaited_once()
+        self.status.edit_text.assert_awaited_once()
+        self.assertIn("0.02-second time budget expired", self.status.edit_text.await_args.args[0])
+        self.assertEqual(list(bot_module.histories[self.user_id]), [])
 
     async def test_chart_analysis_is_saved_even_when_overlay_delivery_fails(self):
         result = {

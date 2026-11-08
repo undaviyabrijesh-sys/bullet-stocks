@@ -241,6 +241,17 @@ OPENAI_CONNECT_TIMEOUT_SECONDS = 10.0
 OPENAI_MAX_RETRIES = 1
 DEFAULT_RESEARCH_TURN_TIMEOUT_SECONDS = 120.0
 
+
+class ResearchTurnDeadlineExceeded(TimeoutError):
+    """Raised when one text or chart research turn exceeds its shared time budget."""
+
+    def __init__(self, timeout_seconds: float):
+        self.timeout_seconds = timeout_seconds
+        super().__init__(
+            f"Research turn time budget expired after {timeout_seconds:g} seconds."
+        )
+
+
 MAX_TOOL_CALLS_PER_TURN = 6
 MAX_TOOL_RESULT_BYTES = 12 * 1024
 MAX_TOOL_RESULT_BYTES_PER_TURN = 36 * 1024
@@ -695,6 +706,20 @@ class ResearchAI:
         self.market_data = market_data
         self.crypto_data = crypto_data
 
+    async def _await_with_turn_deadline(self, awaitable):
+        """Apply the configured turn deadline and preserve provider-owned timeouts."""
+        timeout_seconds = getattr(
+            self, "turn_timeout_seconds", DEFAULT_RESEARCH_TURN_TIMEOUT_SECONDS
+        )
+        timeout_scope = asyncio.timeout(timeout_seconds)
+        try:
+            async with timeout_scope:
+                return await awaitable
+        except TimeoutError:
+            if not timeout_scope.expired():
+                raise
+            raise ResearchTurnDeadlineExceeded(timeout_seconds) from None
+
     async def analyze_chart_image(self, history, user_text, image_bytes, image_mime_type="image/jpeg"):
         """Analyse one screenshot without carrying unrelated conversation turns into vision."""
         if image_mime_type not in {"image/jpeg", "image/png", "image/webp"}:
@@ -730,7 +755,9 @@ class ResearchAI:
         if self.vision_model.startswith("gpt-6-luna"):
             chart_settings["reasoning_effort"] = "none"
             request_options["reasoning_effort"] = "none"
-        response = await self.client.chat.completions.create(**request_options)
+        response = await self._await_with_turn_deadline(
+            self.client.chat.completions.create(**request_options)
+        )
         raw = response.choices[0].message.content
         if not raw:
             raise RuntimeError("Empty chart analysis response.")
@@ -749,14 +776,11 @@ class ResearchAI:
         timeout_seconds = getattr(
             self, "turn_timeout_seconds", DEFAULT_RESEARCH_TURN_TIMEOUT_SECONDS
         )
-        timeout_scope = asyncio.timeout(timeout_seconds)
         try:
-            async with timeout_scope:
-                return await self._answer_within_deadline(history, user_text)
-        except TimeoutError:
-            # Do not turn a provider's own TimeoutError into a turn-deadline message.
-            if not timeout_scope.expired():
-                raise
+            return await self._await_with_turn_deadline(
+                self._answer_within_deadline(history, user_text)
+            )
+        except ResearchTurnDeadlineExceeded:
             return (
                 "I stopped this research turn after its "
                 f"{timeout_seconds:g}-second time budget expired. "
