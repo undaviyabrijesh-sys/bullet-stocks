@@ -308,13 +308,13 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         self.assertEqual(
             consistency["mean_boundary_abs_disagreement"]["baseline"], 0.0
         )
-        self.assertEqual(
+        self.assertAlmostEqual(
             consistency["mean_boundary_abs_disagreement"]["candidate"], 10.0
         )
-        self.assertEqual(
+        self.assertAlmostEqual(
             consistency["mean_boundary_abs_disagreement"]["delta"], 10.0
         )
-        self.assertEqual(
+        self.assertAlmostEqual(
             result["fixtures"][0]["price_accuracy"][
                 "reported_price_consistency"
             ]["mean_boundary_abs_disagreement"]["delta"],

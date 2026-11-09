@@ -227,9 +227,12 @@ class ZoneEvaluationTests(unittest.TestCase):
 
         consistency = result["matches"][0]["reported_price_consistency"]
         self.assertEqual(consistency["status"], "scored")
-        self.assertEqual(consistency["coordinate_price_bounds"], {
-            "price_high": 100.0, "price_low": 80.0,
-        })
+        self.assertAlmostEqual(
+            consistency["coordinate_price_bounds"]["price_high"], 100.0
+        )
+        self.assertAlmostEqual(
+            consistency["coordinate_price_bounds"]["price_low"], 80.0
+        )
         self.assertEqual(consistency["price_high_abs_disagreement"], 0.0)
         self.assertEqual(consistency["price_low_abs_disagreement"], 0.0)
         summary = result["price_accuracy"]["reported_price_consistency"]
@@ -249,7 +252,7 @@ class ZoneEvaluationTests(unittest.TestCase):
         consistency = result["matches"][0]["reported_price_consistency"]
         self.assertEqual(consistency["status"], "scored")
         self.assertEqual(consistency["price_high_abs_disagreement"], 10.0)
-        self.assertEqual(consistency["price_low_abs_disagreement"], 10.0)
+        self.assertAlmostEqual(consistency["price_low_abs_disagreement"], 10.0)
         self.assertAlmostEqual(consistency["price_high_disagreement_pct"], 10.0)
         self.assertAlmostEqual(consistency["price_low_disagreement_pct"], 12.5)
         self.assertAlmostEqual(

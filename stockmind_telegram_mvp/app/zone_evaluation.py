@@ -135,6 +135,13 @@ def _price_comparison(prediction, reference, calibration):
     }
 
 
+def _stable_absolute_disagreement(reported, coordinate):
+    """Ignore only relative floating-point noise from axis interpolation."""
+    if math.isclose(reported, coordinate, rel_tol=1e-12, abs_tol=0.0):
+        return 0.0
+    return abs(reported - coordinate)
+
+
 def _reported_price_consistency(prediction, calibration):
     """Compare the model's stated pair with prices implied by its rendered pixels."""
     try:
@@ -161,8 +168,14 @@ def _reported_price_consistency(prediction, calibration):
             "reason": "reported or coordinate-derived price bounds are not finite positive values",
         }
 
-    high_abs = abs(reported_bounds["price_high"] - coordinate_bounds["price_high"])
-    low_abs = abs(reported_bounds["price_low"] - coordinate_bounds["price_low"])
+    # Linear/log calibration uses binary floats. Treat differences below
+    # 1e-12 relative as interpolation noise, not a reported-price mismatch.
+    high_abs = _stable_absolute_disagreement(
+        reported_bounds["price_high"], coordinate_bounds["price_high"]
+    )
+    low_abs = _stable_absolute_disagreement(
+        reported_bounds["price_low"], coordinate_bounds["price_low"]
+    )
     high_pct = 100 * high_abs / coordinate_bounds["price_high"]
     low_pct = 100 * low_abs / coordinate_bounds["price_low"]
     if not all(math.isfinite(value) for value in (high_abs, low_abs, high_pct, low_pct)):
