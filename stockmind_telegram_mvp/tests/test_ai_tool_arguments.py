@@ -930,3 +930,124 @@ class ResearchTurnDeadlineTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CryptoFinalAnswerConfirmationGuardTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def candle(open_time, close_time, **overrides):
+        row = {
+            "open_time": open_time,
+            "open": "100.0",
+            "high": "102.0",
+            "low": "98.0",
+            "close": "101.0",
+            "volume": "1.0",
+            "close_time": close_time,
+            "quote_volume": "101.0",
+            "trades": 3,
+            "is_closed": False,
+            "candle_status": "forming",
+        }
+        row.update(overrides)
+        return row
+
+    async def run_crypto_turn(self, provider_result, final_text):
+        call = SimpleNamespace(
+            id="call-klines",
+            function=SimpleNamespace(
+                name="get_crypto_klines",
+                arguments='{"symbol":"BTCUSDT","interval":"15m","market":"spot","limit":2}',
+            ),
+        )
+        assistant_message = SimpleNamespace(
+            tool_calls=[call],
+            content=None,
+            model_dump=lambda **kwargs: {
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": call.id,
+                    "type": "function",
+                    "function": {
+                        "name": call.function.name,
+                        "arguments": call.function.arguments,
+                    },
+                }],
+            },
+        )
+        final_message = SimpleNamespace(tool_calls=[], content=final_text)
+        create = AsyncMock(side_effect=[
+            SimpleNamespace(choices=[SimpleNamespace(message=assistant_message)]),
+            SimpleNamespace(choices=[SimpleNamespace(message=final_message)]),
+        ])
+        klines = AsyncMock(return_value=provider_result)
+        research = object.__new__(ResearchAI)
+        research.model = "gpt-4o-mini"
+        research.client = SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        )
+        research.market_data = None
+        research.crypto_data = SimpleNamespace(klines=klines)
+        answer = await research.answer([], "Check BTC structure")
+        return answer, klines
+
+    async def test_unverified_candles_add_final_caveat_even_if_model_says_confirmed(self):
+        answer, klines = await self.run_crypto_turn({
+            "source": "Binance",
+            "symbol": "BTCUSDT",
+            "market": "spot",
+            "interval": "15m",
+            "clock_source": "unverified",
+            "as_of_ms": None,
+            "clock_uncertainty_ms": None,
+            "data": [self.candle(900, 1000, is_closed=True, candle_status="closed")],
+        }, "BTC has a confirmed bullish BOS.")
+
+        klines.assert_awaited_once()
+        self.assertIn("BTC has a confirmed bullish BOS.", answer)
+        self.assertIn("Automated Binance candle check (BTCUSDT 15m spot)", answer)
+        self.assertIn("all 1 model-visible candle row(s) are unverified", answer)
+        self.assertIn("provisional, not confirmed", answer)
+
+    async def test_mixed_closed_and_forming_rows_are_reported_in_final_answer(self):
+        answer, _ = await self.run_crypto_turn({
+            "source": "Binance",
+            "symbol": "BTCUSDT",
+            "market": "spot",
+            "interval": "15m",
+            "clock_source": "binance_server_time",
+            "as_of_ms": 1000,
+            "clock_uncertainty_ms": 1,
+            "data": [
+                self.candle(900, 999),
+                self.candle(901, 1000),
+            ],
+        }, "The latest move may be a structure break.")
+
+        self.assertIn("1 model-visible row(s) were closed", answer)
+        self.assertIn("1 were forming/unverified", answer)
+        self.assertIn("Only closed rows are eligible", answer)
+
+    async def test_unavailable_binance_candles_are_not_silently_omitted(self):
+        answer, _ = await self.run_crypto_turn({
+            "error": "Binance time endpoint unavailable",
+            "type": "ProviderError",
+        }, "I cannot verify the current BTC structure.")
+
+        self.assertIn("Binance candle data was unavailable or withheld", answer)
+        self.assertIn("no structural break can be confirmed", answer)
+
+    async def test_all_closed_rows_note_does_not_claim_structure_was_validated(self):
+        answer, _ = await self.run_crypto_turn({
+            "source": "Binance",
+            "symbol": "BTCUSDT",
+            "market": "usdm",
+            "interval": "1h",
+            "clock_source": "binance_server_time",
+            "as_of_ms": 2000,
+            "clock_uncertainty_ms": 1,
+            "data": [self.candle(900, 1000)],
+        }, "The hourly candles are available.")
+
+        self.assertIn("passed the closed-candle check", answer)
+        self.assertIn("does not by itself establish a BOS/CHOCH", answer)
+
