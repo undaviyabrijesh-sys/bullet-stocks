@@ -523,6 +523,27 @@ def _aggregate_price_accuracy(fixtures):
         for item in scored
         for field in ("price_high_error_pct", "price_low_error_pct")
     ]
+
+    reported_comparisons = [
+        match.get("reported_price_consistency")
+        for fixture in calibrated_fixtures
+        for match in fixture["matches"]
+    ]
+    reported_scored = [
+        item for item in reported_comparisons
+        if item and item["status"] == "scored"
+    ]
+    reported_absolute_errors = [
+        item[field]
+        for item in reported_scored
+        for field in ("price_high_abs_disagreement", "price_low_abs_disagreement")
+    ]
+    reported_percentage_errors = [
+        item[field]
+        for item in reported_scored
+        for field in ("price_high_disagreement_pct", "price_low_disagreement_pct")
+    ]
+
     if not calibrated_fixtures:
         return None
     return {
@@ -534,8 +555,24 @@ def _aggregate_price_accuracy(fixtures):
         ),
         "max_boundary_abs_error": max(absolute_errors) if absolute_errors else None,
         "mean_boundary_error_pct": (
-            sum(percentage_errors) / len(percentage_errors) if percentage_errors else None
+            sum(percentage_errors) / len(percentage_errors)
+            if percentage_errors else None
         ),
+        "reported_price_consistency": {
+            "scored_match_count": len(reported_scored),
+            "unscored_match_count": len(reported_comparisons) - len(reported_scored),
+            "mean_boundary_abs_disagreement": (
+                sum(reported_absolute_errors) / len(reported_absolute_errors)
+                if reported_absolute_errors else None
+            ),
+            "max_boundary_abs_disagreement": (
+                max(reported_absolute_errors) if reported_absolute_errors else None
+            ),
+            "mean_boundary_disagreement_pct": (
+                sum(reported_percentage_errors) / len(reported_percentage_errors)
+                if reported_percentage_errors else None
+            ),
+        },
     }
 
 
