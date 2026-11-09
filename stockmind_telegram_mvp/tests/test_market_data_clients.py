@@ -312,6 +312,90 @@ class BinanceResponseValidationTests(unittest.IsolatedAsyncioTestCase):
             await client.ticker("BTCUSDT")
 
 
+    async def test_caches_unverified_clock_failure_briefly_to_avoid_repeated_time_requests(self):
+        row = [1700000000000, "1", "2", "0.5", "1.5", "10", 1700000899999, "15", 100]
+        failure = httpx.Response(
+            503,
+            json={"message": "temporarily unavailable"},
+            request=httpx.Request("GET", "https://api.binance.com/api/v3/time"),
+        )
+        client = self.make_client(
+            httpx.Response(200, json=[row]),
+            time_response=failure,
+        )
+        queued_responses = list(client.client.get.side_effect)
+        second_kline = self.prepare_response(httpx.Response(200, json=[row]))
+        client.client.get.side_effect = queued_responses + [second_kline]
+
+        with patch(
+            "stockmind_telegram_mvp.app.crypto.time.monotonic_ns",
+            side_effect=[0, 1_000_000, 2_000_000],
+        ) as clock:
+            first = await client.klines("BTCUSDT", interval="1m")
+            second = await client.klines("BTCUSDT", interval="1m")
+
+        self.assertEqual(first["clock_source"], "unverified")
+        self.assertEqual(second["clock_source"], "unverified")
+        self.assertEqual(client.client.get.await_count, 3)
+        self.assertEqual(clock.call_count, 3)
+
+    async def test_retries_server_time_after_failure_cooldown_and_recovers(self):
+        row = [1700000000000, "1", "2", "0.5", "1.5", "10", 1700000899999, "15", 100]
+        failure = httpx.Response(
+            503,
+            json={"message": "temporarily unavailable"},
+            request=httpx.Request("GET", "https://api.binance.com/api/v3/time"),
+        )
+        client = self.make_client(
+            httpx.Response(200, json=[row]),
+            time_response=failure,
+        )
+        queued_responses = list(client.client.get.side_effect)
+        second_kline = self.prepare_response(httpx.Response(200, json=[row]))
+        recovered_time = self.prepare_response(
+            httpx.Response(200, json={"serverTime": 1700001000000})
+        )
+        client.client.get.side_effect = queued_responses + [second_kline, recovered_time]
+
+        with patch(
+            "stockmind_telegram_mvp.app.crypto.time.monotonic_ns",
+            side_effect=[0, 1_000_000, 5_001_000_001, 5_002_000_001],
+        ) as clock:
+            first = await client.klines("BTCUSDT", interval="1m")
+            recovered = await client.klines("BTCUSDT", interval="1m")
+
+        self.assertEqual(first["clock_source"], "unverified")
+        self.assertEqual(recovered["clock_source"], "binance_server_time")
+        self.assertEqual(client.client.get.await_count, 4)
+        self.assertEqual(clock.call_count, 4)
+
+    async def test_spot_and_usdm_server_time_caches_are_independent(self):
+        row = [1700000000000, "1", "2", "0.5", "1.5", "10", 1700000899999, "15", 100]
+        responses = [
+            self.prepare_response(httpx.Response(200, json=[row])),
+            self.prepare_response(httpx.Response(200, json={"serverTime": 1700001000000})),
+            self.prepare_response(httpx.Response(200, json=[row])),
+            self.prepare_response(httpx.Response(200, json={"serverTime": 1700001000000})),
+        ]
+        client = object.__new__(BinanceMarketData)
+        client.client = SimpleNamespace(get=AsyncMock(side_effect=responses))
+
+        with patch(
+            "stockmind_telegram_mvp.app.crypto.time.monotonic_ns",
+            side_effect=[0, 1_000_000, 2_000_000, 3_000_000],
+        ):
+            spot = await client.klines("BTCUSDT", interval="1h", market="spot")
+            usdm = await client.klines("BTCUSDT", interval="1h", market="usdm")
+
+        self.assertEqual(spot["clock_source"], "binance_server_time")
+        self.assertEqual(usdm["clock_source"], "binance_server_time")
+        self.assertEqual(client.client.get.await_count, 4)
+        requested_urls = [call.args[0] for call in client.client.get.await_args_list]
+        self.assertIn("/api/v3/time", requested_urls[1])
+        self.assertIn("/fapi/v1/time", requested_urls[3])
+
+
+
 class SafeToolErrorTests(unittest.TestCase):
     def test_timeout_error_does_not_expose_request_url_or_query_parameters(self):
         request = httpx.Request(
