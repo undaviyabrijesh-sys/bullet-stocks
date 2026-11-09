@@ -782,10 +782,17 @@ def _normalize_crypto_klines_for_model(result):
     rows = result.get("data")
     if not isinstance(rows, list):
         return invalid_result("Binance kline data is not an array; candle data was withheld.")
-    if any(not _is_valid_crypto_kline_row(row) for row in rows):
-        return invalid_result(
-            "Binance kline data contains malformed candle rows; all candle data was withheld."
-        )
+    previous_open_time = None
+    for row in rows:
+        if not _is_valid_crypto_kline_row(row):
+            return invalid_result(
+                "Binance kline data contains malformed candle rows; all candle data was withheld."
+            )
+        if previous_open_time is not None and row["open_time"] <= previous_open_time:
+            return invalid_result(
+                "Binance kline rows are not strictly chronological; all candle data was withheld."
+            )
+        previous_open_time = row["open_time"]
 
     normalized = dict(result)
     as_of_ms = result.get("as_of_ms")
