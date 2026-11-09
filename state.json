@@ -7,12 +7,14 @@
    "ETERNAL",
    "KOTAKBANK",
    "KRISHANA",
+   "LAURUSLABS",
    "NAVINFLUOR",
    "NITINSPIN",
    "PHOENIXLTD",
    "SBC",
    "SHREEPUSHK",
    "SHYAMMETL",
+   "SOUTHBANK",
    "TFCILTD"
   ]
  },
@@ -59,7 +61,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-09T10:09:00+05:30"
+   "last_processed_bar": "2026-11-09T10:20:00+05:30"
   },
   "KINGFA": {
    "entry": 6733.02,
@@ -81,7 +83,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-09T10:09:00+05:30"
+   "last_processed_bar": "2026-11-09T10:21:00+05:30"
   },
   "SONACOMS": {
    "entry": 853.74,
@@ -103,7 +105,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-09T10:09:00+05:30"
+   "last_processed_bar": "2026-11-09T10:21:00+05:30"
   },
   "KRISHANA": {
    "entry": 234.6,
@@ -125,7 +127,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-09T10:09:00+05:30"
+   "last_processed_bar": "2026-11-09T10:21:00+05:30"
   },
   "SHREEPUSHK": {
    "entry": 635.7999877929688,
@@ -147,7 +149,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-09T10:09:00+05:30"
+   "last_processed_bar": "2026-11-09T10:21:00+05:30"
   },
   "NITINSPIN": {
    "entry": 690.25,
@@ -169,7 +171,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-09T10:08:00+05:30"
+   "last_processed_bar": "2026-11-09T10:21:00+05:30"
   },
   "PHOENIXLTD": {
    "entry": 2044.0,
@@ -190,7 +192,7 @@
    "trailing": false,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-09T10:09:00+05:30"
+   "last_processed_bar": "2026-11-09T10:21:00+05:30"
   },
   "ADANIPORTS": {
    "entry": 1915.0,
@@ -211,7 +213,7 @@
    "trailing": false,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-09T10:09:00+05:30"
+   "last_processed_bar": "2026-11-09T10:21:00+05:30"
   },
   "DIVISLAB": {
    "entry": 10074.5,
@@ -234,7 +236,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-09T10:09:00+05:30"
+   "last_processed_bar": "2026-11-09T10:21:00+05:30"
   },
   "ANANDRATHI": {
    "entry": 2347.0,
@@ -257,7 +259,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-09T10:09:00+05:30"
+   "last_processed_bar": "2026-11-09T10:21:00+05:30"
   },
   "ETERNAL": {
    "entry": 354.20001220703125,
@@ -280,7 +282,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-09T10:09:00+05:30"
+   "last_processed_bar": "2026-11-09T10:21:00+05:30"
   },
   "SHYAMMETL": {
    "entry": 1274.5999755859375,
@@ -303,7 +305,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-09T10:09:00+05:30"
+   "last_processed_bar": "2026-11-09T10:21:00+05:30"
   },
   "KOTAKBANK": {
    "entry": 473.75,
@@ -326,7 +328,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-09T10:09:00+05:30"
+   "last_processed_bar": "2026-11-09T10:21:00+05:30"
   },
   "SBC": {
    "entry": 68.72000122070312,
@@ -349,7 +351,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-09T10:09:00+05:30"
+   "last_processed_bar": "2026-11-09T10:21:00+05:30"
   },
   "NAVINFLUOR": {
    "entry": 9000.0,
@@ -372,7 +374,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-09T10:09:00+05:30"
+   "last_processed_bar": "2026-11-09T10:21:00+05:30"
   },
   "TFCILTD": {
    "entry": 169.61000061035156,
@@ -395,7 +397,53 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-09T10:11:14+05:30"
+   "last_processed_bar": "2026-11-09T10:21:00+05:30"
+  },
+  "SOUTHBANK": {
+   "entry": 58.54999923706055,
+   "initial_sl": 43.91249942779541,
+   "sl": 43.91249942779541,
+   "level": 57.279998779296875,
+   "opened": "2026-11-09T10:23:29+05:30",
+   "setup_month": "Oct'26",
+   "monthly_sma20": 37.340500354766846,
+   "monthly_sma10": 43.555000686645506,
+   "t1": 73.18749904632568,
+   "t2": 81.96999893188476,
+   "t3": 87.82499885559082,
+   "t4": 117.0999984741211,
+   "strategy_version": 3,
+   "t1_done": false,
+   "t2_done": false,
+   "t3_done": false,
+   "trailing": false,
+   "trail_activation_date": null,
+   "remaining_fraction": 1.0,
+   "realised_pnl_fraction": 0.0,
+   "last_processed_bar": "2026-11-09T10:23:29+05:30"
+  },
+  "LAURUSLABS": {
+   "entry": 2458.699951171875,
+   "initial_sl": 1844.0249633789062,
+   "sl": 1844.0249633789062,
+   "level": 2405.5,
+   "opened": "2026-11-09T10:23:29+05:30",
+   "setup_month": "Oct'26",
+   "monthly_sma20": 1167.4149963378907,
+   "monthly_sma10": 1513.054998779297,
+   "t1": 3073.3749389648438,
+   "t2": 3442.179931640625,
+   "t3": 3688.0499267578125,
+   "t4": 4917.39990234375,
+   "strategy_version": 3,
+   "t1_done": false,
+   "t2_done": false,
+   "t3_done": false,
+   "trailing": false,
+   "trail_activation_date": null,
+   "remaining_fraction": 1.0,
+   "realised_pnl_fraction": 0.0,
+   "last_processed_bar": "2026-11-09T10:23:29+05:30"
   }
  },
  "closed": [
