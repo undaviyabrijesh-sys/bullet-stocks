@@ -500,5 +500,36 @@ class ZoneEvaluationTests(unittest.TestCase):
             )
 
 
+    def test_evaluator_rounding_matches_renderer_at_multiple_resolutions(self):
+        full_plot = {
+            "x_start": 0.0, "x_end": 1.0,
+            "y_top": 0.0, "y_bottom": 1.0,
+        }
+        for width, height in ((640, 360), (641, 359), (1280, 720), (1920, 1080)):
+            reference = zone(
+                x_start=0.25, x_end=0.75,
+                y_top=0.30, y_bottom=0.70,
+            )
+            # Move every edge by only 0.05 source pixels. The renderer rounds
+            # these to the same half-open pixel box as the manual reference.
+            predicted = prediction(
+                x_start=0.25 + 0.05 / width,
+                x_end=0.75 - 0.05 / width,
+                y_top=0.30 + 0.05 / height,
+                y_bottom=0.70 - 0.05 / height,
+            )
+            with self.subTest(size=(width, height)):
+                result = evaluate_zone_predictions(
+                    [predicted],
+                    [reference],
+                    image_width=width,
+                    image_height=height,
+                    predicted_plot_bounds=full_plot,
+                    reference_plot_bounds=full_plot,
+                )
+                self.assertEqual(result["overall"]["true_positive"], 1)
+                self.assertEqual(result["matches"][0]["iou"], 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()
