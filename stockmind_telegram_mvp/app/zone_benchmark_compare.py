@@ -206,6 +206,12 @@ def _validate_price_accuracy(price, matches, label):
             f"{label}.reported_price_consistency is missing fields: "
             f"{', '.join(reported_missing)}"
         )
+    for field in ("scored_match_count", "unscored_match_count"):
+        value = reported_summary[field]
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(
+                f"{label}.reported_price_consistency.{field} must be a non-negative integer"
+            )
     reported_scored_count = 0
     reported_unscored_count = 0
     reported_absolute_errors = []
