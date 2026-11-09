@@ -3,7 +3,6 @@ import base64
 import hashlib
 import json
 import math
-import re
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone
 
@@ -700,10 +699,11 @@ TOOLS = [
 
 def _crypto_decimal(value, *, allow_zero=False):
     """Parse a finite plain-decimal string from a Binance kline row."""
-    if (
-        not isinstance(value, str)
-        or len(value) > 64
-        or re.fullmatch(r"[0-9]+(?:\\.[0-9]+)?", value) is None
+    if not isinstance(value, str) or not value or len(value) > 64:
+        return None
+    parts = value.split(".")
+    if len(parts) > 2 or any(
+        not part.isascii() or not part.isdigit() for part in parts
     ):
         return None
     try:
