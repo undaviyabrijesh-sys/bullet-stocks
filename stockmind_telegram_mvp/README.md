@@ -184,3 +184,8 @@ because the platform may already have accepted the message.
 The 4,000-character chunk budget is measured in UTF-16 code units so
 supplementary Unicode characters (including emoji) cannot exceed Telegram's
 entity-length accounting or be split in the middle of a code point.
+
+
+### Binance numeric payload validation
+
+The read-only Binance client validates market-data values before passing them to the research model. Kline timestamps and trade counts must be non-negative integers, candle open times must be strictly increasing, OHLC values must be positive finite decimal strings with a consistent high/low envelope, and base/quote volumes must be finite and non-negative. The 24-hour ticker must identify the requested symbol and contain a positive finite last price. Malformed successful HTTP responses are treated as provider failures rather than plausible market data. This validates response structure and numeric consistency; it does not independently verify exchange accuracy or market freshness.
