@@ -216,6 +216,66 @@ class ZoneEvaluationTests(unittest.TestCase):
         self.assertEqual(result["matches"][0]["price_comparison"]["status"], "unscored")
 
 
+    def test_reported_price_bounds_match_pixel_aligned_coordinates(self):
+        result = evaluate(
+            [prediction(price_low="80", price_high="100")],
+            [zone()],
+            price_axis_anchors=AXIS_ANCHORS,
+            price_axis_plot_bounds=PLOT_BOUNDS,
+            predicted_plot_bounds=PLOT_BOUNDS,
+        )
+
+        consistency = result["matches"][0]["reported_price_consistency"]
+        self.assertEqual(consistency["status"], "scored")
+        self.assertEqual(consistency["coordinate_price_bounds"], {
+            "price_high": 100.0, "price_low": 80.0,
+        })
+        self.assertEqual(consistency["price_high_abs_disagreement"], 0.0)
+        self.assertEqual(consistency["price_low_abs_disagreement"], 0.0)
+        summary = result["price_accuracy"]["reported_price_consistency"]
+        self.assertEqual(summary["scored_match_count"], 1)
+        self.assertEqual(summary["unscored_match_count"], 0)
+        self.assertEqual(summary["mean_boundary_abs_disagreement"], 0.0)
+
+    def test_reported_price_disagreement_is_measured_against_coordinate_bounds(self):
+        result = evaluate(
+            [prediction(price_low="70", price_high="110")],
+            [zone()],
+            price_axis_anchors=AXIS_ANCHORS,
+            price_axis_plot_bounds=PLOT_BOUNDS,
+            predicted_plot_bounds=PLOT_BOUNDS,
+        )
+
+        consistency = result["matches"][0]["reported_price_consistency"]
+        self.assertEqual(consistency["status"], "scored")
+        self.assertEqual(consistency["price_high_abs_disagreement"], 10.0)
+        self.assertEqual(consistency["price_low_abs_disagreement"], 10.0)
+        self.assertAlmostEqual(consistency["price_high_disagreement_pct"], 10.0)
+        self.assertAlmostEqual(consistency["price_low_disagreement_pct"], 12.5)
+        self.assertAlmostEqual(
+            result["price_accuracy"]["reported_price_consistency"][
+                "mean_boundary_disagreement_pct"
+            ],
+            11.25,
+        )
+
+    def test_missing_reported_price_pair_is_explicitly_unscored(self):
+        result = evaluate(
+            [prediction()],
+            [zone()],
+            price_axis_anchors=AXIS_ANCHORS,
+            price_axis_plot_bounds=PLOT_BOUNDS,
+            predicted_plot_bounds=PLOT_BOUNDS,
+        )
+
+        consistency = result["matches"][0]["reported_price_consistency"]
+        self.assertEqual(consistency["status"], "unscored")
+        self.assertIn("price_low", consistency["reason"])
+        summary = result["price_accuracy"]["reported_price_consistency"]
+        self.assertEqual(summary["scored_match_count"], 0)
+        self.assertEqual(summary["unscored_match_count"], 1)
+        self.assertIsNone(summary["mean_boundary_abs_disagreement"])
+
     def test_price_axis_anchors_require_a_manually_marked_plot(self):
         with self.assertRaisesRegex(ValueError, "price_axis_plot_bounds is required"):
             evaluate([prediction()], [zone()], price_axis_anchors=AXIS_ANCHORS)
