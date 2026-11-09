@@ -154,6 +154,13 @@ class AnnotationFixtureAssemblyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "independently approved"):
             build_prediction_capture(self.reviewed_path, self.result)
 
+    def test_prediction_capture_rejects_reviewer_reusing_annotator_pseudonym(self):
+        draft = json.loads(self.reviewed_path.read_text(encoding="utf-8"))
+        draft["annotation_metadata"]["reviewer_id"] = "rev-001"
+        self.reviewed_path.write_text(json.dumps(draft), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "different pseudonymous identity token"):
+            build_prediction_capture(self.reviewed_path, self.result)
+
     def test_writes_capture_and_assembles_evaluator_valid_jsonl(self):
         capture_info = write_prediction_capture(self.reviewed_path, self.result)
         capture_path = Path(capture_info["capture_file"])

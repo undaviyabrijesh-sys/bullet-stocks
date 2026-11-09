@@ -349,6 +349,25 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "separate anonymized ID"):
             evaluate_benchmark_manifest(self.manifest)
 
+    def test_rejects_reviewer_reusing_annotator_pseudonym_suffix(self):
+        for annotator_id, reviewer_id in (
+            ("ann-001", "rev-001"),
+            ("ann-Case", "rev-case"),
+        ):
+            with self.subTest(annotator_id=annotator_id, reviewer_id=reviewer_id):
+                self._write(
+                    self._record(
+                        annotation_metadata=_annotation_metadata(
+                            annotator_id=annotator_id,
+                            reviewer_id=reviewer_id,
+                        )
+                    )
+                )
+                with self.assertRaisesRegex(
+                    ValueError, "different pseudonymous identity token"
+                ):
+                    evaluate_benchmark_manifest(self.manifest)
+
     def test_rejects_annotation_metadata_with_unapproved_extra_fields(self):
         metadata = _annotation_metadata()
         metadata["reviewer_email"] = "reviewer@example.com"

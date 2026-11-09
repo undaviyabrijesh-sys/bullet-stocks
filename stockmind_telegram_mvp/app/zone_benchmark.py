@@ -173,8 +173,10 @@ def _validate_annotation_metadata(metadata, line_number, fixture_id):
         raise ValueError(
             f"{prefix}.reviewer_id must be a separate anonymized ID like 'rev-001'"
         )
-    if annotator_id == reviewer_id:
-        raise ValueError(f"{prefix} requires a reviewer distinct from the annotator")
+    if annotator_id[4:].casefold() == reviewer_id[4:].casefold():
+        raise ValueError(
+            f"{prefix} requires a reviewer with a different pseudonymous identity token"
+        )
 
     guideline_version = metadata["guideline_version"]
     if (

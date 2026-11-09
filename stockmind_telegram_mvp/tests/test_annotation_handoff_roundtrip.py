@@ -130,7 +130,7 @@ class AnnotationHandoffRoundTripTests(unittest.TestCase):
 
         approved = review_annotation_draft(
             reloaded_annotation,
-            "rev-roundtrip",
+            "rev-roundtrip-reviewer",
             approve=True,
             reviewed_at="2026-11-09T10:02:00Z",
         )
@@ -145,7 +145,7 @@ class AnnotationHandoffRoundTripTests(unittest.TestCase):
         )
         self.assertEqual(
             reloaded_review["annotation_metadata"]["reviewer_id"],
-            "rev-roundtrip",
+            "rev-roundtrip-reviewer",
         )
 
         capture_info = write_prediction_capture(reviewed_path, self._prediction())
@@ -182,7 +182,7 @@ class AnnotationHandoffRoundTripTests(unittest.TestCase):
         _write_new_json(annotated_path, annotated)
         approved = review_annotation_draft(
             load_draft_and_image(annotated_path)[0],
-            "rev-mutated-image",
+            "rev-mutated-image-reviewer",
             approve=True,
             reviewed_at="2026-11-09T10:02:00Z",
         )
@@ -216,7 +216,7 @@ class AnnotationHandoffRoundTripTests(unittest.TestCase):
 
         rejected = review_annotation_draft(
             reloaded_annotation,
-            "rev-rejected",
+            "rev-rejected-reviewer",
             approve=False,
             reviewed_at="2026-11-09T10:02:00Z",
         )

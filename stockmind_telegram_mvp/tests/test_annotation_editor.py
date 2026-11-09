@@ -768,7 +768,23 @@ class AnnotationWorkflowTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "reviewer_id"):
             review_annotation_draft(annotated, "ann-001", approve=True, reviewed_at="2026-11-07T12:01:00Z")
         with self.assertRaisesRegex(ValueError, "earlier"):
-            review_annotation_draft(annotated, "rev-001", approve=True, reviewed_at="2026-11-07T11:59:00Z")
+            review_annotation_draft(annotated, "rev-002", approve=True, reviewed_at="2026-11-07T11:59:00Z")
+
+    def test_rejects_reviewer_reusing_annotator_pseudonym_suffix(self):
+        for annotator_id, reviewer_id in (
+            ("ann-001", "rev-001"),
+            ("ann-Case", "rev-case"),
+        ):
+            with self.subTest(annotator_id=annotator_id, reviewer_id=reviewer_id):
+                annotated = apply_manual_annotations(
+                    _draft(), PLOT, [ZONE], annotator_id,
+                    annotated_at="2026-11-07T12:00:00Z",
+                )
+                with self.assertRaisesRegex(ValueError, "different pseudonymous identity"):
+                    review_annotation_draft(
+                        annotated, reviewer_id, approve=True,
+                        reviewed_at="2026-11-07T12:05:00Z",
+                    )
 
     def test_approval_is_a_separate_non_benchmark_ready_transition(self):
         annotated = apply_manual_annotations(_draft(), PLOT, [ZONE], "ann-001", annotated_at="2026-11-07T12:00:00Z")

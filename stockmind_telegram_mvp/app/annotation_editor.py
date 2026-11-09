@@ -493,6 +493,10 @@ def review_annotation_draft(draft, reviewer_id, *, approve, reviewed_at=None):
     metadata = _validate_draft(draft, "pending_review")
     if not isinstance(reviewer_id, str) or not _REVIEWER_ID_RE.fullmatch(reviewer_id):
         raise ValueError("reviewer_id must be an anonymized ID like 'rev-001'")
+    if reviewer_id[4:].casefold() == metadata["annotator_id"][4:].casefold():
+        raise ValueError(
+            "reviewer_id must identify a different pseudonymous identity from the annotator"
+        )
     if not isinstance(approve, bool):
         raise ValueError("approve must be a boolean")
     timestamp = reviewed_at or _utc_now()
