@@ -512,6 +512,38 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         self.assertEqual(result["price_accuracy"]["mean_boundary_abs_error"], 0.0)
 
 
+    def test_reported_price_consistency_is_aggregated_separately_from_geometry_error(self):
+        self._write(self._record(
+            predicted_zones=[_prediction(price_low="80", price_high="100")],
+            price_axis_anchors=[
+                {"y": 0.2, "price": 120},
+                {"y": 0.5, "price": 90},
+                {"y": 0.8, "price": 60},
+            ],
+            price_axis_scale="linear",
+            price_axis_plot_bounds={
+                "x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9
+            },
+            reference_plot_bounds={
+                "x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9
+            },
+            predicted_plot_bounds={
+                "x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9
+            },
+        ))
+
+        result = evaluate_benchmark_manifest(self.manifest)
+        consistency = result["price_accuracy"]["reported_price_consistency"]
+        self.assertEqual(consistency["scored_match_count"], 1)
+        self.assertEqual(consistency["unscored_match_count"], 0)
+        self.assertEqual(consistency["mean_boundary_abs_disagreement"], 0.0)
+        self.assertEqual(
+            result["fixtures"][0]["price_accuracy"]["reported_price_consistency"][
+                "scored_match_count"
+            ],
+            1,
+        )
+
     def test_price_axis_anchors_require_manual_plot_bounds(self):
         self._write(self._record(
             price_axis_anchors=[
