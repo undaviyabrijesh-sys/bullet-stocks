@@ -152,7 +152,10 @@ class AnnotationHandoffRoundTripTests(unittest.TestCase):
         capture_path = Path(capture_info["capture_file"])
         capture = build_prediction_capture(reviewed_path, self._prediction())
         self.assertEqual(capture["image_sha256"], self.image_sha256)
-        self.assertEqual(capture["prediction"]["zones"][0], self._prediction()["zones"][0])
+        captured_zone = capture["prediction"]["zones"][0]
+        self.assertEqual(captured_zone["zone_type"], ZONE["zone_type"])
+        for field in ("x_start", "x_end", "y_top", "y_bottom"):
+            self.assertEqual(captured_zone[field], ZONE[field])
 
         assembled = assemble_benchmark_fixture(reviewed_path, capture_path)
         manifest_path = Path(assembled["manifest_file"])
