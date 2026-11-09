@@ -1,4 +1,5 @@
 import math
+import sys
 import unittest
 
 from decimal import Decimal
@@ -45,6 +46,53 @@ class PriceAxisCalibrationTests(unittest.TestCase):
         calibration = calibrate_price_axis(anchors, scale="log")
         self.assertAlmostEqual(calibration.price_at_y(0.6), 1000 * math.exp(-1.2))
         self.assertEqual(calibration.scale, "log")
+
+    def test_linear_calibration_scales_large_finite_anchor_prices_before_fitting(self):
+        anchors = [
+            {"y": 0.1, "price": 9e307},
+            {"y": 0.5, "price": 7e307},
+            {"y": 0.9, "price": 5e307},
+        ]
+        calibration = calibrate_price_axis(anchors)
+
+        self.assertTrue(math.isclose(
+            calibration.price_at_y(0.3), 8e307, rel_tol=1e-12
+        ))
+        self.assertTrue(math.isclose(
+            calibration.price_at_y(0.7), 6e307, rel_tol=1e-12
+        ))
+        self.assertTrue(math.isfinite(calibration.max_anchor_relative_error))
+
+    def test_log_calibration_handles_largest_and_smallest_finite_prices(self):
+        highest_price = sys.float_info.max
+        lowest_price = math.ulp(0.0)
+        midpoint_price = math.exp(
+            (math.log(highest_price) + math.log(lowest_price)) / 2
+        )
+        anchors = [
+            {"y": 0.1, "price": highest_price},
+            {"y": 0.5, "price": midpoint_price},
+            {"y": 0.9, "price": lowest_price},
+        ]
+
+        calibration = calibrate_price_axis(anchors, scale="log")
+
+        for anchor in anchors:
+            self.assertTrue(math.isclose(
+                calibration.price_at_y(anchor["y"]),
+                anchor["price"],
+                rel_tol=1e-12,
+            ))
+        self.assertTrue(math.isfinite(calibration.max_anchor_relative_error))
+
+    def test_rejects_linear_fit_that_cannot_be_represented_as_finite_slope(self):
+        anchors = [
+            {"y": 0.1, "price": 9e307},
+            {"y": 0.100000002, "price": 5e307},
+            {"y": 0.100000004, "price": 1e307},
+        ]
+        with self.assertRaisesRegex(ValueError, "exceeds the supported numeric range"):
+            calibrate_price_axis(anchors)
 
     def test_zone_bounds_return_high_at_top_and_low_at_bottom(self):
         calibration = calibrate_price_axis([
