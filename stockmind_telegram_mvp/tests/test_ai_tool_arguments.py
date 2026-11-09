@@ -82,6 +82,35 @@ class CryptoCandleConfirmationTests(unittest.TestCase):
                 self.assertEqual(result["data"][0]["candle_status"], "unverified")
 
 
+    def test_malformed_crypto_kline_envelopes_are_withheld(self):
+        malformed_payloads = [
+            None,
+            [],
+            {},
+            {"data": None},
+            {"data": [{"close_time": 999}, "not-a-candle"]},
+        ]
+        for payload in malformed_payloads:
+            with self.subTest(payload=payload):
+                result = _normalize_crypto_klines_for_model(payload)
+                self.assertEqual(result["clock_source"], "unverified")
+                self.assertIsNone(result["as_of_ms"])
+                self.assertEqual(result["data"], [])
+                self.assertEqual(result["type"], "InvalidCryptoKlineResult")
+                self.assertFalse(result["candle_confirmation"]["clock_verified"])
+                self.assertEqual(result["candle_confirmation"]["confirmed_closed_rows"], 0)
+
+    def test_provider_error_without_candle_data_is_preserved(self):
+        provider_error = {
+            "error": "Binance time endpoint unavailable",
+            "type": "ProviderError",
+        }
+        self.assertEqual(
+            _normalize_crypto_klines_for_model(provider_error),
+            provider_error,
+        )
+
+
 class AIClientConfigurationTests(unittest.TestCase):
     def test_openai_client_uses_explicit_timeout_and_bounded_retries(self):
         with patch("stockmind_telegram_mvp.app.ai.AsyncOpenAI") as client_factory:
