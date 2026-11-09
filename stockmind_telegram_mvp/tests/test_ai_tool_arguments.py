@@ -113,6 +113,14 @@ class CryptoCandleConfirmationTests(unittest.TestCase):
             {"data": [self.candle(close_time=True)]},
             {"data": [self.candle(high="99.0")]},
             {"data": [self.candle(volume="NaN")]},
+            {"data": [
+                self.candle(open_time=900),
+                self.candle(open_time=900),
+            ]},
+            {"data": [
+                self.candle(open_time=901),
+                self.candle(open_time=900),
+            ]},
         ]
         for payload in malformed_payloads:
             with self.subTest(payload=payload):
