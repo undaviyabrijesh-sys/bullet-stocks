@@ -12,6 +12,7 @@ SPOT = "https://api.binance.com"
 FUTURES = "https://fapi.binance.com"
 INTERVALS = {"1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M"}
 SERVER_TIME_CACHE_TTL_NS = 30_000_000_000
+SERVER_TIME_FAILURE_CACHE_TTL_NS = 5_000_000_000
 SERVER_CLOCK_DRIFT_PPM = 100
 
 
@@ -21,6 +22,7 @@ class BinanceMarketData:
     def __init__(self):
         self.client = httpx.AsyncClient(timeout=15.0)
         self._server_clock_cache = {}
+        self._server_clock_failure_cache = {}
         self._server_clock_lock = asyncio.Lock()
 
     @staticmethod
@@ -60,6 +62,10 @@ class BinanceMarketData:
         if cache is None:
             cache = {}
             self._server_clock_cache = cache
+        failure_cache = getattr(self, "_server_clock_failure_cache", None)
+        if failure_cache is None:
+            failure_cache = {}
+            self._server_clock_failure_cache = failure_cache
         lock = getattr(self, "_server_clock_lock", None)
         if lock is None:
             lock = asyncio.Lock()
@@ -86,10 +92,22 @@ class BinanceMarketData:
                             "clock_uncertainty_ms": uncertainty_ms,
                         }
 
+            failed_at_ns = failure_cache.get(market)
+            if failed_at_ns is not None:
+                failure_age_ns = now_ns - failed_at_ns
+                if 0 <= failure_age_ns <= SERVER_TIME_FAILURE_CACHE_TTL_NS:
+                    return {
+                        "as_of_ms": None,
+                        "clock_source": "unverified",
+                        "clock_uncertainty_ms": None,
+                    }
+                failure_cache.pop(market, None)
+
             started_ns = now_ns
             try:
                 payload = await self._get_json(base + path, {})
             except (httpx.HTTPError, RuntimeError, ValueError):
+                failure_cache[market] = time.monotonic_ns()
                 return {
                     "as_of_ms": None,
                     "clock_source": "unverified",
@@ -103,6 +121,7 @@ class BinanceMarketData:
                 or not isinstance(server_time_ms, int)
                 or server_time_ms <= 0
             ):
+                failure_cache[market] = received_ns
                 return {
                     "as_of_ms": None,
                     "clock_source": "unverified",
@@ -113,6 +132,7 @@ class BinanceMarketData:
             uncertainty_ms = round_trip_ms + 1
             as_of_ms = server_time_ms - uncertainty_ms
             if as_of_ms <= 0:
+                failure_cache[market] = received_ns
                 return {
                     "as_of_ms": None,
                     "clock_source": "unverified",
@@ -124,6 +144,7 @@ class BinanceMarketData:
                 "received_monotonic_ns": received_ns,
                 "uncertainty_ms": uncertainty_ms,
             }
+            failure_cache.pop(market, None)
             return {
                 "as_of_ms": as_of_ms,
                 "clock_source": "binance_server_time",
