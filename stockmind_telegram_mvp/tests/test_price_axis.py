@@ -74,6 +74,44 @@ class PriceAxisCalibrationTests(unittest.TestCase):
         )
         self.assertAlmostEqual(calibration.price_at_y(0.4), 100.0)
 
+    def test_rejects_malformed_direct_calibration_state(self):
+        invalid_calibrations = (
+            PriceAxisCalibration("percent", -100.0, 140.0, 0.2, 0.8, 3, 0.0),
+            PriceAxisCalibration("linear", 100.0, 140.0, 0.2, 0.8, 3, 0.0),
+            PriceAxisCalibration("linear", -100.0, 140.0, float("nan"), 0.8, 3, 0.0),
+            PriceAxisCalibration("linear", -100.0, 140.0, 0.2, float("inf"), 3, 0.0),
+            PriceAxisCalibration("linear", -100.0, 140.0, 0.8, 0.2, 3, 0.0),
+            PriceAxisCalibration("linear", -100.0, float("nan"), 0.2, 0.8, 3, 0.0),
+        )
+        for calibration in invalid_calibrations:
+            with self.subTest(calibration=calibration), self.assertRaises(ValueError):
+                calibration.price_at_y(0.4)
+
+    def test_rejects_centered_reference_outside_anchor_range(self):
+        calibration = PriceAxisCalibration(
+            "linear", -100.0, 140.0, 0.2, 0.8, 3, 0.0,
+            reference_y=0.9, reference_value=100.0,
+        )
+        with self.assertRaisesRegex(ValueError, "reference_y"):
+            calibration.price_at_y(0.4)
+
+    def test_rounding_drift_at_anchor_edges_is_clamped_not_extrapolated(self):
+        calibration = calibrate_price_axis([
+            {"y": 0.2, "price": 120},
+            {"y": 0.5, "price": 90},
+            {"y": 0.8, "price": 60},
+        ])
+        self.assertAlmostEqual(
+            calibration.price_at_y(0.2 - 0.5e-9),
+            calibration.price_at_y(0.2),
+        )
+        self.assertAlmostEqual(
+            calibration.price_at_y(0.8 + 0.5e-9),
+            calibration.price_at_y(0.8),
+        )
+        with self.assertRaisesRegex(ValueError, "outside"):
+            calibration.price_at_y(0.2 - 2e-9)
+
     def test_rejects_incomplete_centered_reference_pair(self):
         for reference_fields in (
             {"reference_y": 0.5},
