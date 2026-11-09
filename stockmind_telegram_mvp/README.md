@@ -93,6 +93,10 @@ The bot now returns a second image with translucent supply (red) and demand (gre
 - Keep .env out of Git. Never commit tokens or API keys.
 
 ## Data integrity
+
+### Binance numeric payload validation
+
+The read-only Binance client validates market-data values before passing them to the research model. Kline timestamps and trade counts must be non-negative integers, candle open times must be strictly increasing, OHLC values must be positive finite decimal strings with a consistent high/low envelope, and base/quote volumes must be finite and non-negative. The 24-hour ticker must identify the requested symbol and contain a positive finite last price. Malformed successful HTTP responses are treated as provider failures rather than plausible market data. This validates response structure and numeric consistency; it does not independently verify exchange accuracy or market freshness.
 Malformed or non-object model tool arguments are contained as explicit tool errors and returned to the model for recovery; they do not terminate the user's research turn before a response can be produced. Tapetide responses must contain a JSON object with a `data` field and object-shaped metadata; a non-JSON success page, JSON array, missing data envelope or malformed metadata is treated as a provider error rather than an empty successful result. Binance candle responses must be arrays of structurally valid kline rows, and ticker responses must identify the requested symbol and include a last price.
 
 Provider failures sent back to the model are normalized: timeout, connection and HTTP-status errors do not forward raw request URLs, and unexpected exceptions are not copied verbatim into model context. Tapetide error codes and local argument-validation messages remain available for recovery. If a result contains truncation metadata, the model is instructed to treat it as a partial sample and not infer omitted rows. These guards improve response integrity but do not validate the correctness or freshness of provider market data.
@@ -185,7 +189,3 @@ The 4,000-character chunk budget is measured in UTF-16 code units so
 supplementary Unicode characters (including emoji) cannot exceed Telegram's
 entity-length accounting or be split in the middle of a code point.
 
-
-### Binance numeric payload validation
-
-The read-only Binance client validates market-data values before passing them to the research model. Kline timestamps and trade counts must be non-negative integers, candle open times must be strictly increasing, OHLC values must be positive finite decimal strings with a consistent high/low envelope, and base/quote volumes must be finite and non-negative. The 24-hour ticker must identify the requested symbol and contain a positive finite last price. Malformed successful HTTP responses are treated as provider failures rather than plausible market data. This validates response structure and numeric consistency; it does not independently verify exchange accuracy or market freshness.
