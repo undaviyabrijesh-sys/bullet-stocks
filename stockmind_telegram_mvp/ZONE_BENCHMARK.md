@@ -412,3 +412,22 @@ sent to the vision provider. To avoid decoding a large screenshot a second time,
 that internal handler uses `_render_overlay_prepared` with those same canonical
 bytes. This underscore-prefixed helper is an internal fast path; direct callers
 and offline tools should use `render_overlay`.
+
+
+## Multi-resolution pixel geometry contract
+
+Zone and plot coordinates are quantized to half-open source-image pixel bounds
+`[left, right) × [top, bottom)` by the shared overlay geometry helpers. The
+renderer adapts those bounds to Pillow's inclusive rectangle endpoints by
+subtracting one from the right and bottom edges. The evaluator scores the same
+quantized bounds, rather than the model's unrounded normalized coordinates.
+
+Regression coverage exercises even and odd screenshot dimensions (640×360,
+641×359, 1280×720 and 1920×1080), including zones touching the outer image
+edges. It checks the actual Pillow raster footprint against the half-open box
+and checks that sub-pixel coordinate differences which quantize to the same
+source pixels receive identical geometry scores. If a caller supplies
+dimensions whose coordinate scaling cannot be represented by the numeric
+runtime, the geometry helper rejects the box instead of leaking an overflow
+exception. These synthetic tests verify coordinate semantics; they are not
+evidence of market-zone detection accuracy.
