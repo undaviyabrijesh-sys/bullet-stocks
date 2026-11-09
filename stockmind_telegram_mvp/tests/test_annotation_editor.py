@@ -245,7 +245,7 @@ class AnnotationSourcePixelAlignmentTests(unittest.TestCase):
             "y_top": 713.49 / self.IMAGE_HEIGHT,
             "y_bottom": 1401.51 / self.IMAGE_HEIGHT,
         }
-        source_edges = (1235, 1402, 3002, 1402)
+        source_edges = (1235, 713, 3002, 1402)
         for render_width, render_height in self.RENDER_SIZES:
             with self.subTest(render_size=(render_width, render_height)):
                 actual = editor_box_to_canvas_coordinates(
