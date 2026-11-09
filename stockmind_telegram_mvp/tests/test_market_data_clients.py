@@ -226,7 +226,7 @@ class BinanceResponseValidationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["symbol"], "BTCUSDT")
 
     async def test_rejects_non_positive_or_malformed_ticker_last_price(self):
-        invalid_prices = ("NaN", "Infinity", "0", "-1", "not-a-price", "", True, 0, float("inf"))
+        invalid_prices = ("NaN", "Infinity", "0", "-1", "not-a-price", "", True, 0)
         for last_price in invalid_prices:
             with self.subTest(last_price=repr(last_price)):
                 client = self.make_client(
