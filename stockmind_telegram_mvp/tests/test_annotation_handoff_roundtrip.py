@@ -169,6 +169,38 @@ class AnnotationHandoffRoundTripTests(unittest.TestCase):
         self.assertEqual(scored["overall"]["false_positive"], 0)
         self.assertEqual(scored["overall"]["false_negative"], 0)
 
+    def test_changed_screenshot_after_review_and_capture_blocks_handoff(self):
+        draft, _ = load_draft_and_image(self.draft_path)
+        annotated = apply_manual_annotations(
+            draft,
+            PLOT,
+            [ZONE],
+            "ann-mutated-image",
+            annotated_at="2026-11-09T10:01:00Z",
+        )
+        annotated_path = self.inbox / "mutated.annotated.json"
+        _write_new_json(annotated_path, annotated)
+        approved = review_annotation_draft(
+            load_draft_and_image(annotated_path)[0],
+            "rev-mutated-image",
+            approve=True,
+            reviewed_at="2026-11-09T10:02:00Z",
+        )
+        reviewed_path = self.inbox / "mutated.reviewed.json"
+        _write_new_json(reviewed_path, approved)
+
+        capture_info = write_prediction_capture(reviewed_path, self._prediction())
+        capture_path = Path(capture_info["capture_file"])
+
+        intake = json.loads(self.draft_path.read_text(encoding="utf-8"))
+        image_path = self.inbox / intake["image_file"]
+        Image.new("RGB", (64, 48), "black").save(image_path, format="PNG")
+
+        with self.assertRaisesRegex(ValueError, "SHA-256"):
+            build_prediction_capture(reviewed_path, self._prediction())
+        with self.assertRaisesRegex(ValueError, "SHA-256"):
+            assemble_benchmark_fixture(reviewed_path, capture_path)
+
     def test_rejected_annotation_remains_ineligible_after_json_roundtrip(self):
         draft, _ = load_draft_and_image(self.draft_path)
         annotated = apply_manual_annotations(
