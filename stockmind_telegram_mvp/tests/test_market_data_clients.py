@@ -117,6 +117,67 @@ class BinanceResponseValidationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["data"][0]["trades"], 100)
         self.assertEqual(result["market"], "usdm")
 
+    async def test_rejects_non_finite_non_positive_or_malformed_kline_values(self):
+        base_row = [1700000000000, "1", "2", "0.5", "1.5", "10", 1700000899999, "15", 100]
+        invalid_fields = (
+            (1, "NaN"),
+            (2, "Infinity"),
+            (3, "-0.1"),
+            (4, "0"),
+            (5, "NaN"),
+            (7, "-1"),
+            (1, "1e3"),
+            (2, "9" * 65),
+        )
+        for index, value in invalid_fields:
+            with self.subTest(index=index, value=value):
+                row = list(base_row)
+                row[index] = value
+                client = self.make_client(httpx.Response(200, json=[row]))
+                with self.assertRaisesRegex(RuntimeError, "malformed kline numeric field"):
+                    await client.klines("BTCUSDT")
+
+    async def test_rejects_inconsistent_ohlc_relationships(self):
+        base_row = [1700000000000, "1", "2", "0.5", "1.5", "10", 1700000899999, "15", 100]
+        invalid_rows = []
+        high_below_open = list(base_row)
+        high_below_open[2] = "0.9"
+        invalid_rows.append(high_below_open)
+        low_above_close = list(base_row)
+        low_above_close[3] = "1.6"
+        invalid_rows.append(low_above_close)
+        low_above_high = list(base_row)
+        low_above_high[3] = "2.1"
+        invalid_rows.append(low_above_high)
+
+        for row in invalid_rows:
+            with self.subTest(row=row):
+                client = self.make_client(httpx.Response(200, json=[row]))
+                with self.assertRaisesRegex(RuntimeError, "inconsistent OHLC"):
+                    await client.klines("BTCUSDT")
+
+    async def test_rejects_invalid_timestamps_and_trade_counts(self):
+        base_row = [1700000000000, "1", "2", "0.5", "1.5", "10", 1700000899999, "15", 100]
+        invalid_fields = ((0, True), (0, -1), (6, 1), (8, True), (8, 1.5), (8, -1))
+        for index, value in invalid_fields:
+            with self.subTest(index=index, value=value):
+                row = list(base_row)
+                row[index] = value
+                client = self.make_client(httpx.Response(200, json=[row]))
+                with self.assertRaisesRegex(RuntimeError, "malformed kline timestamp or trade count"):
+                    await client.klines("BTCUSDT")
+
+    async def test_rejects_duplicate_or_out_of_order_kline_timestamps(self):
+        first = [1700000000000, "1", "2", "0.5", "1.5", "10", 1700000899999, "15", 100]
+        duplicate = list(first)
+        later = list(first)
+        later[0] += 60000
+        later[6] += 60000
+        for rows in ([first, duplicate], [later, first]):
+            client = self.make_client(httpx.Response(200, json=rows))
+            with self.assertRaisesRegex(RuntimeError, "non-chronological"):
+                await client.klines("BTCUSDT")
+
     async def test_rejects_object_error_payload_from_kline_endpoint(self):
         client = self.make_client(httpx.Response(200, json={"code": -1121, "msg": "Invalid symbol."}))
 
@@ -143,6 +204,16 @@ class BinanceResponseValidationTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["data"], payload)
         self.assertEqual(result["symbol"], "BTCUSDT")
+
+    async def test_rejects_non_positive_or_malformed_ticker_last_price(self):
+        invalid_prices = ("NaN", "Infinity", "0", "-1", "not-a-price", "", True, 0, float("inf"))
+        for last_price in invalid_prices:
+            with self.subTest(last_price=repr(last_price)):
+                client = self.make_client(
+                    httpx.Response(200, json={"symbol": "BTCUSDT", "lastPrice": last_price})
+                )
+                with self.assertRaisesRegex(RuntimeError, "unexpected ticker response"):
+                    await client.ticker("BTCUSDT")
 
     async def test_rejects_ticker_payload_for_a_different_symbol(self):
         client = self.make_client(
