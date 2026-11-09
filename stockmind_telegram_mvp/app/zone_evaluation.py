@@ -8,7 +8,7 @@ from functools import lru_cache
 import math
 
 from .overlay_engine import normalized_plot_bounds_to_pixel_box, normalized_zone_to_pixel_box
-from .price_axis import calibrate_price_axis, zone_price_bounds
+from .price_axis import calibrate_price_axis, parse_zone_price_bounds, zone_price_bounds
 from .plot_evaluation import build_plot_boundary_accuracy
 
 MAX_EVALUATED_ZONES = 8
@@ -135,6 +135,45 @@ def _price_comparison(prediction, reference, calibration):
     }
 
 
+def _reported_price_consistency(prediction, calibration):
+    """Compare the model's stated pair with prices implied by its rendered pixels."""
+    try:
+        reported_low, reported_high = parse_zone_price_bounds(prediction["zone"])
+        coordinate_bounds = zone_price_bounds(prediction["zone"], calibration)
+    except (KeyError, TypeError, ValueError) as exc:
+        return {"status": "unscored", "reason": str(exc)[:240]}
+
+    reported_bounds = {
+        "price_high": float(reported_high),
+        "price_low": float(reported_low),
+    }
+    coordinate_bounds = {
+        "price_high": float(coordinate_bounds["price_high"]),
+        "price_low": float(coordinate_bounds["price_low"]),
+    }
+    values = (
+        reported_bounds["price_high"], reported_bounds["price_low"],
+        coordinate_bounds["price_high"], coordinate_bounds["price_low"],
+    )
+    if not all(math.isfinite(value) and value > 0 for value in values):
+        return {
+            "status": "unscored",
+            "reason": "reported or coordinate-derived price bounds are not finite positive values",
+        }
+
+    high_abs = abs(reported_bounds["price_high"] - coordinate_bounds["price_high"])
+    low_abs = abs(reported_bounds["price_low"] - coordinate_bounds["price_low"])
+    return {
+        "status": "scored",
+        "reported_price_bounds": reported_bounds,
+        "coordinate_price_bounds": coordinate_bounds,
+        "price_high_abs_disagreement": high_abs,
+        "price_low_abs_disagreement": low_abs,
+        "price_high_disagreement_pct": 100 * high_abs / coordinate_bounds["price_high"],
+        "price_low_disagreement_pct": 100 * low_abs / coordinate_bounds["price_low"],
+    }
+
+
 def _price_accuracy(matches, calibration):
     if calibration is None:
         return None
@@ -150,20 +189,39 @@ def _price_accuracy(matches, calibration):
         for item in scored
         for key in ("price_high_error_pct", "price_low_error_pct")
     ]
+    reported_comparisons = [
+        match.get("reported_price_consistency") for match in matches
+    ]
+    reported_scored = [
+        item for item in reported_comparisons
+        if item and item["status"] == "scored"
+    ]
+    reported_absolute_errors = [
+        item[field]
+        for item in reported_scored
+        for field in ("price_high_abs_disagreement", "price_low_abs_disagreement")
+    ]
+    reported_percentage_errors = [
+        item[field]
+        for item in reported_scored
+        for field in ("price_high_disagreement_pct", "price_low_disagreement_pct")
+    ]
     return {
         "scale": calibration.scale,
         "anchor_count": calibration.anchor_count,
         "max_anchor_relative_error_pct": 100 * calibration.max_anchor_relative_error,
         "scored_match_count": len(scored),
         "unscored_match_count": len(comparisons) - len(scored),
-        "mean_boundary_abs_error": (
-            sum(boundary_errors) / len(boundary_errors) if boundary_errors else None
-        ),
+        "mean_boundary_abs_error": sum(boundary_errors) / len(boundary_errors) if boundary_errors else None,
         "max_boundary_abs_error": max(boundary_errors) if boundary_errors else None,
-        "mean_boundary_error_pct": (
-            sum(boundary_percent_errors) / len(boundary_percent_errors)
-            if boundary_percent_errors else None
-        ),
+        "mean_boundary_error_pct": sum(boundary_percent_errors) / len(boundary_percent_errors) if boundary_percent_errors else None,
+        "reported_price_consistency": {
+            "scored_match_count": len(reported_scored),
+            "unscored_match_count": len(reported_comparisons) - len(reported_scored),
+            "mean_boundary_abs_disagreement": sum(reported_absolute_errors) / len(reported_absolute_errors) if reported_absolute_errors else None,
+            "max_boundary_abs_disagreement": max(reported_absolute_errors) if reported_absolute_errors else None,
+            "mean_boundary_disagreement_pct": sum(reported_percentage_errors) / len(reported_percentage_errors) if reported_percentage_errors else None,
+        },
     }
 
 
@@ -385,6 +443,9 @@ def evaluate_zone_predictions(
                 "center_error_normalized": center_error,
                 "price_comparison": (
                     _price_comparison(pred, ref, calibration) if calibration else None
+                ),
+                "reported_price_consistency": (
+                    _reported_price_consistency(pred, calibration) if calibration else None
                 ),
             }
             matches.append(match)
