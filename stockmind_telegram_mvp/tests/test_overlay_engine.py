@@ -469,5 +469,67 @@ class ExifOrientationMatrixTests(unittest.TestCase):
 
 
 
+    def test_half_open_pixel_footprint_matches_pillow_at_multiple_resolutions(self):
+        interior = {
+            "zone_type": "demand", "draw_overlay": True,
+            "x_start": 0.123, "x_end": 0.987,
+            "y_top": 0.111, "y_bottom": 0.444,
+        }
+        edge = {
+            "zone_type": "supply", "draw_overlay": True,
+            "x_start": 0.0, "x_end": 1.0,
+            "y_top": 0.0, "y_bottom": 0.45,
+        }
+        for width, height in ((640, 360), (641, 359), (1280, 720), (1920, 1080)):
+            for zone in (interior, edge):
+                with self.subTest(size=(width, height), zone=zone["zone_type"]):
+                    pixel_box = normalized_zone_to_pixel_box(zone, width, height)
+                    self.assertIsNotNone(pixel_box)
+                    left, top, right, bottom = pixel_box
+                    self.assertLessEqual(0, left)
+                    self.assertLessEqual(0, top)
+                    self.assertLessEqual(right, width)
+                    self.assertLessEqual(bottom, height)
+
+                    with patch.object(
+                        overlay_engine.ImageDraw.ImageDraw,
+                        "rectangle",
+                        autospec=True,
+                    ) as draw_rectangle:
+                        rendered, count = render_overlay(
+                            sample_image(size=(width, height)), [zone]
+                        )
+                    self.assertEqual(count, 1)
+                    self.assertIsNotNone(rendered)
+                    self.assertEqual(
+                        draw_rectangle.call_args.args[1],
+                        overlay_engine._pillow_rectangle_bounds(pixel_box),
+                    )
+
+                    # Pillow's rectangle endpoints are inclusive. The adapter
+                    # must produce exactly the half-open pixel footprint used
+                    # by the evaluator, including zones touching image edges.
+                    mask = Image.new("1", (width, height), 0)
+                    overlay_engine.ImageDraw.Draw(mask).rectangle(
+                        overlay_engine._pillow_rectangle_bounds(pixel_box),
+                        fill=1,
+                    )
+                    self.assertEqual(mask.getbbox(), pixel_box)
+
+    def test_pixel_scaling_rejects_dimensions_beyond_float_range(self):
+        huge_dimension = 10 ** 400
+        zone = {
+            "zone_type": "demand", "draw_overlay": True,
+            "x_start": 0.2, "x_end": 0.8,
+            "y_top": 0.2, "y_bottom": 0.4,
+        }
+        bounds = {
+            "x_start": 0.1, "x_end": 0.9,
+            "y_top": 0.1, "y_bottom": 0.9,
+        }
+        self.assertIsNone(normalized_zone_to_pixel_box(zone, huge_dimension, 360))
+        self.assertIsNone(normalized_plot_bounds_to_pixel_box(bounds, 640, huge_dimension))
+
+
 if __name__ == "__main__":
     unittest.main()
