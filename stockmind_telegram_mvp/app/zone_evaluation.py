@@ -163,14 +163,21 @@ def _reported_price_consistency(prediction, calibration):
 
     high_abs = abs(reported_bounds["price_high"] - coordinate_bounds["price_high"])
     low_abs = abs(reported_bounds["price_low"] - coordinate_bounds["price_low"])
+    high_pct = 100 * high_abs / coordinate_bounds["price_high"]
+    low_pct = 100 * low_abs / coordinate_bounds["price_low"]
+    if not all(math.isfinite(value) for value in (high_abs, low_abs, high_pct, low_pct)):
+        return {
+            "status": "unscored",
+            "reason": "reported-price disagreement exceeds the supported numeric range",
+        }
     return {
         "status": "scored",
         "reported_price_bounds": reported_bounds,
         "coordinate_price_bounds": coordinate_bounds,
         "price_high_abs_disagreement": high_abs,
         "price_low_abs_disagreement": low_abs,
-        "price_high_disagreement_pct": 100 * high_abs / coordinate_bounds["price_high"],
-        "price_low_disagreement_pct": 100 * low_abs / coordinate_bounds["price_low"],
+        "price_high_disagreement_pct": high_pct,
+        "price_low_disagreement_pct": low_pct,
     }
 
 
