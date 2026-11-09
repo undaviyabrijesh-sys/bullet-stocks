@@ -17,16 +17,34 @@ from stockmind_telegram_mvp.app.strict_json import loads as strict_json_loads
 
 
 class CryptoCandleConfirmationTests(unittest.TestCase):
+    @staticmethod
+    def candle(**overrides):
+        row = {
+            "open_time": 900,
+            "open": "100.0",
+            "high": "102.0",
+            "low": "98.0",
+            "close": "101.0",
+            "volume": "1.0",
+            "close_time": 1000,
+            "quote_volume": "101.0",
+            "trades": 3,
+            "is_closed": False,
+            "candle_status": "forming",
+        }
+        row.update(overrides)
+        return row
+
     def test_unverified_clock_overrides_provider_closed_flags(self):
         result = _normalize_crypto_klines_for_model({
             "clock_source": "unverified",
             "as_of_ms": 1700000000000,
             "clock_uncertainty_ms": None,
-            "data": [{
-                "close_time": 1699999999999,
-                "is_closed": True,
-                "candle_status": "closed",
-            }],
+            "data": [self.candle(
+                close_time=1699999999999,
+                is_closed=True,
+                candle_status="closed",
+            )],
         })
 
         self.assertEqual(result["clock_source"], "unverified")
@@ -41,40 +59,42 @@ class CryptoCandleConfirmationTests(unittest.TestCase):
             "as_of_ms": 1000,
             "clock_uncertainty_ms": 2,
             "data": [
-                {"close_time": 999, "is_closed": False, "candle_status": "forming"},
-                {"close_time": 1000, "is_closed": True, "candle_status": "closed"},
-                {"close_time": 1001, "is_closed": True, "candle_status": "closed"},
-                {"close_time": True, "is_closed": True, "candle_status": "closed"},
+                self.candle(close_time=999, is_closed=False, candle_status="forming"),
+                self.candle(close_time=1000, is_closed=True, candle_status="closed"),
+                self.candle(close_time=1001, is_closed=True, candle_status="closed"),
             ],
         })
 
         self.assertEqual(
             [row["candle_status"] for row in result["data"]],
-            ["closed", "forming", "forming", "unverified"],
+            ["closed", "forming", "forming"],
         )
         self.assertEqual(
             [row["is_closed"] for row in result["data"]],
-            [True, False, False, False],
+            [True, False, False],
         )
         self.assertEqual(result["candle_confirmation"]["confirmed_closed_rows"], 1)
-        self.assertEqual(result["candle_confirmation"]["unconfirmed_rows"], 3)
+        self.assertEqual(result["candle_confirmation"]["unconfirmed_rows"], 2)
 
     def test_invalid_server_time_metadata_fails_closed(self):
         invalid_clocks = [
-            {"clock_source": "binance_server_time", "as_of_ms": None},
-            {"clock_source": "binance_server_time", "as_of_ms": True},
-            {"clock_source": "binance_server_time", "as_of_ms": 0},
-            {"clock_source": "local_clock", "as_of_ms": 1000},
+            {"clock_source": "binance_server_time", "as_of_ms": None, "clock_uncertainty_ms": 0},
+            {"clock_source": "binance_server_time", "as_of_ms": True, "clock_uncertainty_ms": 0},
+            {"clock_source": "binance_server_time", "as_of_ms": 0, "clock_uncertainty_ms": 0},
+            {"clock_source": "binance_server_time", "as_of_ms": 1000, "clock_uncertainty_ms": None},
+            {"clock_source": "binance_server_time", "as_of_ms": 1000, "clock_uncertainty_ms": True},
+            {"clock_source": "binance_server_time", "as_of_ms": 1000, "clock_uncertainty_ms": -1},
+            {"clock_source": "local_clock", "as_of_ms": 1000, "clock_uncertainty_ms": 0},
         ]
         for clock in invalid_clocks:
             with self.subTest(clock=clock):
                 result = _normalize_crypto_klines_for_model({
                     **clock,
-                    "data": [{
-                        "close_time": 999,
-                        "is_closed": True,
-                        "candle_status": "closed",
-                    }],
+                    "data": [self.candle(
+                        close_time=999,
+                        is_closed=True,
+                        candle_status="closed",
+                    )],
                 })
                 self.assertEqual(result["clock_source"], "unverified")
                 self.assertIsNone(result["as_of_ms"])
@@ -88,7 +108,11 @@ class CryptoCandleConfirmationTests(unittest.TestCase):
             [],
             {},
             {"data": None},
-            {"data": [{"close_time": 999}, "not-a-candle"]},
+            {"data": [self.candle(), "not-a-candle"]},
+            {"data": [{"close_time": 999}]},
+            {"data": [self.candle(close_time=True)]},
+            {"data": [self.candle(high="99.0")]},
+            {"data": [self.candle(volume="NaN")]},
         ]
         for payload in malformed_payloads:
             with self.subTest(payload=payload):
