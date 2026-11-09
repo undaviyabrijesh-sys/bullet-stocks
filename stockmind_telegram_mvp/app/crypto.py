@@ -1,4 +1,5 @@
 import re
+import time
 from decimal import Decimal, InvalidOperation
 
 import httpx
@@ -70,6 +71,9 @@ class BinanceMarketData:
         )
         if not isinstance(rows, list):
             raise RuntimeError("Binance returned an unexpected kline response.")
+        # Capture one UTC wall-clock timestamp for the entire response so candle
+        # closure flags are internally consistent, even across a minute boundary.
+        as_of_ms = time.time_ns() // 1_000_000
         if any(not isinstance(row, (list, tuple)) or len(row) < 9 for row in rows):
             raise RuntimeError("Binance returned a malformed kline row.")
 
@@ -121,10 +125,13 @@ class BinanceMarketData:
             "data": [
                 {"open_time": row[0], "open": row[1], "high": row[2], "low": row[3],
                  "close": row[4], "volume": row[5], "close_time": row[6],
-                 "quote_volume": row[7], "trades": row[8]}
+                 "quote_volume": row[7], "trades": row[8],
+                 "is_closed": row[6] < as_of_ms,
+                 "candle_status": "closed" if row[6] < as_of_ms else "forming"}
                 for row in validated_rows
             ],
-            "note": "The final candle may still be forming; do not treat it as closed until close_time has passed."
+            "as_of_ms": as_of_ms,
+            "note": "Each candle's is_closed flag is evaluated against this response's as_of_ms timestamp."
         }
 
     async def ticker(self, symbol: str, market: str = "spot"):

@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import httpx
 
@@ -116,6 +116,26 @@ class BinanceResponseValidationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["data"][0]["close"], "1.5")
         self.assertEqual(result["data"][0]["trades"], 100)
         self.assertEqual(result["market"], "usdm")
+
+    async def test_marks_closed_and_forming_klines_against_one_response_timestamp(self):
+        first = [1700000000000, "1", "2", "0.5", "1.5", "10", 1700000899999, "15", 100]
+        boundary = [1700000900000, "1", "2", "0.5", "1.5", "10", 1700000900000, "15", 100]
+        as_of_ms = 1700000900000
+        client = self.make_client(httpx.Response(200, json=[first, boundary]))
+
+        with patch(
+            "stockmind_telegram_mvp.app.crypto.time.time_ns",
+            return_value=as_of_ms * 1_000_000,
+        ) as clock:
+            result = await client.klines("BTCUSDT", interval="1m")
+
+        self.assertEqual(result["as_of_ms"], as_of_ms)
+        self.assertEqual([row["is_closed"] for row in result["data"]], [True, False])
+        self.assertEqual(
+            [row["candle_status"] for row in result["data"]],
+            ["closed", "forming"],
+        )
+        clock.assert_called_once_with()
 
     async def test_rejects_non_finite_non_positive_or_malformed_kline_values(self):
         base_row = [1700000000000, "1", "2", "0.5", "1.5", "10", 1700000899999, "15", 100]
