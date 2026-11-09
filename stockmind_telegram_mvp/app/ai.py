@@ -3,6 +3,8 @@ import base64
 import hashlib
 import json
 import math
+import re
+from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone
 
 import httpx
@@ -696,8 +698,62 @@ TOOLS = [
 ]
 
 
+def _crypto_decimal(value, *, allow_zero=False):
+    """Parse a finite plain-decimal string from a Binance kline row."""
+    if (
+        not isinstance(value, str)
+        or len(value) > 64
+        or re.fullmatch(r"[0-9]+(?:\\.[0-9]+)?", value) is None
+    ):
+        return None
+    try:
+        number = Decimal(value)
+    except InvalidOperation:
+        return None
+    if not number.is_finite() or (number < 0 if allow_zero else number <= 0):
+        return None
+    return number
+
+
+def _is_valid_crypto_kline_row(row):
+    """Validate the complete adapter candle shape before model exposure."""
+    required = {
+        "open_time", "open", "high", "low", "close",
+        "volume", "close_time", "quote_volume", "trades",
+    }
+    if not isinstance(row, dict) or not required.issubset(row):
+        return False
+
+    open_time, close_time, trades = (
+        row["open_time"], row["close_time"], row["trades"]
+    )
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or value < 0
+        for value in (open_time, close_time, trades)
+    ) or close_time < open_time:
+        return False
+
+    open_price = _crypto_decimal(row["open"])
+    high_price = _crypto_decimal(row["high"])
+    low_price = _crypto_decimal(row["low"])
+    close_price = _crypto_decimal(row["close"])
+    volume = _crypto_decimal(row["volume"], allow_zero=True)
+    quote_volume = _crypto_decimal(row["quote_volume"], allow_zero=True)
+    if any(
+        value is None
+        for value in (
+            open_price, high_price, low_price, close_price, volume, quote_volume
+        )
+    ):
+        return False
+    return (
+        high_price >= max(open_price, low_price, close_price)
+        and low_price <= min(open_price, high_price, close_price)
+    )
+
+
 def _normalize_crypto_klines_for_model(result):
-    """Recompute Binance candle closure at the model boundary; fail closed on bad payloads."""
+    """Recompute Binance candle closure and validate full rows at the model boundary."""
     def invalid_result(message):
         return {
             "source": "Binance",
@@ -726,16 +782,22 @@ def _normalize_crypto_klines_for_model(result):
     rows = result.get("data")
     if not isinstance(rows, list):
         return invalid_result("Binance kline data is not an array; candle data was withheld.")
-    if any(not isinstance(row, dict) for row in rows):
-        return invalid_result("Binance kline data contains malformed rows; all candle data was withheld.")
+    if any(not _is_valid_crypto_kline_row(row) for row in rows):
+        return invalid_result(
+            "Binance kline data contains malformed candle rows; all candle data was withheld."
+        )
 
     normalized = dict(result)
     as_of_ms = result.get("as_of_ms")
+    clock_uncertainty_ms = result.get("clock_uncertainty_ms")
     clock_verified = (
         result.get("clock_source") == "binance_server_time"
         and isinstance(as_of_ms, int)
         and not isinstance(as_of_ms, bool)
         and as_of_ms > 0
+        and isinstance(clock_uncertainty_ms, int)
+        and not isinstance(clock_uncertainty_ms, bool)
+        and clock_uncertainty_ms >= 0
     )
 
     if not clock_verified:
@@ -757,28 +819,14 @@ def _normalize_crypto_klines_for_model(result):
     confirmed_count = 0
     normalized_rows = []
     for row in rows:
-        if not isinstance(row, dict):
-            normalized_rows.append(row)
-            continue
-
-        close_time = row.get("close_time")
-        valid_close_time = (
-            isinstance(close_time, int)
-            and not isinstance(close_time, bool)
-            and close_time >= 0
-        )
-        is_closed = valid_close_time and close_time < as_of_ms
+        close_time = row["close_time"]
+        is_closed = close_time < as_of_ms
         if is_closed:
             confirmed_count += 1
-        status = (
-            "closed" if is_closed
-            else "forming" if valid_close_time
-            else "unverified"
-        )
         normalized_rows.append({
             **row,
             "is_closed": is_closed,
-            "candle_status": status,
+            "candle_status": "closed" if is_closed else "forming",
         })
 
     normalized["data"] = normalized_rows
