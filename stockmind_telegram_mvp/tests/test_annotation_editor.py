@@ -951,6 +951,49 @@ class DraftImageVerificationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "safe relative path"):
                 load_draft_and_image(draft_path)
 
+    def test_rejects_non_string_and_nonportable_relative_image_paths(self):
+        invalid_paths = (
+            None,
+            7,
+            [],
+            "",
+            "images/./chart.png",
+            "images//chart.png",
+            "images\\\\chart.png",
+        )
+        for image_file in invalid_paths:
+            with self.subTest(image_file=image_file), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                draft = _draft()
+                draft["image_file"] = image_file
+                draft_path = root / "chart.draft.json"
+                draft_path.write_text(json.dumps(draft), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "safe relative path"):
+                    load_draft_and_image(draft_path)
+
+    def test_rejects_image_symlink_that_escapes_draft_directory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            outside = root / "outside"
+            outside.mkdir()
+            images_link = root / "images"
+            try:
+                images_link.symlink_to(outside, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("directory symlinks are unavailable on this platform")
+            image_bytes = self._png()
+            (outside / "chart.png").write_bytes(image_bytes)
+            draft = _draft()
+            draft["image_file"] = "images/chart.png"
+            draft["image_sha256"] = hashlib.sha256(image_bytes).hexdigest()
+            draft["image_width"] = 32
+            draft["image_height"] = 24
+            draft_path = root / "chart.draft.json"
+            draft_path.write_text(json.dumps(draft), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "remain inside the draft directory"):
+                load_draft_and_image(draft_path)
+
 
 class AnnotationEditorCliExitTests(unittest.TestCase):
     def _run_editor(self, mode, *, save_output, external_output=False):

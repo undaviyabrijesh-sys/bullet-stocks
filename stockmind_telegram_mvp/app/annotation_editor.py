@@ -528,8 +528,18 @@ def load_draft_and_image(draft_path, image_path=None):
         raise ValueError("unsupported annotation draft schema")
 
     if image_path is None:
-        relative = PurePosixPath(draft.get("image_file", ""))
-        if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+        image_file = draft.get("image_file")
+        if (
+            not isinstance(image_file, str)
+            or not image_file
+            or "\\" in image_file
+        ):
+            raise ValueError("draft image_file must be a safe relative path")
+        raw_parts = image_file.split("/")
+        if any(part in {"", ".", ".."} for part in raw_parts):
+            raise ValueError("draft image_file must be a safe relative path")
+        relative = PurePosixPath(image_file)
+        if relative.is_absolute() or not relative.parts:
             raise ValueError("draft image_file must be a safe relative path")
         image_path = draft_path.parent.joinpath(*relative.parts)
         try:
