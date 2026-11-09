@@ -11,8 +11,75 @@ from stockmind_telegram_mvp.app.ai import (
     _canonical_tool_arguments,
     _parse_tool_arguments,
     _serialize_tool_result,
+    _normalize_crypto_klines_for_model,
 )
 from stockmind_telegram_mvp.app.strict_json import loads as strict_json_loads
+
+
+class CryptoCandleConfirmationTests(unittest.TestCase):
+    def test_unverified_clock_overrides_provider_closed_flags(self):
+        result = _normalize_crypto_klines_for_model({
+            "clock_source": "unverified",
+            "as_of_ms": 1700000000000,
+            "clock_uncertainty_ms": None,
+            "data": [{
+                "close_time": 1699999999999,
+                "is_closed": True,
+                "candle_status": "closed",
+            }],
+        })
+
+        self.assertEqual(result["clock_source"], "unverified")
+        self.assertIsNone(result["as_of_ms"])
+        self.assertIsNone(result["clock_uncertainty_ms"])
+        self.assertFalse(result["data"][0]["is_closed"])
+        self.assertEqual(result["data"][0]["candle_status"], "unverified")
+
+    def test_verified_clock_recomputes_closed_status_from_close_time(self):
+        result = _normalize_crypto_klines_for_model({
+            "clock_source": "binance_server_time",
+            "as_of_ms": 1000,
+            "clock_uncertainty_ms": 2,
+            "data": [
+                {"close_time": 999, "is_closed": False, "candle_status": "forming"},
+                {"close_time": 1000, "is_closed": True, "candle_status": "closed"},
+                {"close_time": 1001, "is_closed": True, "candle_status": "closed"},
+                {"close_time": True, "is_closed": True, "candle_status": "closed"},
+            ],
+        })
+
+        self.assertEqual(
+            [row["candle_status"] for row in result["data"]],
+            ["closed", "forming", "forming", "unverified"],
+        )
+        self.assertEqual(
+            [row["is_closed"] for row in result["data"]],
+            [True, False, False, False],
+        )
+        self.assertEqual(result["candle_confirmation"]["confirmed_closed_rows"], 1)
+        self.assertEqual(result["candle_confirmation"]["unconfirmed_rows"], 3)
+
+    def test_invalid_server_time_metadata_fails_closed(self):
+        invalid_clocks = [
+            {"clock_source": "binance_server_time", "as_of_ms": None},
+            {"clock_source": "binance_server_time", "as_of_ms": True},
+            {"clock_source": "binance_server_time", "as_of_ms": 0},
+            {"clock_source": "local_clock", "as_of_ms": 1000},
+        ]
+        for clock in invalid_clocks:
+            with self.subTest(clock=clock):
+                result = _normalize_crypto_klines_for_model({
+                    **clock,
+                    "data": [{
+                        "close_time": 999,
+                        "is_closed": True,
+                        "candle_status": "closed",
+                    }],
+                })
+                self.assertEqual(result["clock_source"], "unverified")
+                self.assertIsNone(result["as_of_ms"])
+                self.assertFalse(result["data"][0]["is_closed"])
+                self.assertEqual(result["data"][0]["candle_status"], "unverified")
 
 
 class AIClientConfigurationTests(unittest.TestCase):
@@ -344,6 +411,58 @@ class ToolBudgetExecutionTests(unittest.IsolatedAsyncioTestCase):
         research.market_data = market_data
         research.crypto_data = crypto_data
         return research
+
+    async def test_crypto_tool_result_is_rechecked_before_model_receives_it(self):
+        call = self.make_call(
+            1,
+            name="get_crypto_klines",
+            arguments='{"symbol":"BTCUSDT"}',
+        )
+        first_message = SimpleNamespace(
+            tool_calls=[call],
+            content=None,
+            model_dump=lambda **kwargs: self.assistant_dump([call]),
+        )
+        final_message = SimpleNamespace(
+            tool_calls=[],
+            content="The candle is unverified; no confirmed structure break can be inferred.",
+        )
+        create = AsyncMock(
+            side_effect=[
+                self.make_response(first_message),
+                self.make_response(final_message),
+            ]
+        )
+        klines = AsyncMock(return_value={
+            "source": "Binance",
+            "market": "spot",
+            "symbol": "BTCUSDT",
+            "interval": "15m",
+            "clock_source": "unverified",
+            "as_of_ms": 1700000000000,
+            "clock_uncertainty_ms": None,
+            "data": [{
+                "close_time": 1699999999999,
+                "is_closed": True,
+                "candle_status": "closed",
+            }],
+        })
+        research = self.make_research(
+            create, SimpleNamespace(), SimpleNamespace(klines=klines)
+        )
+
+        await research.answer([], "Check BTC structure")
+
+        tool_messages = [
+            item for item in create.await_args_list[1].kwargs["messages"]
+            if item.get("role") == "tool"
+        ]
+        self.assertEqual(len(tool_messages), 1)
+        payload = json.loads(tool_messages[0]["content"])
+        self.assertEqual(payload["clock_source"], "unverified")
+        self.assertIsNone(payload["as_of_ms"])
+        self.assertFalse(payload["data"][0]["is_closed"])
+        self.assertEqual(payload["data"][0]["candle_status"], "unverified")
 
     async def test_identical_tool_requests_in_one_batch_execute_provider_once(self):
         calls = [
