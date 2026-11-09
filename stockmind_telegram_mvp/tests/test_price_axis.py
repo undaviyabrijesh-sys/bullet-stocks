@@ -74,6 +74,22 @@ class PriceAxisCalibrationTests(unittest.TestCase):
         )
         self.assertAlmostEqual(calibration.price_at_y(0.4), 100.0)
 
+    def test_rejects_incomplete_centered_reference_pair(self):
+        for reference_fields in (
+            {"reference_y": 0.5},
+            {"reference_value": 100.0},
+        ):
+            with self.subTest(reference_fields=reference_fields):
+                calibration = PriceAxisCalibration(
+                    "linear", -100.0, 140.0, 0.2, 0.8, 3, 0.0,
+                    **reference_fields,
+                )
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "requires both reference_y and reference_value",
+                ):
+                    calibration.price_at_y(0.4)
+
     def test_log_axis_maps_exponential_price_scale(self):
         anchors = [
             {"y": y, "price": 1000 * math.exp(-2 * y)}
@@ -82,6 +98,32 @@ class PriceAxisCalibrationTests(unittest.TestCase):
         calibration = calibrate_price_axis(anchors, scale="log")
         self.assertAlmostEqual(calibration.price_at_y(0.6), 1000 * math.exp(-1.2))
         self.assertEqual(calibration.scale, "log")
+
+    def test_log_axis_zone_bounds_use_centered_reference_when_zero_intercept_cannot_be_exponentiated(self):
+        anchors = [
+            {"y": 0.9, "price": 1e308},
+            {"y": 0.95, "price": 1e307},
+            {"y": 1.0, "price": 1e306},
+        ]
+        calibration = calibrate_price_axis(anchors, scale="log")
+
+        # The fitted log-intercept is finite, but exp(intercept) is outside
+        # float range. In-range prices must still use the centered reference.
+        self.assertGreater(calibration.intercept, math.log(sys.float_info.max))
+        bounds = zone_price_bounds(
+            {"y_top": 0.91, "y_bottom": 0.99},
+            calibration,
+        )
+
+        self.assertTrue(math.isfinite(bounds["price_high"]))
+        self.assertTrue(math.isfinite(bounds["price_low"]))
+        self.assertGreater(bounds["price_high"], bounds["price_low"])
+        self.assertTrue(math.isclose(
+            bounds["price_high"], 6.30957344480203e307, rel_tol=1e-12
+        ))
+        self.assertTrue(math.isclose(
+            bounds["price_low"], 1.584893192461162e306, rel_tol=1e-12
+        ))
 
     def test_linear_calibration_scales_large_finite_anchor_prices_before_fitting(self):
         anchors = [
