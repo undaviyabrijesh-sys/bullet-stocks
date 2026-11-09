@@ -260,10 +260,13 @@ Price-axis calibration:
 - fits either a linear price axis or a linear fit in log-price space;
 - rejects reversed/non-monotonic anchors and fits whose maximum anchor residual exceeds 2% by default (the caller may set a stricter tolerance, up to 10%);
 - never extrapolates beyond the first/last anchor y-coordinate;
-- reports matched-zone high/low boundary error in price units and as a percentage, separately from IoU;
+- reports matched-zone high/low boundary error from normalized, pixel-rounded geometry in price units and as a percentage, separately from IoU;
+- separately compares the model's stated `price_low`/`price_high` with the prices implied by those same pixel-rounded overlay coordinates, reporting absolute and percentage disagreement plus scored/unscored counts;
 - marks a matched zone as unscored if either boundary falls outside the calibrated y range rather than guessing a price.
 
 This is a manual calibration and scoring tool, not automatic axis OCR. Anchor y-coordinates must use the same full-image coordinate frame as the AI and reference rectangles. Keep the screenshot, anchors and annotations together in the fixture record. Do not mix anchors from another panel, crop, symbol or timeframe.
+
+For each matched zone, `price_accuracy` keeps two measurements separate: (1) geometry price error, which compares the model's pixel-rounded rectangle with the manually annotated rectangle after axis calibration; and (2) `reported_price_consistency`, which compares the model's stated numeric bounds with prices derived from its own pixel-rounded rectangle. The second metric detects a model response whose drawn rectangle and written price labels contradict one another. It is unscored when either reported price is missing/invalid or a boundary falls outside the manually calibrated y range; no extrapolation or guessed values are used. These reported-label consistency counts apply to matched zones only, not unmatched false-positive predictions. Paired reports show baseline, candidate and candidate-minus-baseline deltas for this metric. It does not establish that the manually read axis labels or the underlying zone interpretation are correct.
 
 ## Important limitations
 
