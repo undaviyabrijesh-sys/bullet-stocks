@@ -97,9 +97,13 @@ def _validate_metric_consistency(row, matches, label):
 
 
 def _validate_price_accuracy(price, matches, label):
-    """Validate per-match price errors and their fixture-level summary."""
+    """Recompute geometric price errors and model-label/coordinate consistency."""
     if price is None:
-        if any(match.get("price_comparison") is not None for match in matches):
+        if any(
+            match.get("price_comparison") is not None
+            or match.get("reported_price_consistency") is not None
+            for match in matches
+        ):
             raise ValueError(f"{label} omits price_accuracy but contains price comparisons")
         return
 
@@ -109,7 +113,7 @@ def _validate_price_accuracy(price, matches, label):
         "scale", "anchor_count", "max_anchor_relative_error_pct",
         "scored_match_count", "unscored_match_count",
         "mean_boundary_abs_error", "max_boundary_abs_error",
-        "mean_boundary_error_pct",
+        "mean_boundary_error_pct", "reported_price_consistency",
     }
     missing = sorted(required - set(price))
     if missing:
@@ -152,7 +156,7 @@ def _validate_price_accuracy(price, matches, label):
             if not isinstance(value, dict):
                 raise ValueError(f"{label} match {index}.{side} must be an object")
             high, low = value.get("price_high"), value.get("price_low")
-            if not _finite(high) or not _finite(low) or low <= 0 or high < low:
+            if not _finite(high) or not _finite(low) or low <= 0 or high <= low:
                 raise ValueError(f"{label} match {index}.{side} has invalid positive price bounds")
             bounds[side] = (float(high), float(low))
 
@@ -187,6 +191,109 @@ def _validate_price_accuracy(price, matches, label):
     for field, expected in expected_summary.items():
         if not _same_metric(price[field], expected):
             raise ValueError(f"{label}.{field} does not match per-zone price errors")
+
+    reported_summary = price["reported_price_consistency"]
+    if not isinstance(reported_summary, dict):
+        raise ValueError(f"{label}.reported_price_consistency must be an object")
+    reported_required = {
+        "scored_match_count", "unscored_match_count",
+        "mean_boundary_abs_disagreement", "max_boundary_abs_disagreement",
+        "mean_boundary_disagreement_pct",
+    }
+    reported_missing = sorted(reported_required - set(reported_summary))
+    if reported_missing:
+        raise ValueError(
+            f"{label}.reported_price_consistency is missing fields: "
+            f"{', '.join(reported_missing)}"
+        )
+    reported_scored_count = 0
+    reported_unscored_count = 0
+    reported_absolute_errors = []
+    reported_percentage_errors = []
+    for index, match in enumerate(matches):
+        comparison = match.get("reported_price_consistency")
+        if not isinstance(comparison, dict):
+            raise ValueError(
+                f"{label} match {index} is missing reported-price consistency evidence"
+            )
+        status = comparison.get("status")
+        if status == "unscored":
+            if not isinstance(comparison.get("reason"), str) or not comparison["reason"].strip():
+                raise ValueError(
+                    f"{label} match {index} has no reported-price unscored reason"
+                )
+            reported_unscored_count += 1
+            continue
+        if status != "scored":
+            raise ValueError(
+                f"{label} match {index} has an invalid reported-price consistency status"
+            )
+
+        bounds = {}
+        for side in ("reported_price_bounds", "coordinate_price_bounds"):
+            value = comparison.get(side)
+            if not isinstance(value, dict):
+                raise ValueError(f"{label} match {index}.{side} must be an object")
+            high, low = value.get("price_high"), value.get("price_low")
+            if not _finite(high) or not _finite(low) or low <= 0 or high <= low:
+                raise ValueError(
+                    f"{label} match {index}.{side} has invalid positive ordered bounds"
+                )
+            bounds[side] = (float(high), float(low))
+
+        reported_high, reported_low = bounds["reported_price_bounds"]
+        coordinate_high, coordinate_low = bounds["coordinate_price_bounds"]
+        expected_disagreements = {
+            "price_high_abs_disagreement": abs(reported_high - coordinate_high),
+            "price_low_abs_disagreement": abs(reported_low - coordinate_low),
+            "price_high_disagreement_pct": (
+                100 * abs(reported_high - coordinate_high) / coordinate_high
+            ),
+            "price_low_disagreement_pct": (
+                100 * abs(reported_low - coordinate_low) / coordinate_low
+            ),
+        }
+        for field, expected in expected_disagreements.items():
+            if not _same_metric(comparison.get(field), expected):
+                raise ValueError(
+                    f"{label} match {index}.{field} does not match reported and coordinate bounds"
+                )
+        reported_absolute_errors.extend((
+            expected_disagreements["price_high_abs_disagreement"],
+            expected_disagreements["price_low_abs_disagreement"],
+        ))
+        reported_percentage_errors.extend((
+            expected_disagreements["price_high_disagreement_pct"],
+            expected_disagreements["price_low_disagreement_pct"],
+        ))
+        reported_scored_count += 1
+
+    if (
+        reported_scored_count != reported_summary["scored_match_count"]
+        or reported_unscored_count != reported_summary["unscored_match_count"]
+        or reported_scored_count + reported_unscored_count != len(matches)
+    ):
+        raise ValueError(
+            f"{label}.reported_price_consistency counts do not match per-zone results"
+        )
+    expected_reported_summary = {
+        "mean_boundary_abs_disagreement": (
+            sum(reported_absolute_errors) / len(reported_absolute_errors)
+            if reported_absolute_errors else None
+        ),
+        "max_boundary_abs_disagreement": (
+            max(reported_absolute_errors) if reported_absolute_errors else None
+        ),
+        "mean_boundary_disagreement_pct": (
+            sum(reported_percentage_errors) / len(reported_percentage_errors)
+            if reported_percentage_errors else None
+        ),
+    }
+    for field, expected in expected_reported_summary.items():
+        if not _same_metric(reported_summary[field], expected):
+            raise ValueError(
+                f"{label}.reported_price_consistency.{field} does not match per-zone results"
+            )
 
 
 def _aggregate_values_match(actual, expected):
@@ -552,14 +659,16 @@ def _compare_macro_metrics(baseline, candidate):
 
 
 def _compare_price(baseline, candidate):
-    fields = (
-        "calibrated_fixture_count", "scored_zone_count", "unscored_zone_count",
-        "mean_boundary_abs_error", "max_boundary_abs_error", "mean_boundary_error_pct"
-    )
     if baseline is None and candidate is None:
         return None
     baseline, candidate = baseline or {}, candidate or {}
-    return {
+    fields = (
+        "calibrated_fixture_count", "scored_zone_count", "unscored_zone_count",
+        "mean_boundary_abs_error", "max_boundary_abs_error", "mean_boundary_error_pct",
+        "scale", "anchor_count", "max_anchor_relative_error_pct",
+        "scored_match_count", "unscored_match_count",
+    )
+    result = {
         field: {
             "baseline": baseline.get(field),
             "candidate": candidate.get(field),
@@ -567,6 +676,24 @@ def _compare_price(baseline, candidate):
         }
         for field in fields
     }
+    reported_fields = (
+        "scored_match_count", "unscored_match_count",
+        "mean_boundary_abs_disagreement", "max_boundary_abs_disagreement",
+        "mean_boundary_disagreement_pct",
+    )
+    baseline_reported = baseline.get("reported_price_consistency") or {}
+    candidate_reported = candidate.get("reported_price_consistency") or {}
+    result["reported_price_consistency"] = {
+        field: {
+            "baseline": baseline_reported.get(field),
+            "candidate": candidate_reported.get(field),
+            "delta": _delta(
+                baseline_reported.get(field), candidate_reported.get(field)
+            ),
+        }
+        for field in reported_fields
+    }
+    return result
 
 
 def _compare_context(baseline_fixtures, candidate_fixtures, field):
