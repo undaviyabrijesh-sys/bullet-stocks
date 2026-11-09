@@ -5,6 +5,7 @@ import unittest
 from decimal import Decimal
 
 from stockmind_telegram_mvp.app.price_axis import (
+    PriceAxisCalibration,
     calibrate_price_axis,
     parse_zone_price_bounds,
     zone_price_bounds,
@@ -37,6 +38,37 @@ class PriceAxisCalibrationTests(unittest.TestCase):
         self.assertAlmostEqual(calibration.price_at_y(0.4), 100)
         self.assertAlmostEqual(calibration.max_anchor_relative_error, 0)
         self.assertEqual(calibration.anchor_count, 3)
+
+    def test_linear_calibration_keeps_valid_region_when_y_zero_intercept_overflows(self):
+        anchors = [
+            {"y": 0.9, "price": 1.7e308},
+            {"y": 0.95, "price": 1.65e308},
+            {"y": 1.0, "price": 1.6e308},
+        ]
+
+        calibration = calibrate_price_axis(anchors, max_relative_error=0.02)
+
+        self.assertIsNone(calibration.intercept)
+        self.assertTrue(math.isfinite(calibration.slope))
+        for anchor in anchors:
+            self.assertTrue(math.isclose(
+                calibration.price_at_y(anchor["y"]),
+                anchor["price"],
+                rel_tol=1e-12,
+            ))
+        bounds = zone_price_bounds(
+            {"y_top": 0.92, "y_bottom": 0.98},
+            calibration,
+        )
+        self.assertGreater(bounds["price_high"], bounds["price_low"])
+        self.assertTrue(math.isfinite(bounds["price_high"]))
+        self.assertTrue(math.isfinite(bounds["price_low"]))
+
+    def test_legacy_positional_calibration_constructor_still_works(self):
+        calibration = PriceAxisCalibration(
+            "linear", -100.0, 140.0, 0.2, 0.8, 3, 0.0
+        )
+        self.assertAlmostEqual(calibration.price_at_y(0.4), 100.0)
 
     def test_log_axis_maps_exponential_price_scale(self):
         anchors = [
