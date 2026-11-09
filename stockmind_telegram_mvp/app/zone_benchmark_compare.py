@@ -21,6 +21,12 @@ from .plot_evaluation import (
     compare_plot_boundary_accuracy,
     validate_plot_boundary_accuracy,
 )
+from .zone_evaluation import (
+    _finite_mean,
+    _percentage_price_error,
+    _price_error_metrics,
+    _stable_absolute_disagreement,
+)
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _COUNT_FIELDS = ("predicted", "reference", "true_positive", "false_positive", "false_negative")
@@ -162,11 +168,19 @@ def _validate_price_accuracy(price, matches, label):
 
         predicted_high, predicted_low = bounds["predicted_price_bounds"]
         reference_high, reference_low = bounds["reference_price_bounds"]
+        try:
+            high_abs, high_pct = _price_error_metrics(predicted_high, reference_high)
+            low_abs, low_pct = _price_error_metrics(predicted_low, reference_low)
+        except ValueError as exc:
+            raise ValueError(
+                f"{label} match {index} has a scored price comparison "
+                f"outside the supported numeric range: {exc}"
+            ) from exc
         expected_errors = {
-            "price_high_abs_error": abs(predicted_high - reference_high),
-            "price_low_abs_error": abs(predicted_low - reference_low),
-            "price_high_error_pct": 100 * abs(predicted_high - reference_high) / reference_high,
-            "price_low_error_pct": 100 * abs(predicted_low - reference_low) / reference_low,
+            "price_high_abs_error": high_abs,
+            "price_low_abs_error": low_abs,
+            "price_high_error_pct": high_pct,
+            "price_low_error_pct": low_pct,
         }
         for field, expected in expected_errors.items():
             if not _same_metric(comparison.get(field), expected):
@@ -184,9 +198,9 @@ def _validate_price_accuracy(price, matches, label):
     if scored_count != price["scored_match_count"] or unscored_count != price["unscored_match_count"]:
         raise ValueError(f"{label} scored/unscored counts do not match per-zone results")
     expected_summary = {
-        "mean_boundary_abs_error": sum(absolute_errors) / len(absolute_errors) if absolute_errors else None,
+        "mean_boundary_abs_error": _finite_mean(absolute_errors),
         "max_boundary_abs_error": max(absolute_errors) if absolute_errors else None,
-        "mean_boundary_error_pct": sum(percentage_errors) / len(percentage_errors) if percentage_errors else None,
+        "mean_boundary_error_pct": _finite_mean(percentage_errors),
     }
     for field, expected in expected_summary.items():
         if not _same_metric(price[field], expected):
@@ -249,15 +263,21 @@ def _validate_price_accuracy(price, matches, label):
 
         reported_high, reported_low = bounds["reported_price_bounds"]
         coordinate_high, coordinate_low = bounds["coordinate_price_bounds"]
+        high_abs = _stable_absolute_disagreement(reported_high, coordinate_high)
+        low_abs = _stable_absolute_disagreement(reported_low, coordinate_low)
+        try:
+            high_pct = _percentage_price_error(high_abs, coordinate_high)
+            low_pct = _percentage_price_error(low_abs, coordinate_low)
+        except ValueError as exc:
+            raise ValueError(
+                f"{label} match {index} has scored reported-price consistency "
+                f"outside the supported numeric range: {exc}"
+            ) from exc
         expected_disagreements = {
-            "price_high_abs_disagreement": abs(reported_high - coordinate_high),
-            "price_low_abs_disagreement": abs(reported_low - coordinate_low),
-            "price_high_disagreement_pct": (
-                100 * abs(reported_high - coordinate_high) / coordinate_high
-            ),
-            "price_low_disagreement_pct": (
-                100 * abs(reported_low - coordinate_low) / coordinate_low
-            ),
+            "price_high_abs_disagreement": high_abs,
+            "price_low_abs_disagreement": low_abs,
+            "price_high_disagreement_pct": high_pct,
+            "price_low_disagreement_pct": low_pct,
         }
         for field, expected in expected_disagreements.items():
             if not _same_metric(comparison.get(field), expected):
@@ -283,17 +303,11 @@ def _validate_price_accuracy(price, matches, label):
             f"{label}.reported_price_consistency counts do not match per-zone results"
         )
     expected_reported_summary = {
-        "mean_boundary_abs_disagreement": (
-            sum(reported_absolute_errors) / len(reported_absolute_errors)
-            if reported_absolute_errors else None
-        ),
+        "mean_boundary_abs_disagreement": _finite_mean(reported_absolute_errors),
         "max_boundary_abs_disagreement": (
             max(reported_absolute_errors) if reported_absolute_errors else None
         ),
-        "mean_boundary_disagreement_pct": (
-            sum(reported_percentage_errors) / len(reported_percentage_errors)
-            if reported_percentage_errors else None
-        ),
+        "mean_boundary_disagreement_pct": _finite_mean(reported_percentage_errors),
     }
     for field, expected in expected_reported_summary.items():
         if not _same_metric(reported_summary[field], expected):

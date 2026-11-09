@@ -7,7 +7,10 @@ from pathlib import Path
 
 from PIL import Image
 
-from stockmind_telegram_mvp.app.zone_benchmark import evaluate_benchmark_manifest
+from stockmind_telegram_mvp.app.zone_benchmark import (
+    _aggregate_price_accuracy,
+    evaluate_benchmark_manifest,
+)
 
 
 def _png_bytes(size=(40, 30)):
@@ -542,6 +545,43 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
                 "scored_match_count"
             ],
             1,
+        )
+
+    def test_price_accuracy_aggregate_uses_overflow_safe_means(self):
+        comparison = {
+            "status": "scored",
+            "price_high_abs_error": 1e308,
+            "price_low_abs_error": 1e308,
+            "price_high_error_pct": 142.85714285714286,
+            "price_low_error_pct": 166.66666666666666,
+        }
+        fixtures = [{
+            "price_accuracy": {},
+            "matches": [
+                {
+                    "price_comparison": dict(comparison),
+                    "reported_price_consistency": {
+                        "status": "unscored",
+                        "reason": "reported labels unavailable",
+                    },
+                },
+                {
+                    "price_comparison": dict(comparison),
+                    "reported_price_consistency": {
+                        "status": "unscored",
+                        "reason": "reported labels unavailable",
+                    },
+                },
+            ],
+        }]
+
+        result = _aggregate_price_accuracy(fixtures)
+
+        self.assertEqual(result["mean_boundary_abs_error"], 1e308)
+        self.assertEqual(result["max_boundary_abs_error"], 1e308)
+        self.assertAlmostEqual(
+            result["mean_boundary_error_pct"],
+            (142.85714285714286 + 166.66666666666666) / 2,
         )
 
     def test_price_axis_anchors_require_manual_plot_bounds(self):

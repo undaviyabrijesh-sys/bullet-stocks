@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 from PIL import Image
 
 from .overlay_engine import prepare_chart_image
-from .zone_evaluation import evaluate_zone_predictions
+from .zone_evaluation import evaluate_zone_predictions, _finite_mean
 from .plot_evaluation import aggregate_plot_boundary_accuracy
 from .strict_json import loads as strict_json_loads
 
@@ -550,28 +550,17 @@ def _aggregate_price_accuracy(fixtures):
         "calibrated_fixture_count": len(calibrated_fixtures),
         "scored_zone_count": len(scored),
         "unscored_zone_count": unscored_count,
-        "mean_boundary_abs_error": (
-            sum(absolute_errors) / len(absolute_errors) if absolute_errors else None
-        ),
+        "mean_boundary_abs_error": _finite_mean(absolute_errors),
         "max_boundary_abs_error": max(absolute_errors) if absolute_errors else None,
-        "mean_boundary_error_pct": (
-            sum(percentage_errors) / len(percentage_errors)
-            if percentage_errors else None
-        ),
+        "mean_boundary_error_pct": _finite_mean(percentage_errors),
         "reported_price_consistency": {
             "scored_match_count": len(reported_scored),
             "unscored_match_count": len(reported_comparisons) - len(reported_scored),
-            "mean_boundary_abs_disagreement": (
-                sum(reported_absolute_errors) / len(reported_absolute_errors)
-                if reported_absolute_errors else None
-            ),
+            "mean_boundary_abs_disagreement": _finite_mean(reported_absolute_errors),
             "max_boundary_abs_disagreement": (
                 max(reported_absolute_errors) if reported_absolute_errors else None
             ),
-            "mean_boundary_disagreement_pct": (
-                sum(reported_percentage_errors) / len(reported_percentage_errors)
-                if reported_percentage_errors else None
-            ),
+            "mean_boundary_disagreement_pct": _finite_mean(reported_percentage_errors),
         },
     }
 

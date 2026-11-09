@@ -1,6 +1,11 @@
 import unittest
+from unittest.mock import patch
 
-from stockmind_telegram_mvp.app.zone_evaluation import evaluate_zone_predictions
+from stockmind_telegram_mvp.app.zone_evaluation import (
+    _finite_mean,
+    _price_comparison,
+    evaluate_zone_predictions,
+)
 
 def evaluate(predicted_zones, reference_zones, **kwargs):
     # Most geometry-only unit tests use the full screenshot as a known plot.
@@ -201,6 +206,21 @@ class ZoneEvaluationTests(unittest.TestCase):
         comparison = result["matches"][0]["price_comparison"]
         self.assertAlmostEqual(comparison["predicted_price_bounds"]["price_high"], 98.8888888889)
         self.assertAlmostEqual(comparison["reference_price_bounds"]["price_low"], 80)
+
+    def test_geometry_price_percentage_overflow_is_unscored(self):
+        predicted_bounds = {"price_high": 1e308, "price_low": 1e-300}
+        reference_bounds = {"price_high": 1.0, "price_low": 1e-300}
+        with patch(
+            "stockmind_telegram_mvp.app.zone_evaluation.zone_price_bounds",
+            side_effect=[predicted_bounds, reference_bounds],
+        ):
+            comparison = _price_comparison({"zone": {}}, {"zone": {}}, calibration=None)
+
+        self.assertEqual(comparison["status"], "unscored")
+        self.assertIn("percentage price error", comparison["reason"])
+
+    def test_finite_mean_does_not_overflow_when_intermediate_sum_would(self):
+        self.assertEqual(_finite_mean([1e308, 1e308]), 1e308)
 
     def test_price_comparison_is_unscored_instead_of_extrapolating(self):
         result = evaluate(

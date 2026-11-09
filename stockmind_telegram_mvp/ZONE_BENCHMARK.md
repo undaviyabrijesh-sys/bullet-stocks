@@ -262,7 +262,8 @@ Price-axis calibration:
 - never extrapolates beyond the first/last anchor y-coordinate;
 - reports matched-zone high/low boundary error from normalized, pixel-rounded geometry in price units and as a percentage, separately from IoU;
 - separately compares the model's stated `price_low`/`price_high` with the prices implied by those same pixel-rounded overlay coordinates, reporting absolute and percentage disagreement plus scored/unscored counts;
-- marks a matched zone as unscored if either boundary falls outside the calibrated y range rather than guessing a price.
+- marks a matched zone as unscored if either boundary falls outside the calibrated y range rather than guessing a price;
+- marks a price comparison unscored if an absolute or percentage error cannot be represented as a finite number, and uses overflow-safe arithmetic for aggregate means.
 
 This is a manual calibration and scoring tool, not automatic axis OCR. Anchor y-coordinates must use the same full-image coordinate frame as the AI and reference rectangles. Keep the screenshot, anchors and annotations together in the fixture record. Do not mix anchors from another panel, crop, symbol or timeframe.
 

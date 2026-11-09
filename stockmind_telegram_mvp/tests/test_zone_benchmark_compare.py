@@ -10,6 +10,7 @@ from PIL import Image
 from stockmind_telegram_mvp.app.zone_benchmark import evaluate_benchmark_manifest
 from stockmind_telegram_mvp.app.zone_benchmark_compare import (
     _read_report,
+    _validate_price_accuracy,
     compare_benchmark_reports,
 )
 
@@ -562,6 +563,47 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
                     ValueError, "does not agree with its plot bounds"
                 ):
                     compare_benchmark_reports(report, report)
+
+    def test_price_accuracy_validator_rejects_overflowing_scored_percentage(self):
+        price = {
+            "scale": "linear",
+            "anchor_count": 3,
+            "max_anchor_relative_error_pct": 0.0,
+            "scored_match_count": 1,
+            "unscored_match_count": 0,
+            "mean_boundary_abs_error": 1e308,
+            "max_boundary_abs_error": 1e308,
+            "mean_boundary_error_pct": 1.0,
+            "reported_price_consistency": {
+                "scored_match_count": 0,
+                "unscored_match_count": 1,
+                "mean_boundary_abs_disagreement": None,
+                "max_boundary_abs_disagreement": None,
+                "mean_boundary_disagreement_pct": None,
+            },
+        }
+        matches = [{
+            "price_comparison": {
+                "status": "scored",
+                "predicted_price_bounds": {
+                    "price_high": 1e308, "price_low": 5e307,
+                },
+                "reference_price_bounds": {
+                    "price_high": 1.0, "price_low": 0.5,
+                },
+                "price_high_abs_error": 1e308,
+                "price_low_abs_error": 5e307,
+                "price_high_error_pct": 1.0,
+                "price_low_error_pct": 1.0,
+            },
+            "reported_price_consistency": {
+                "status": "unscored",
+                "reason": "reported labels unavailable",
+            },
+        }]
+
+        with self.assertRaisesRegex(ValueError, "outside the supported numeric range"):
+            _validate_price_accuracy(price, matches, "fixture")
 
     def test_report_loader_rejects_duplicate_object_keys(self):
         report_path = self.root / "duplicate-report.json"

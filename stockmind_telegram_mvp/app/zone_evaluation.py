@@ -113,17 +113,49 @@ def _metrics(predictions, references, matches):
     }
 
 
+def _finite_mean(values):
+    """Compute a finite mean without overflowing an otherwise representable average."""
+    if not values:
+        return None
+    count = len(values)
+    try:
+        mean = math.fsum(value / count for value in values)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError("metric mean exceeds the supported numeric range") from exc
+    if not math.isfinite(mean):
+        raise ValueError("metric mean exceeds the supported numeric range")
+    return mean
+
+
+def _percentage_price_error(absolute_error, reference_price):
+    """Return a finite percentage error, or reject an unrepresentable metric."""
+    percentage = (absolute_error / reference_price) * 100
+    if not math.isfinite(percentage):
+        raise ValueError("percentage price error exceeds the supported numeric range")
+    return percentage
+
+
+def _price_error_metrics(predicted_price, reference_price):
+    absolute_error = abs(predicted_price - reference_price)
+    if not math.isfinite(absolute_error):
+        raise ValueError("absolute price error exceeds the supported numeric range")
+    percentage_error = _percentage_price_error(absolute_error, reference_price)
+    return absolute_error, percentage_error
+
+
 def _price_comparison(prediction, reference, calibration):
     try:
         predicted_bounds = zone_price_bounds(prediction["zone"], calibration)
         reference_bounds = zone_price_bounds(reference["zone"], calibration)
+        high_error, high_pct = _price_error_metrics(
+            predicted_bounds["price_high"], reference_bounds["price_high"]
+        )
+        low_error, low_pct = _price_error_metrics(
+            predicted_bounds["price_low"], reference_bounds["price_low"]
+        )
     except ValueError as exc:
-        return {"status": "unscored", "reason": str(exc)}
+        return {"status": "unscored", "reason": str(exc)[:240]}
 
-    high_error = abs(predicted_bounds["price_high"] - reference_bounds["price_high"])
-    low_error = abs(predicted_bounds["price_low"] - reference_bounds["price_low"])
-    high_pct = 100 * high_error / reference_bounds["price_high"]
-    low_pct = 100 * low_error / reference_bounds["price_low"]
     return {
         "status": "scored",
         "predicted_price_bounds": predicted_bounds,
@@ -176,13 +208,11 @@ def _reported_price_consistency(prediction, calibration):
     low_abs = _stable_absolute_disagreement(
         reported_bounds["price_low"], coordinate_bounds["price_low"]
     )
-    high_pct = 100 * high_abs / coordinate_bounds["price_high"]
-    low_pct = 100 * low_abs / coordinate_bounds["price_low"]
-    if not all(math.isfinite(value) for value in (high_abs, low_abs, high_pct, low_pct)):
-        return {
-            "status": "unscored",
-            "reason": "reported-price disagreement exceeds the supported numeric range",
-        }
+    try:
+        high_pct = _percentage_price_error(high_abs, coordinate_bounds["price_high"])
+        low_pct = _percentage_price_error(low_abs, coordinate_bounds["price_low"])
+    except ValueError as exc:
+        return {"status": "unscored", "reason": str(exc)[:240]}
     return {
         "status": "scored",
         "reported_price_bounds": reported_bounds,
@@ -232,15 +262,15 @@ def _price_accuracy(matches, calibration):
         "max_anchor_relative_error_pct": 100 * calibration.max_anchor_relative_error,
         "scored_match_count": len(scored),
         "unscored_match_count": len(comparisons) - len(scored),
-        "mean_boundary_abs_error": sum(boundary_errors) / len(boundary_errors) if boundary_errors else None,
+        "mean_boundary_abs_error": _finite_mean(boundary_errors),
         "max_boundary_abs_error": max(boundary_errors) if boundary_errors else None,
-        "mean_boundary_error_pct": sum(boundary_percent_errors) / len(boundary_percent_errors) if boundary_percent_errors else None,
+        "mean_boundary_error_pct": _finite_mean(boundary_percent_errors),
         "reported_price_consistency": {
             "scored_match_count": len(reported_scored),
             "unscored_match_count": len(reported_comparisons) - len(reported_scored),
-            "mean_boundary_abs_disagreement": sum(reported_absolute_errors) / len(reported_absolute_errors) if reported_absolute_errors else None,
+            "mean_boundary_abs_disagreement": _finite_mean(reported_absolute_errors),
             "max_boundary_abs_disagreement": max(reported_absolute_errors) if reported_absolute_errors else None,
-            "mean_boundary_disagreement_pct": sum(reported_percentage_errors) / len(reported_percentage_errors) if reported_percentage_errors else None,
+            "mean_boundary_disagreement_pct": _finite_mean(reported_percentage_errors),
         },
     }
 
