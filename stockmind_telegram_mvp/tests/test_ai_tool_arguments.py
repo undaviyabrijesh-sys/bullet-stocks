@@ -59,9 +59,9 @@ class CryptoCandleConfirmationTests(unittest.TestCase):
             "as_of_ms": 1000,
             "clock_uncertainty_ms": 2,
             "data": [
-                self.candle(close_time=999, is_closed=False, candle_status="forming"),
-                self.candle(close_time=1000, is_closed=True, candle_status="closed"),
-                self.candle(close_time=1001, is_closed=True, candle_status="closed"),
+                self.candle(open_time=900, close_time=999, is_closed=False, candle_status="forming"),
+                self.candle(open_time=901, close_time=1000, is_closed=True, candle_status="closed"),
+                self.candle(open_time=902, close_time=1001, is_closed=True, candle_status="closed"),
             ],
         })
 
@@ -503,7 +503,15 @@ class ToolBudgetExecutionTests(unittest.IsolatedAsyncioTestCase):
             "as_of_ms": 1700000000000,
             "clock_uncertainty_ms": None,
             "data": [{
+                "open_time": 1699999999900,
+                "open": "100.0",
+                "high": "102.0",
+                "low": "98.0",
+                "close": "101.0",
+                "volume": "1.0",
                 "close_time": 1699999999999,
+                "quote_volume": "101.0",
+                "trades": 3,
                 "is_closed": True,
                 "candle_status": "closed",
             }],
@@ -644,7 +652,8 @@ class ToolBudgetExecutionTests(unittest.IsolatedAsyncioTestCase):
 
         answer = await research.answer([], "Get BTC candles")
 
-        self.assertEqual(answer, "The same BTC candle request was reused.")
+        self.assertTrue(answer.startswith("The same BTC candle request was reused."))
+        self.assertIn("Binance candle data was unavailable or withheld", answer)
         klines.assert_awaited_once_with("BTCUSDT", "15m", "spot", 100)
         tool_messages = [
             item for item in create.await_args_list[1].kwargs["messages"]
@@ -695,7 +704,9 @@ class ToolBudgetExecutionTests(unittest.IsolatedAsyncioTestCase):
 
         answer = await research.answer([], "Compare BTC spot and futures candles")
 
-        self.assertEqual(answer, "Three distinct candle requests.")
+        self.assertTrue(answer.startswith("Three distinct candle requests."))
+        self.assertEqual(answer.count("Automated Binance candle check ("), 3)
+        self.assertEqual(answer.count("No candle rows were available"), 3)
         self.assertEqual(klines.await_count, 3)
         self.assertEqual(
             [call.args[1:3] for call in klines.await_args_list],
