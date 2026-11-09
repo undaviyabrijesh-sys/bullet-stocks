@@ -24,6 +24,8 @@ from stockmind_telegram_mvp.app.annotation_editor import (
     editor_control_rows,
     zoomed_editor_image_size,
     editor_canvas_point_to_normalized,
+    editor_canvas_point_to_source_normalized,
+    editor_box_to_canvas_coordinates,
     editor_canvas_point_inside_image,
     editor_canvas_point_inside_plot,
     main as editor_main,
@@ -210,6 +212,94 @@ class AnnotationEditorZoomTests(unittest.TestCase):
 
 
 
+class AnnotationSourcePixelAlignmentTests(unittest.TestCase):
+    IMAGE_WIDTH = 4033
+    IMAGE_HEIGHT = 2269
+    RENDER_SIZES = (
+        (1200, 675),
+        (1800, 1012),
+        (2400, 1350),
+        (3600, 2025),
+        (4033, 2269),
+    )
+
+    def test_source_pixel_point_round_trips_at_every_zoom_level(self):
+        source_x, source_y = 1235, 713
+        for render_width, render_height in self.RENDER_SIZES:
+            with self.subTest(render_size=(render_width, render_height)):
+                canvas_x = source_x * render_width / self.IMAGE_WIDTH
+                canvas_y = source_y * render_height / self.IMAGE_HEIGHT
+                self.assertEqual(
+                    editor_canvas_point_to_source_normalized(
+                        canvas_x, canvas_y,
+                        render_width, render_height,
+                        self.IMAGE_WIDTH, self.IMAGE_HEIGHT,
+                    ),
+                    (source_x / self.IMAGE_WIDTH, source_y / self.IMAGE_HEIGHT),
+                )
+
+    def test_box_preview_uses_the_same_rounded_source_pixels_at_every_zoom(self):
+        box = {
+            "x_start": 1235.49 / self.IMAGE_WIDTH,
+            "x_end": 3001.51 / self.IMAGE_WIDTH,
+            "y_top": 713.49 / self.IMAGE_HEIGHT,
+            "y_bottom": 1401.51 / self.IMAGE_HEIGHT,
+        }
+        source_edges = (1235, 1402, 3002, 1402)
+        for render_width, render_height in self.RENDER_SIZES:
+            with self.subTest(render_size=(render_width, render_height)):
+                actual = editor_box_to_canvas_coordinates(
+                    box,
+                    self.IMAGE_WIDTH,
+                    self.IMAGE_HEIGHT,
+                    render_width,
+                    render_height,
+                )
+                expected = (
+                    source_edges[0] * render_width / self.IMAGE_WIDTH,
+                    source_edges[1] * render_height / self.IMAGE_HEIGHT,
+                    source_edges[2] * render_width / self.IMAGE_WIDTH,
+                    source_edges[3] * render_height / self.IMAGE_HEIGHT,
+                )
+                for actual_value, expected_value in zip(actual, expected):
+                    self.assertAlmostEqual(actual_value, expected_value, places=10)
+
+    def test_editor_box_coordinates_match_renderer_pixel_rounding(self):
+        from stockmind_telegram_mvp.app.annotation_editor import _DesktopEditor
+
+        editor = object.__new__(_DesktopEditor)
+        editor.image_width = self.IMAGE_WIDTH
+        editor.image_height = self.IMAGE_HEIGHT
+        editor.render_w, editor.render_h = 1800, 1012
+        box = {
+            "x_start": 1235.49 / self.IMAGE_WIDTH,
+            "x_end": 3001.51 / self.IMAGE_WIDTH,
+            "y_top": 713.49 / self.IMAGE_HEIGHT,
+            "y_bottom": 1401.51 / self.IMAGE_HEIGHT,
+        }
+        self.assertEqual(
+            editor._coords(box),
+            editor_box_to_canvas_coordinates(
+                box, self.IMAGE_WIDTH, self.IMAGE_HEIGHT, 1800, 1012
+            ),
+        )
+
+    def test_source_pixel_mapping_rejects_invalid_dimensions(self):
+        for image_width, image_height in (
+            (0, 900), (1600, True), (1.5, 900),
+        ):
+            with self.subTest(image_width=image_width, image_height=image_height):
+                with self.assertRaises(ValueError):
+                    editor_canvas_point_to_source_normalized(
+                        10, 10, 100, 100, image_width, image_height
+                    )
+                with self.assertRaises(ValueError):
+                    editor_box_to_canvas_coordinates(
+                        {"x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9},
+                        image_width, image_height, 100, 100,
+                    )
+
+
 class AnnotationEditorAxisAnchorGeometryTests(unittest.TestCase):
     def test_raw_canvas_point_must_be_inside_image_without_edge_clamping(self):
         self.assertTrue(editor_canvas_point_inside_image(0, 0, 1000, 500))
@@ -265,6 +355,8 @@ class AnnotationEditorAxisAnchorInteractionTests(unittest.TestCase):
         editor.plot_bounds = plot
         editor.render_w = 1000
         editor.render_h = 500
+        editor.image_width = 1000
+        editor.image_height = 500
         editor.axis_anchors = []
         editor.undo_stack = []
         editor.canvas = types.SimpleNamespace(delete=lambda _item: None)
@@ -296,6 +388,18 @@ class AnnotationEditorAxisAnchorInteractionTests(unittest.TestCase):
         self.assertEqual(len(editor.prompt_calls), 1)
         self.assertEqual(editor.axis_anchors, [{"y": 0.5, "price": 100.0}])
         self.assertEqual(editor.undo_stack[0][0], "axis_anchor")
+
+    def test_axis_anchor_is_quantized_to_original_screenshot_row(self):
+        editor = self._editor(500, 251.2)
+        editor.image_width = 1600
+        editor.image_height = 900
+
+        editor._finish_draw(types.SimpleNamespace(x=500, y=251.2))
+
+        self.assertEqual(
+            editor.axis_anchors,
+            [{"y": 452 / 900, "price": 100.0}],
+        )
 
     def test_release_in_blank_canvas_is_not_clamped_into_edge_plot(self):
         edge_plot = {"x_start": 0.1, "x_end": 1.0, "y_top": 0.1, "y_bottom": 1.0}
@@ -974,6 +1078,39 @@ class AnnotationEditorDrawingStartInteractionTests(unittest.TestCase):
         self.assertEqual(editor.plot_bounds["y_top"], 0.5)
         self.assertEqual(editor.plot_bounds["y_bottom"], 0.6)
         self.assertEqual(editor.undo_stack[-1][0], "plot")
+
+    def test_rectangle_drag_saves_identical_source_pixel_edges_at_every_zoom(self):
+        source_width, source_height = 4033, 2269
+        source_edges = (1235, 713, 3002, 1402)
+        render_sizes = (
+            (1200, 675), (1800, 1012), (2400, 1350),
+            (3600, 2025), (4033, 2269),
+        )
+        for render_width, render_height in render_sizes:
+            with self.subTest(render_size=(render_width, render_height)):
+                editor = self._editor("plot")
+                editor.image_width = source_width
+                editor.image_height = source_height
+                editor.render_w = render_width
+                editor.render_h = render_height
+                start = types.SimpleNamespace(
+                    x=source_edges[0] * render_width / source_width,
+                    y=source_edges[1] * render_height / source_height,
+                )
+                finish = types.SimpleNamespace(
+                    x=source_edges[2] * render_width / source_width,
+                    y=source_edges[3] * render_height / source_height,
+                )
+
+                editor._start_draw(start)
+                editor._finish_draw(finish)
+
+                self.assertEqual(editor.plot_bounds, {
+                    "x_start": source_edges[0] / source_width,
+                    "x_end": source_edges[2] / source_width,
+                    "y_top": source_edges[1] / source_height,
+                    "y_bottom": source_edges[3] / source_height,
+                })
 
 if __name__ == "__main__":
     unittest.main()
