@@ -978,6 +978,7 @@ class ResearchAI:
                                         args["symbol"], args.get("interval", "15m"),
                                         args.get("market", "spot"), args.get("limit", 100)
                                     )
+                                    result = _normalize_crypto_klines_for_model(result)
                                 elif call.function.name == "get_crypto_ticker":
                                     result = await self.crypto_data.ticker(
                                         args["symbol"], args.get("market", "spot")
