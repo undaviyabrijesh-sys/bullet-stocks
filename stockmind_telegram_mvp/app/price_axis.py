@@ -137,18 +137,32 @@ def calibrate_price_axis(
 
     ys = [point[0] for point in points]
     values = [math.log(point[1]) if scale == "log" else point[1] for point in points]
-    mean_y = sum(ys) / len(ys)
-    mean_value = sum(values) / len(values)
-    denominator = sum((y - mean_y) ** 2 for y in ys)
-    if denominator <= 0:
+
+    # Linear prices can be close to the largest finite float. Normalize them
+    # before least-squares arithmetic so summing several valid anchors does
+    # not overflow. Log prices are already bounded by the float exponent range
+    # and are left unscaled to preserve their available precision.
+    value_scale = max(abs(value) for value in values) if scale == "linear" else 1.0
+    if not math.isfinite(value_scale) or value_scale <= 0:
+        raise ValueError("price-axis values cannot be normalized")
+    fit_values = [value / value_scale for value in values]
+
+    mean_y = math.fsum(ys) / len(ys)
+    mean_value = math.fsum(fit_values) / len(fit_values)
+    denominator = math.fsum((y - mean_y) ** 2 for y in ys)
+    if denominator <= 0 or not math.isfinite(denominator):
         raise ValueError("price-axis anchors do not span a usable y range")
 
-    slope = sum(
+    slope_scaled = math.fsum(
         (y - mean_y) * (value - mean_value)
-        for y, value in zip(ys, values)
+        for y, value in zip(ys, fit_values)
     ) / denominator
-    intercept = mean_value - slope * mean_y
-    if not math.isfinite(slope) or not math.isfinite(intercept) or slope >= 0:
+    intercept_scaled = mean_value - slope_scaled * mean_y
+    slope = slope_scaled * value_scale
+    intercept = intercept_scaled * value_scale
+    if not math.isfinite(slope) or not math.isfinite(intercept):
+        raise ValueError("price-axis fit exceeds the supported numeric range")
+    if slope >= 0:
         raise ValueError("price-axis fit is not a descending price scale")
 
     calibration = PriceAxisCalibration(
@@ -163,7 +177,10 @@ def calibrate_price_axis(
     relative_errors = []
     for y, observed_price in points:
         fitted_price = calibration.price_at_y(y)
-        relative_errors.append(abs(fitted_price - observed_price) / observed_price)
+        relative_error = abs(fitted_price - observed_price) / observed_price
+        if not math.isfinite(relative_error):
+            raise ValueError("price-axis calibration residual exceeds the supported numeric range")
+        relative_errors.append(relative_error)
     max_error = max(relative_errors)
     if max_error > tolerance:
         raise ValueError(
