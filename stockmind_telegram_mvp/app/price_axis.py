@@ -238,6 +238,8 @@ def calibrate_price_axis(
         max_y=ys[-1],
         anchor_count=len(points),
         max_anchor_relative_error=max_error,
+        reference_y=mean_y,
+        reference_value=reference_value,
     )
 
 

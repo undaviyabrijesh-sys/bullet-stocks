@@ -50,6 +50,10 @@ class PriceAxisCalibrationTests(unittest.TestCase):
 
         self.assertIsNone(calibration.intercept)
         self.assertTrue(math.isfinite(calibration.slope))
+        self.assertAlmostEqual(calibration.reference_y, 0.95)
+        self.assertTrue(math.isclose(
+            calibration.reference_value, 1.65e308, rel_tol=1e-12
+        ))
         for anchor in anchors:
             self.assertTrue(math.isclose(
                 calibration.price_at_y(anchor["y"]),
