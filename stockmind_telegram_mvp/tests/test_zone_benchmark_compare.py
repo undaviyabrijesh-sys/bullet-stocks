@@ -286,6 +286,61 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate matched prediction_index"):
             compare_benchmark_reports(baseline, candidate)
 
+    def test_compares_reported_price_labels_against_calibrated_overlay_coordinates(self):
+        anchors = [
+            {"y": 0.2, "price": 120},
+            {"y": 0.5, "price": 90},
+            {"y": 0.8, "price": 60},
+        ]
+        baseline = self._report(
+            "baseline",
+            [{**_zone(), "draw_overlay": True, "price_low": "80", "price_high": "100"}],
+            anchors=anchors,
+        )
+        candidate = self._report(
+            "candidate",
+            [{**_zone(), "draw_overlay": True, "price_low": "70", "price_high": "110"}],
+            anchors=anchors,
+        )
+
+        result = compare_benchmark_reports(baseline, candidate)
+        consistency = result["price_accuracy"]["reported_price_consistency"]
+        self.assertEqual(
+            consistency["mean_boundary_abs_disagreement"]["baseline"], 0.0
+        )
+        self.assertEqual(
+            consistency["mean_boundary_abs_disagreement"]["candidate"], 10.0
+        )
+        self.assertEqual(
+            consistency["mean_boundary_abs_disagreement"]["delta"], 10.0
+        )
+        self.assertEqual(
+            result["fixtures"][0]["price_accuracy"][
+                "reported_price_consistency"
+            ]["mean_boundary_abs_disagreement"]["delta"],
+            10.0,
+        )
+
+    def test_rejects_tampered_reported_price_consistency_summary(self):
+        anchors = [
+            {"y": 0.2, "price": 120},
+            {"y": 0.5, "price": 90},
+            {"y": 0.8, "price": 60},
+        ]
+        report = self._report(
+            "baseline",
+            [{**_zone(), "draw_overlay": True, "price_low": "80", "price_high": "100"}],
+            anchors=anchors,
+        )
+        report["fixtures"][0]["price_accuracy"]["reported_price_consistency"][
+            "mean_boundary_abs_disagreement"
+        ] = 999
+
+        with self.assertRaisesRegex(
+            ValueError, "reported_price_consistency.mean_boundary_abs_disagreement"
+        ):
+            compare_benchmark_reports(report, report)
+
     def test_rejects_price_summary_that_disagrees_with_matched_zone_errors(self):
         anchors = [
             {"y": 0.2, "price": 120},
