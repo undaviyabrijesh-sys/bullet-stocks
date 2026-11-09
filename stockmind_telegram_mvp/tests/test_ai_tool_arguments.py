@@ -928,10 +928,6 @@ class ResearchTurnDeadlineTests(unittest.IsolatedAsyncioTestCase):
         create.assert_awaited_once()
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class CryptoFinalAnswerConfirmationGuardTests(unittest.IsolatedAsyncioTestCase):
     @staticmethod
     def candle(open_time, close_time, **overrides):
@@ -1051,3 +1047,7 @@ class CryptoFinalAnswerConfirmationGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("passed the closed-candle check", answer)
         self.assertIn("does not by itself establish a BOS/CHOCH", answer)
 
+
+
+if __name__ == "__main__":
+    unittest.main()
