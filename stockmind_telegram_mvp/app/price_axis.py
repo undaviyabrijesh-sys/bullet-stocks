@@ -75,8 +75,15 @@ class PriceAxisCalibration:
         if y < self.min_y - _Y_TOLERANCE or y > self.max_y + _Y_TOLERANCE:
             raise ValueError("y is outside the calibrated price-axis range")
 
+        has_reference_y = self.reference_y is not None
+        has_reference_value = self.reference_value is not None
+        if has_reference_y != has_reference_value:
+            raise ValueError(
+                "centered calibration requires both reference_y and reference_value"
+            )
+
         try:
-            if self.reference_y is not None and self.reference_value is not None:
+            if has_reference_y:
                 # Evaluate locally around the anchor centroid. The legacy
                 # intercept at y=0 may be outside float range even when every
                 # price inside the calibrated screenshot region is representable.
