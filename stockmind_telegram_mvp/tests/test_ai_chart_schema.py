@@ -1,7 +1,12 @@
 import unittest
 
-from stockmind_telegram_mvp.app.ai import CHART_RESPONSE_FORMAT, sanitize_chart_analysis
-
+from stockmind_telegram_mvp.app.ai import (
+    CHART_IMAGE_INSTRUCTIONS,
+    CHART_IMAGE_PROMPT,
+    CHART_PROMPT_VERSION,
+    CHART_RESPONSE_FORMAT,
+    sanitize_chart_analysis,
+)
 
 PLOT_BOUNDS = {
     "x_start": 0.08, "x_end": 0.94, "y_top": 0.12, "y_bottom": 0.9,
@@ -145,8 +150,55 @@ class ChartResponseValidationTests(unittest.TestCase):
         item = result["zones"][0]
         self.assertEqual(len(item["label"]), 64)
         self.assertIsNone(item["price_low"])
-        self.assertEqual(len(item["price_high"]), 32)
+        self.assertIsNone(item["price_high"])
+        self.assertIn("Numeric price bounds were withheld", result["analysis"])
 
+    def test_preserves_a_complete_positive_decimal_price_pair(self):
+        result = sanitize_chart_analysis(payload([
+            zone(price_low=" 100.25 ", price_high="105.75")
+        ]))
+        item = result["zones"][0]
+        self.assertEqual(item["price_low"], "100.25")
+        self.assertEqual(item["price_high"], "105.75")
+        self.assertTrue(item["draw_overlay"])
+        self.assertNotIn("Numeric price bounds were withheld", result["analysis"])
+
+    def test_withholds_incomplete_non_numeric_non_positive_or_reversed_price_pairs(self):
+        invalid_pairs = [
+            {"price_low": "105", "price_high": "100"},
+            {"price_low": "100", "price_high": "100"},
+            {"price_low": "0", "price_high": "10"},
+            {"price_low": "-1", "price_high": "10"},
+            {"price_low": "1e3", "price_high": "2e3"},
+            {"price_low": "₹100", "price_high": "105"},
+            {"price_low": "100", "price_high": None},
+            {"price_low": 100, "price_high": "105"},
+            {"price_low": "1" * 33, "price_high": "200"},
+        ]
+        for pair in invalid_pairs:
+            with self.subTest(pair=pair):
+                result = sanitize_chart_analysis(payload([zone(**pair)]))
+                item = result["zones"][0]
+                self.assertIsNone(item["price_low"])
+                self.assertIsNone(item["price_high"])
+                # Price-label validation is independent of normalized overlay geometry.
+                self.assertTrue(item["draw_overlay"])
+                self.assertIn("Numeric price bounds were withheld", result["analysis"])
+
+    def test_missing_price_pair_is_not_reported_as_a_validation_error(self):
+        result = sanitize_chart_analysis(payload([
+            zone(price_low=None, price_high=None)
+        ]))
+        self.assertIsNone(result["zones"][0]["price_low"])
+        self.assertIsNone(result["zones"][0]["price_high"])
+        self.assertNotIn("Numeric price bounds were withheld", result["analysis"])
+
+    def test_chart_prompt_requires_ordered_price_bounds_and_bumps_version(self):
+        self.assertEqual(CHART_PROMPT_VERSION, "dns-chart-v5")
+        combined = CHART_IMAGE_PROMPT + CHART_IMAGE_INSTRUCTIONS
+        self.assertIn("price_high", combined)
+        self.assertIn("price_low < price_high", combined)
+        self.assertIn("both null", combined)
     def test_rejects_missing_or_wrongly_typed_response_fields(self):
         for payload in (
             None,

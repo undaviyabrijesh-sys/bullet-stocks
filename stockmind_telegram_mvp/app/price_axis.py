@@ -5,12 +5,51 @@ least three manually verified (normalized y, price) anchors from the same
 screenshot. A fit that is non-monotonic or too distorted is rejected.
 """
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 import math
+import re
 
 MAX_AXIS_ANCHORS = 20
 DEFAULT_MAX_RELATIVE_ERROR = 0.02
 MAX_ALLOWED_RELATIVE_ERROR = 0.10
 _Y_TOLERANCE = 1e-9
+MAX_REPORTED_PRICE_TEXT_LENGTH = 32
+_REPORTED_PRICE_PATTERN = re.compile(r"[0-9]+(?:[.][0-9]+)?")
+
+
+def parse_zone_price_bounds(zone):
+    """Parse a complete, positive, ordered pair of plain decimal price strings.
+
+    This validates label ordering only. A manually calibrated screenshot axis
+    is still required to verify that the values correspond to normalized y.
+    """
+    if not isinstance(zone, dict):
+        raise ValueError("zone must be an object")
+
+    parsed = []
+    for field in ("price_low", "price_high"):
+        value = zone.get(field)
+        if (
+            not isinstance(value, str)
+            or not value.strip()
+            or len(value.strip()) > MAX_REPORTED_PRICE_TEXT_LENGTH
+        ):
+            raise ValueError(f"{field} must be a positive decimal string")
+        text = value.strip()
+        if _REPORTED_PRICE_PATTERN.fullmatch(text) is None:
+            raise ValueError(f"{field} must be a plain decimal string")
+        try:
+            price = Decimal(text)
+        except InvalidOperation as exc:
+            raise ValueError(f"{field} must be a valid decimal price") from exc
+        if not price.is_finite() or price <= 0:
+            raise ValueError(f"{field} must be positive and finite")
+        parsed.append(price)
+
+    price_low, price_high = parsed
+    if price_low >= price_high:
+        raise ValueError("price_low must be lower than price_high")
+    return price_low, price_high
 
 
 @dataclass(frozen=True)

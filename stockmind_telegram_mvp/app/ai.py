@@ -10,6 +10,7 @@ from openai import AsyncOpenAI
 
 from .tapetide import TapetideAPIError
 from .strict_json import loads as strict_json_loads
+from .price_axis import parse_zone_price_bounds
 
 SYSTEM_PROMPT = """
 You are StockMind AI, a multilingual market research assistant for Indian equities and crypto.
@@ -91,8 +92,12 @@ Analyse in this order:
    Only use a USER label when the screenshot clearly shows that the user marked that zone; otherwise use AI.
 4. For each zone, give type, approximate upper/lower bounds (only if the price scale is readable),
    structural reason, freshness/mitigation state, and confidence (high/medium/low).
-   A zone is fresh only if no later price revisit is visible. If the screenshot does not show
-   enough history to determine this, say "freshness cannot be confirmed".
+   For numeric bounds, price_high belongs at the zone y_top and price_low at y_bottom.
+   Return both as plain positive decimal strings (digits and an optional decimal point only),
+   with price_low < price_high. If either value cannot be read confidently, return both null
+   and do not state a numeric range for that zone in prose. Never infer a price from pixels
+   without a readable scale. A zone is fresh only if no later price revisit is visible. If the
+   screenshot does not show enough history to determine this, say "freshness cannot be confirmed".
 5. Describe visible BOS/CHOCH, liquidity sweep, rejection, retest or imbalance only when the
    candle sequence supports it. A wick through a level alone is not automatically a BOS.
 6. Give conditional scenarios: what confirmation is needed, what would invalidate the idea, and
@@ -116,7 +121,7 @@ Use this response structure:
 The user may ask in English, Hinglish, Hindi, Gujarati or mixed language. Reply in their style.
 """
 
-CHART_PROMPT_VERSION = "dns-chart-v4"
+CHART_PROMPT_VERSION = "dns-chart-v5"
 CHART_IMAGE_INSTRUCTIONS = """
 Return structured JSON. First identify plot_bounds: the visible main price-candle plotting
 rectangle, excluding the price scale, toolbars, legends and separate indicator/volume panels.
@@ -129,7 +134,11 @@ into the price scale, toolbar, legend or another panel. If a zone crosses the pl
 its geometry is ambiguous, or it is too small to locate reliably, set draw_overlay=false and
 all four coordinates to zero. Never clip or invent a box position to make it fit.
 
-Mark only clearly visible chart zones. Set price bounds to null if the scale cannot be read.
+Mark only clearly visible chart zones. When readable, return price_high for y_top and
+price_low for y_bottom as plain positive decimal strings, with price_low < price_high.
+Return both price fields as null if either cannot be read confidently. Do not include a numeric
+zone range in the prose when its structured price pair is null. Never infer prices from pixel
+coordinates without a readable scale.
 Return at most 8 distinct zones. The text analysis must explain that the overlay is an estimate
 and needs visual verification.
 """
@@ -474,6 +483,7 @@ def sanitize_chart_analysis(data: dict) -> dict:
                 }
 
     safe_zones = []
+    withheld_price_bounds = 0
     # Count accepted zones, not raw response entries: malformed/unknown items
     # must not consume the overlay quota and hide later valid zones.
     for zone in zones:
@@ -488,12 +498,18 @@ def sanitize_chart_analysis(data: dict) -> dict:
         label = zone.get("label")
         if not isinstance(label, str) or not label.strip():
             label = zone_type.upper()
-        price_low = zone.get("price_low")
-        price_high = zone.get("price_high")
-        if not isinstance(price_low, str):
+        raw_price_low = zone.get("price_low")
+        raw_price_high = zone.get("price_high")
+        try:
+            parse_zone_price_bounds(zone)
+        except ValueError:
             price_low = None
-        if not isinstance(price_high, str):
             price_high = None
+            if raw_price_low is not None or raw_price_high is not None:
+                withheld_price_bounds += 1
+        else:
+            price_low = raw_price_low.strip()
+            price_high = raw_price_high.strip()
 
         raw_coordinates = [
             zone.get("x_start"), zone.get("x_end"),
@@ -531,7 +547,17 @@ def sanitize_chart_analysis(data: dict) -> dict:
             "draw_overlay": draw_overlay,
         })
 
-    return {"analysis": analysis.strip(), "plot_bounds": plot_bounds, "zones": safe_zones}
+    safe_analysis = analysis.strip()
+    if withheld_price_bounds:
+        zone_word = "zone" if withheld_price_bounds == 1 else "zones"
+        safe_analysis += (
+            f"\n\nNumeric price bounds were withheld for {withheld_price_bounds} "
+            f"{zone_word} because the structured pair was incomplete, non-numeric, "
+            "non-positive, or reversed. Verify any conflicting numeric range in the "
+            "prose against the visible price scale before relying on it."
+        )
+
+    return {"analysis": safe_analysis, "plot_bounds": plot_bounds, "zones": safe_zones}
 
 
 TOOLS = [

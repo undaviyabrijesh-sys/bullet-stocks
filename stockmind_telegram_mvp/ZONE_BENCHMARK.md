@@ -51,6 +51,23 @@ Every fixture must include an `annotation_metadata` object. Only annotations tha
 
 A fixture record should contain a stable fixture_id, image_file, image_sha256, image_width, image_height, reference_zones, predicted_zones, prediction_metadata and approved annotation_metadata. The image_file must be a relative path contained within the manifest directory. Optional `market_context` can record `asset_class`, `symbol`, `exchange` and `timeframe`. Values are trimmed, limited to 32/64/64/16 characters respectively, and control characters are rejected. Asset class, exchange and timeframe are case-folded; symbols are uppercased so case-only variants share one group. Omitted dimensions are reported in a `null` group rather than silently excluded. Timeframe aliases such as `60m` and `1h` are intentionally not assumed equivalent. Each reference zone needs zone_type and the four normalized coordinates. Predicted zones should be the structured AI zones, including draw_overlay. Because the Telegram renderer requires a valid model plot frame before drawing any zone, include predicted_plot_bounds and an independently reviewed reference_plot_bounds for scored fixtures. If predicted_plot_bounds is missing or invalid, all AI zones are treated as ignored predictions (and matching manual zones remain false negatives), even when no manual plot boundary is supplied; they are never credited as drawable detections. If a model plot frame is supplied without a manual reference plot, the manifest is rejected rather than reporting an unpaired plot score. When price_axis_anchors are present, price_axis_plot_bounds is required and must describe the manually reviewed main price-plot rectangle; price_axis_scale selects linear or log price-unit scoring. Additional descriptive metadata fields may be included.
 
+## Structured price-label validation
+
+The live chart-response sanitizer accepts a numeric price range only when both
+fields are plain positive decimal strings and price_low < price_high. The
+higher value belongs at y_top; the lower value belongs at y_bottom. If
+either field is incomplete, malformed, non-positive or reversed, both structured
+price fields are withheld and the analysis receives an explicit warning. Valid
+pixel geometry remains independently drawable: a bad text range does not move
+or silently repair the overlay.
+
+This ordering check does not prove that the stated prices correspond to the
+zone's normalized y-coordinates. The live Telegram flow has no independently
+verified axis anchors, so it must not claim that mapping is calibrated. The
+offline evaluator's existing price_accuracy measures coordinate-derived
+prices against manual reference geometry using manually entered linear/log
+anchors. Comparing the model's stated price_low/price_high labels directly
+with those calibrated coordinate prices remains a separate benchmark task.
 ## Geometry scoring
 
 Call evaluate_zone_predictions(predicted_zones, reference_zones, image_width=1600, image_height=900, iou_threshold=0.5) from app.zone_evaluation. Always pass the original screenshot dimensions.

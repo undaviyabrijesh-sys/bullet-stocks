@@ -1,13 +1,32 @@
 import math
 import unittest
 
+from decimal import Decimal
+
 from stockmind_telegram_mvp.app.price_axis import (
     calibrate_price_axis,
+    parse_zone_price_bounds,
     zone_price_bounds,
 )
 
-
 class PriceAxisCalibrationTests(unittest.TestCase):
+    def test_parses_only_complete_positive_ordered_decimal_price_pairs(self):
+        self.assertEqual(
+            parse_zone_price_bounds({"price_low": "100.25", "price_high": "105.75"}),
+            (Decimal("100.25"), Decimal("105.75")),
+        )
+        for pair in (
+            {"price_low": "105", "price_high": "100"},
+            {"price_low": "100", "price_high": "100"},
+            {"price_low": "0", "price_high": "10"},
+            {"price_low": "-1", "price_high": "10"},
+            {"price_low": "1e3", "price_high": "2e3"},
+            {"price_low": "₹100", "price_high": "105"},
+            {"price_low": "100", "price_high": None},
+            {"price_low": "1" * 33, "price_high": "200"},
+        ):
+            with self.subTest(pair=pair), self.assertRaises(ValueError):
+                parse_zone_price_bounds(pair)
     def test_linear_axis_maps_coordinates_to_price_without_extrapolation(self):
         calibration = calibrate_price_axis([
             {"y": 0.2, "price": 120},
