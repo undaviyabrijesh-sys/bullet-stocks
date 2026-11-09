@@ -321,6 +321,28 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
             10.0,
         )
 
+    def test_rejects_boolean_or_float_reported_price_consistency_counts(self):
+        anchors = [
+            {"y": 0.2, "price": 120},
+            {"y": 0.5, "price": 90},
+            {"y": 0.8, "price": 60},
+        ]
+        for invalid_count in (True, 1.0):
+            with self.subTest(invalid_count=invalid_count):
+                report = self._report(
+                    "baseline",
+                    [{**_zone(), "draw_overlay": True, "price_low": "80", "price_high": "100"}],
+                    anchors=anchors,
+                )
+                report["fixtures"][0]["price_accuracy"]["reported_price_consistency"][
+                    "scored_match_count"
+                ] = invalid_count
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "reported_price_consistency.scored_match_count must be a non-negative integer",
+                ):
+                    compare_benchmark_reports(report, report)
+
     def test_rejects_tampered_reported_price_consistency_summary(self):
         anchors = [
             {"y": 0.2, "price": 120},
