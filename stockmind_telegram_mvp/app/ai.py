@@ -846,6 +846,134 @@ def _normalize_crypto_klines_for_model(result):
     return normalized
 
 
+def _crypto_confirmation_summary(serialized_result):
+    """Summarize only the Binance candle rows that were actually exposed to the model."""
+    try:
+        payload = strict_json_loads(serialized_result)
+    except (TypeError, ValueError):
+        return {"status": "unavailable"}
+
+    if not isinstance(payload, dict) or payload.get("deduplicated"):
+        return None
+
+    summary = {
+        "symbol": payload.get("symbol") if isinstance(payload.get("symbol"), str) else None,
+        "interval": payload.get("interval") if isinstance(payload.get("interval"), str) else None,
+        "market": payload.get("market") if isinstance(payload.get("market"), str) else None,
+        "truncated": isinstance(payload.get("truncation"), dict),
+    }
+    rows = payload.get("data")
+    error_types = {
+        "InvalidCryptoKlineResult",
+        "ProviderError",
+        "ToolBudgetExceeded",
+        "ToolResultTooLarge",
+        "ToolResultSerializationError",
+    }
+    if (
+        not isinstance(rows, list)
+        or payload.get("type") in error_types
+        or (payload.get("error") and not rows)
+    ):
+        summary.update({"status": "unavailable", "visible_rows": 0})
+        return summary
+
+    confirmation = payload.get("candle_confirmation")
+    clock_verified = (
+        payload.get("clock_source") == "binance_server_time"
+        and isinstance(confirmation, dict)
+        and confirmation.get("clock_verified") is True
+    )
+    closed_rows = sum(
+        1 for row in rows
+        if isinstance(row, dict)
+        and row.get("is_closed") is True
+        and row.get("candle_status") == "closed"
+    )
+    unconfirmed_rows = len(rows) - closed_rows
+    summary.update({
+        "clock_verified": clock_verified,
+        "visible_rows": len(rows),
+        "closed_rows": closed_rows,
+        "unconfirmed_rows": unconfirmed_rows,
+    })
+
+    if not rows:
+        summary["status"] = "no_rows"
+    elif not clock_verified:
+        summary["status"] = "unverified"
+    elif closed_rows == 0:
+        summary["status"] = "no_closed"
+    elif unconfirmed_rows:
+        summary["status"] = "mixed"
+    else:
+        summary["status"] = "all_closed"
+    return summary
+
+
+def _append_crypto_confirmation_note(answer, summaries):
+    """Append a deterministic closure caveat after the model's free-form answer."""
+    if not summaries:
+        return answer
+
+    notes = []
+    for summary in summaries:
+        if summary.get("status") is None:
+            continue
+        label_parts = [
+            value for value in (
+                summary.get("symbol"),
+                summary.get("interval"),
+                summary.get("market"),
+            ) if value
+        ]
+        label = " ".join(label_parts) or "requested candle sample"
+        status = summary.get("status")
+
+        if status == "unavailable":
+            detail = (
+                "Binance candle data was unavailable or withheld; no structural break "
+                "can be confirmed from this request."
+            )
+        elif status == "no_rows":
+            detail = (
+                "No candle rows were available; no BOS/CHOCH can be confirmed from this request."
+            )
+        elif status == "unverified":
+            count = summary.get("visible_rows", 0)
+            detail = (
+                f"Server-time verification was unavailable; all {count} model-visible "
+                "candle row(s) are unverified. Any BOS/CHOCH claim based on this sample "
+                "is provisional, not confirmed."
+            )
+        elif status == "no_closed":
+            detail = (
+                "No model-visible candle row passed the closed-candle check; a BOS/CHOCH "
+                "cannot be confirmed from this sample."
+            )
+        elif status == "mixed":
+            detail = (
+                f"{summary.get('closed_rows', 0)} model-visible row(s) were closed and "
+                f"{summary.get('unconfirmed_rows', 0)} were forming/unverified. Only closed "
+                "rows are eligible to confirm a structural break; any claim relying on "
+                "unconfirmed rows is provisional."
+            )
+        else:
+            detail = (
+                f"All {summary.get('closed_rows', 0)} model-visible candle row(s) passed "
+                "the closed-candle check. This verifies candle closure only; it does not "
+                "by itself establish a BOS/CHOCH."
+            )
+
+        if summary.get("truncated"):
+            detail += " The provider result was sampled to fit the model context."
+        notes.append(f"Automated Binance candle check ({label}): {detail}")
+
+    if not notes:
+        return answer
+    return answer.rstrip() + "\n\n" + "\n".join(notes)
+
+
 class ResearchAI:
     def __init__(
         self,
@@ -966,6 +1094,12 @@ class ResearchAI:
         # the tool name and effective arguments after dispatch defaults and provider-safe
         # symbol normalization, so distinct endpoints/parameters never share data.
         tool_result_cache = {}
+        crypto_confirmation_summaries = []
+
+        def finalize_answer(content):
+            return _append_crypto_confirmation_note(
+                content, crypto_confirmation_summaries
+            )
 
         for _ in range(4):
             request_options = {
@@ -980,11 +1114,13 @@ class ResearchAI:
             response = await self.client.chat.completions.create(**request_options)
             message = response.choices[0].message
             if not message.tool_calls:
-                return message.content or "I couldn't prepare a reliable answer. Please try again."
+                return finalize_answer(
+                    message.content or "I couldn't prepare a reliable answer. Please try again."
+                )
 
             remaining_calls = MAX_TOOL_CALLS_PER_TURN - tool_calls_used
             if len(message.tool_calls) > remaining_calls:
-                return (
+                return finalize_answer(
                     "I stopped this research turn because it requested more than "
                     f"{MAX_TOOL_CALLS_PER_TURN} separate market-data lookups. "
                     "Please narrow the question to one instrument or a smaller set of data."
@@ -1083,6 +1219,11 @@ class ResearchAI:
                     )
                     tool_result_bytes += len(serialized_result.encode("utf-8"))
 
+                if call.function.name == "get_crypto_klines":
+                    summary = _crypto_confirmation_summary(serialized_result)
+                    if summary is not None:
+                        crypto_confirmation_summaries.append(summary)
+
                 messages.append(
                     {
                         "role": "tool",
@@ -1091,4 +1232,6 @@ class ResearchAI:
                     }
                 )
 
-        return "I couldn't complete the research within the allowed steps. Please narrow the question."
+        return finalize_answer(
+            "I couldn't complete the research within the allowed steps. Please narrow the question."
+        )
