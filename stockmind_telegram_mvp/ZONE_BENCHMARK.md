@@ -258,6 +258,7 @@ Price-axis calibration:
 - requires 3..20 manually verified anchors and a manually marked main price-plot rectangle; two points are deliberately insufficient because they cannot expose a distorted/non-uniform scale;
 - rejects anchor y-coordinates outside the marked main price plot, preventing toolbar or lower indicator-panel labels from calibrating the candle chart;
 - fits either a linear price axis or a linear fit in log-price space;
+- normalizes linear anchor prices before least-squares fitting to avoid overflowing intermediate sums; fits whose slope/intercept cannot be represented as finite floats are rejected, and logarithmic calibration is tested across the finite floating-point price range;
 - rejects reversed/non-monotonic anchors and fits whose maximum anchor residual exceeds 2% by default (the caller may set a stricter tolerance, up to 10%);
 - never extrapolates beyond the first/last anchor y-coordinate;
 - reports matched-zone high/low boundary error from normalized, pixel-rounded geometry in price units and as a percentage, separately from IoU;
