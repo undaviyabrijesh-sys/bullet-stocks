@@ -132,6 +132,29 @@ def editor_canvas_point_to_normalized(x, y, render_width, render_height):
     return tuple(normalized)
 
 
+def editor_canvas_point_to_source_normalized(
+    x, y, render_width, render_height, image_width, image_height
+):
+    """Map a rendered-canvas point to the nearest original-image pixel boundary.
+
+    Annotation JSON uses full-resolution screenshot coordinates. Quantizing at
+    the source resolution makes a drag produce the same geometry at every zoom
+    level and avoids storing sub-pixel edges that the benchmark cannot score.
+    """
+    for field, value in (("image_width", image_width), ("image_height", image_height)):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{field} must be a positive integer")
+    x_normalized, y_normalized = editor_canvas_point_to_normalized(
+        x, y, render_width, render_height
+    )
+    try:
+        source_x = round(x_normalized * image_width)
+        source_y = round(y_normalized * image_height)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError("canvas point cannot be represented at source resolution") from exc
+    return source_x / image_width, source_y / image_height
+
+
 def editor_canvas_point_inside_image(x, y, render_width, render_height):
     """Return whether a raw canvas point is within the screenshot pixel area.
 
@@ -190,6 +213,38 @@ def _validate_box(box, field):
     if values["y_top"] >= values["y_bottom"]:
         raise ValueError(f"{field} must have positive height")
     return values
+
+
+def editor_box_to_canvas_coordinates(
+    box, image_width, image_height, render_width, render_height
+):
+    """Draw a normalized box at the source-pixel boundaries scored by the benchmark."""
+    for field, value in (
+        ("image_width", image_width),
+        ("image_height", image_height),
+        ("render_width", render_width),
+        ("render_height", render_height),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{field} must be a positive integer")
+    if not isinstance(box, dict):
+        raise ValueError("box must be an object")
+    normalized = _validate_box(
+        {key: box.get(key) for key in _BOX_FIELDS}, "editor box"
+    )
+    try:
+        left = round(normalized["x_start"] * image_width)
+        right = round(normalized["x_end"] * image_width)
+        top = round(normalized["y_top"] * image_height)
+        bottom = round(normalized["y_bottom"] * image_height)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError("box cannot be represented at source resolution") from exc
+    return (
+        left * render_width / image_width,
+        top * render_height / image_height,
+        right * render_width / image_width,
+        bottom * render_height / image_height,
+    )
 
 
 def editor_canvas_point_inside_plot(x, y, render_width, render_height, plot_bounds):
@@ -656,8 +711,13 @@ class _DesktopEditor:
         )
 
     def _coords(self, box):
-        return (box["x_start"] * self.render_w, box["y_top"] * self.render_h,
-                box["x_end"] * self.render_w, box["y_bottom"] * self.render_h)
+        return editor_box_to_canvas_coordinates(
+            box,
+            self.image_width,
+            self.image_height,
+            self.render_w,
+            self.render_h,
+        )
 
     def _redraw(self):
         self.canvas.delete("overlay")
@@ -830,8 +890,9 @@ class _DesktopEditor:
                     "not in the price-label margin."
                 )
                 return
-            _, y = editor_canvas_point_to_normalized(
-                0, y1, self.render_w, self.render_h
+            _, y = editor_canvas_point_to_source_normalized(
+                0, y1, self.render_w, self.render_h,
+                self.image_width, self.image_height,
             )
             raw_price = self.simpledialog.askstring(
                 "Manual price-axis anchor",
@@ -863,11 +924,13 @@ class _DesktopEditor:
         if right - left < 2 or bottom - top < 2:
             self.status.set("Rectangle too small; drag a larger area.")
             return
-        x_start, y_top = editor_canvas_point_to_normalized(
-            left, top, self.render_w, self.render_h
+        x_start, y_top = editor_canvas_point_to_source_normalized(
+            left, top, self.render_w, self.render_h,
+            self.image_width, self.image_height,
         )
-        x_end, y_bottom = editor_canvas_point_to_normalized(
-            right, bottom, self.render_w, self.render_h
+        x_end, y_bottom = editor_canvas_point_to_source_normalized(
+            right, bottom, self.render_w, self.render_h,
+            self.image_width, self.image_height,
         )
         box = {
             "x_start": x_start,
