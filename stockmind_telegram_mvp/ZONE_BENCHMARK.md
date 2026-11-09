@@ -431,3 +431,13 @@ dimensions whose coordinate scaling cannot be represented by the numeric
 runtime, the geometry helper rejects the box instead of leaking an overflow
 exception. These synthetic tests verify coordinate semantics; they are not
 evidence of market-zone detection accuracy.
+
+## Reviewed screenshot immutability
+
+Prediction capture and benchmark assembly reload the canonical screenshot referenced
+by the reviewed annotation and verify its SHA-256 and dimensions. Replacing or
+editing that image after annotation/review invalidates the handoff, even when the
+saved annotation and prediction-capture JSON still agree with each other. Re-intake
+the exact intended screenshot and repeat annotation and independent review; do not
+repair a mismatch by editing a stored hash. A regression test changes the source
+image after a valid capture and verifies that both capture and assembly fail closed.
