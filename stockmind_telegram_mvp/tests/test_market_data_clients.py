@@ -181,8 +181,9 @@ class BinanceResponseValidationTests(unittest.IsolatedAsyncioTestCase):
             httpx.Response(200, json=[row]),
             time_response=httpx.Response(200, json={"serverTime": 1700001000000}),
         )
+        queued_responses = list(client.client.get.side_effect)
         second_kline_response = self.prepare_response(httpx.Response(200, json=[row]))
-        client.client.get.side_effect = [second_kline_response]
+        client.client.get.side_effect = queued_responses + [second_kline_response]
 
         with patch(
             "stockmind_telegram_mvp.app.crypto.time.monotonic_ns",
