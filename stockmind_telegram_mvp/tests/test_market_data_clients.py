@@ -93,17 +93,22 @@ class TapetideResponseValidationTests(unittest.IsolatedAsyncioTestCase):
 
 
 class BinanceResponseValidationTests(unittest.IsolatedAsyncioTestCase):
-    def make_client(self, response):
+    def prepare_response(self, response):
         # AsyncClient attaches the originating request before raise_for_status().
-        # Rebuild mocked responses with that same required HTTPX invariant.
-        response = httpx.Response(
+        return httpx.Response(
             response.status_code,
             headers=response.headers,
             content=response.content,
             request=httpx.Request("GET", "https://api.binance.com/test"),
         )
+
+    def make_client(self, response, time_response=None):
+        response = self.prepare_response(response)
+        if time_response is None:
+            time_response = httpx.Response(200, json={"serverTime": 1700001000000})
+        time_response = self.prepare_response(time_response)
         client = object.__new__(BinanceMarketData)
-        client.client = SimpleNamespace(get=AsyncMock(return_value=response))
+        client.client = SimpleNamespace(get=AsyncMock(side_effect=[response, time_response]))
         return client
 
     async def test_maps_valid_kline_rows_without_changing_provider_values(self):
@@ -117,25 +122,79 @@ class BinanceResponseValidationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["data"][0]["trades"], 100)
         self.assertEqual(result["market"], "usdm")
 
-    async def test_marks_closed_and_forming_klines_against_one_response_timestamp(self):
+    async def test_marks_closed_and_forming_klines_against_conservative_binance_time(self):
         first = [1700000000000, "1", "2", "0.5", "1.5", "10", 1700000899999, "15", 100]
         boundary = [1700000900000, "1", "2", "0.5", "1.5", "10", 1700000900000, "15", 100]
         as_of_ms = 1700000900000
-        client = self.make_client(httpx.Response(200, json=[first, boundary]))
+        time_response = httpx.Response(200, json={"serverTime": as_of_ms + 2})
+        client = self.make_client(
+            httpx.Response(200, json=[first, boundary]),
+            time_response=time_response,
+        )
 
         with patch(
-            "stockmind_telegram_mvp.app.crypto.time.time_ns",
-            return_value=as_of_ms * 1_000_000,
+            "stockmind_telegram_mvp.app.crypto.time.monotonic_ns",
+            side_effect=[0, 1_000_000],
         ) as clock:
             result = await client.klines("BTCUSDT", interval="1m")
 
         self.assertEqual(result["as_of_ms"], as_of_ms)
+        self.assertEqual(result["clock_source"], "binance_server_time")
+        self.assertEqual(result["clock_uncertainty_ms"], 2)
         self.assertEqual([row["is_closed"] for row in result["data"]], [True, False])
         self.assertEqual(
             [row["candle_status"] for row in result["data"]],
             ["closed", "forming"],
         )
-        clock.assert_called_once_with()
+        self.assertEqual(clock.call_count, 2)
+        self.assertIn("/api/v3/time", client.client.get.await_args_list[1].args[0])
+
+    async def test_unavailable_or_malformed_server_time_never_confirms_candles(self):
+        row = [1700000000000, "1", "2", "0.5", "1.5", "10", 1700000899999, "15", 100]
+        invalid_time_responses = (
+            httpx.Response(
+                503,
+                json={"message": "temporarily unavailable"},
+                request=httpx.Request("GET", "https://api.binance.com/api/v3/time"),
+            ),
+            httpx.Response(200, json={"serverTime": "1700001000000"}),
+            httpx.Response(200, json={"serverTime": True}),
+            httpx.Response(200, json={"serverTime": -1}),
+        )
+        for time_response in invalid_time_responses:
+            with self.subTest(time_response=time_response.status_code):
+                client = self.make_client(
+                    httpx.Response(200, json=[row]),
+                    time_response=time_response,
+                )
+                result = await client.klines("BTCUSDT")
+
+                self.assertEqual(result["clock_source"], "unverified")
+                self.assertIsNone(result["as_of_ms"])
+                self.assertIsNone(result["clock_uncertainty_ms"])
+                self.assertFalse(result["data"][0]["is_closed"])
+                self.assertEqual(result["data"][0]["candle_status"], "unverified")
+
+    async def test_reuses_server_time_sync_within_market_cache_ttl(self):
+        row = [1700000000000, "1", "2", "0.5", "1.5", "10", 1700000899999, "15", 100]
+        client = self.make_client(
+            httpx.Response(200, json=[row]),
+            time_response=httpx.Response(200, json={"serverTime": 1700001000000}),
+        )
+        second_kline_response = self.prepare_response(httpx.Response(200, json=[row]))
+        client.client.get.side_effect = [second_kline_response]
+
+        with patch(
+            "stockmind_telegram_mvp.app.crypto.time.monotonic_ns",
+            side_effect=[0, 1_000_000, 2_000_000],
+        ) as clock:
+            first = await client.klines("BTCUSDT", interval="1h")
+            second = await client.klines("BTCUSDT", interval="1h")
+
+        self.assertEqual(first["clock_source"], "binance_server_time")
+        self.assertEqual(second["clock_source"], "binance_server_time")
+        self.assertEqual(client.client.get.await_count, 3)
+        self.assertEqual(clock.call_count, 3)
 
     async def test_rejects_non_finite_non_positive_or_malformed_kline_values(self):
         base_row = [1700000000000, "1", "2", "0.5", "1.5", "10", 1700000899999, "15", 100]

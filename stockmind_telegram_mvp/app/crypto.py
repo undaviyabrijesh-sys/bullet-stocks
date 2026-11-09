@@ -1,3 +1,5 @@
+import asyncio
+import math
 import re
 import time
 from decimal import Decimal, InvalidOperation
@@ -9,6 +11,8 @@ _DECIMAL_TEXT = re.compile(r"[0-9]+(?:\.[0-9]+)?\Z")
 SPOT = "https://api.binance.com"
 FUTURES = "https://fapi.binance.com"
 INTERVALS = {"1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M"}
+SERVER_TIME_CACHE_TTL_NS = 30_000_000_000
+SERVER_CLOCK_DRIFT_PPM = 100
 
 
 class BinanceMarketData:
@@ -16,6 +20,8 @@ class BinanceMarketData:
 
     def __init__(self):
         self.client = httpx.AsyncClient(timeout=15.0)
+        self._server_clock_cache = {}
+        self._server_clock_lock = asyncio.Lock()
 
     @staticmethod
     def _symbol(value: str) -> str:
@@ -40,6 +46,89 @@ class BinanceMarketData:
             return response.json()
         except ValueError as exc:
             raise RuntimeError("Binance returned a non-JSON response.") from exc
+
+    async def _server_clock(self, market: str) -> dict:
+        """Return a conservative Binance-time estimate, cached per market.
+
+        The uncertainty margin includes the full observed round-trip time,
+        one millisecond for server timestamp resolution, and a 100 ppm drift
+        allowance while the monotonic-clock sample is cached.
+        """
+        base = self._base(market)
+        path = "/api/v3/time" if market == "spot" else "/fapi/v1/time"
+        cache = getattr(self, "_server_clock_cache", None)
+        if cache is None:
+            cache = {}
+            self._server_clock_cache = cache
+        lock = getattr(self, "_server_clock_lock", None)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._server_clock_lock = lock
+
+        async with lock:
+            now_ns = time.monotonic_ns()
+            cached = cache.get(market)
+            if cached is not None:
+                elapsed_ns = now_ns - cached["received_monotonic_ns"]
+                if 0 <= elapsed_ns <= SERVER_TIME_CACHE_TTL_NS:
+                    elapsed_ms = elapsed_ns / 1_000_000
+                    drift_allowance_ms = math.ceil(
+                        elapsed_ms * SERVER_CLOCK_DRIFT_PPM / 1_000_000
+                    )
+                    uncertainty_ms = cached["uncertainty_ms"] + drift_allowance_ms
+                    as_of_ms = math.floor(
+                        cached["server_time_ms"] + elapsed_ms - uncertainty_ms
+                    )
+                    if as_of_ms > 0:
+                        return {
+                            "as_of_ms": as_of_ms,
+                            "clock_source": "binance_server_time",
+                            "clock_uncertainty_ms": uncertainty_ms,
+                        }
+
+            started_ns = now_ns
+            try:
+                payload = await self._get_json(base + path, {})
+            except (httpx.HTTPError, RuntimeError, ValueError):
+                return {
+                    "as_of_ms": None,
+                    "clock_source": "unverified",
+                    "clock_uncertainty_ms": None,
+                }
+
+            received_ns = time.monotonic_ns()
+            server_time_ms = payload.get("serverTime") if isinstance(payload, dict) else None
+            if (
+                isinstance(server_time_ms, bool)
+                or not isinstance(server_time_ms, int)
+                or server_time_ms <= 0
+            ):
+                return {
+                    "as_of_ms": None,
+                    "clock_source": "unverified",
+                    "clock_uncertainty_ms": None,
+                }
+
+            round_trip_ms = math.ceil(max(0, received_ns - started_ns) / 1_000_000)
+            uncertainty_ms = round_trip_ms + 1
+            as_of_ms = server_time_ms - uncertainty_ms
+            if as_of_ms <= 0:
+                return {
+                    "as_of_ms": None,
+                    "clock_source": "unverified",
+                    "clock_uncertainty_ms": None,
+                }
+
+            cache[market] = {
+                "server_time_ms": server_time_ms,
+                "received_monotonic_ns": received_ns,
+                "uncertainty_ms": uncertainty_ms,
+            }
+            return {
+                "as_of_ms": as_of_ms,
+                "clock_source": "binance_server_time",
+                "clock_uncertainty_ms": uncertainty_ms,
+            }
 
     @staticmethod
     def _decimal_field(value, *, allow_zero: bool, error_message: str) -> Decimal:
@@ -71,9 +160,6 @@ class BinanceMarketData:
         )
         if not isinstance(rows, list):
             raise RuntimeError("Binance returned an unexpected kline response.")
-        # Capture one UTC wall-clock timestamp for the entire response so candle
-        # closure flags are internally consistent, even across a minute boundary.
-        as_of_ms = time.time_ns() // 1_000_000
         if any(not isinstance(row, (list, tuple)) or len(row) < 9 for row in rows):
             raise RuntimeError("Binance returned a malformed kline row.")
 
@@ -116,22 +202,35 @@ class BinanceMarketData:
                 raise RuntimeError("Binance returned inconsistent OHLC values.")
             validated_rows.append(row)
 
+        clock = await self._server_clock(market)
+        clock_verified = clock["clock_source"] == "binance_server_time"
+        as_of_ms = clock["as_of_ms"]
+        data = []
+        for row in validated_rows:
+            is_closed = bool(clock_verified and row[6] < as_of_ms)
+            candle_status = (
+                "closed" if is_closed else "forming" if clock_verified else "unverified"
+            )
+            data.append({
+                "open_time": row[0], "open": row[1], "high": row[2], "low": row[3],
+                "close": row[4], "volume": row[5], "close_time": row[6],
+                "quote_volume": row[7], "trades": row[8],
+                "is_closed": is_closed,
+                "candle_status": candle_status,
+            })
+
         return {
             "source": "Binance",
             "market": market,
             "symbol": symbol,
             "interval": interval,
             "timezone": "UTC timestamps (display in IST when useful)",
-            "data": [
-                {"open_time": row[0], "open": row[1], "high": row[2], "low": row[3],
-                 "close": row[4], "volume": row[5], "close_time": row[6],
-                 "quote_volume": row[7], "trades": row[8],
-                 "is_closed": row[6] < as_of_ms,
-                 "candle_status": "closed" if row[6] < as_of_ms else "forming"}
-                for row in validated_rows
-            ],
-            "as_of_ms": as_of_ms,
-            "note": "Each candle's is_closed flag is evaluated against this response's as_of_ms timestamp."
+            "data": data,
+            **clock,
+            "note": (
+                "as_of_ms is a conservative lower-bound estimate of Binance server time; "
+                "candle closure is unverified when clock_source is unverified."
+            ),
         }
 
     async def ticker(self, symbol: str, market: str = "spot"):
