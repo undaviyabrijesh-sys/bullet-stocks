@@ -974,9 +974,11 @@ class DraftImageVerificationTests(unittest.TestCase):
     def test_rejects_image_symlink_that_escapes_draft_directory(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
+            fixture_dir = root / "fixture"
+            fixture_dir.mkdir()
             outside = root / "outside"
             outside.mkdir()
-            images_link = root / "images"
+            images_link = fixture_dir / "images"
             try:
                 images_link.symlink_to(outside, target_is_directory=True)
             except (OSError, NotImplementedError):
@@ -988,7 +990,7 @@ class DraftImageVerificationTests(unittest.TestCase):
             draft["image_sha256"] = hashlib.sha256(image_bytes).hexdigest()
             draft["image_width"] = 32
             draft["image_height"] = 24
-            draft_path = root / "chart.draft.json"
+            draft_path = fixture_dir / "chart.draft.json"
             draft_path.write_text(json.dumps(draft), encoding="utf-8")
 
             with self.assertRaisesRegex(ValueError, "remain inside the draft directory"):
