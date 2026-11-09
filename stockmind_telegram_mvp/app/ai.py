@@ -697,13 +697,37 @@ TOOLS = [
 
 
 def _normalize_crypto_klines_for_model(result):
-    """Recompute Binance candle closure at the model boundary; fail closed on bad clock metadata."""
+    """Recompute Binance candle closure at the model boundary; fail closed on bad payloads."""
+    def invalid_result(message):
+        return {
+            "source": "Binance",
+            "clock_source": "unverified",
+            "as_of_ms": None,
+            "clock_uncertainty_ms": None,
+            "data": [],
+            "error": message,
+            "type": "InvalidCryptoKlineResult",
+            "candle_confirmation": {
+                "clock_verified": False,
+                "confirmed_closed_rows": 0,
+                "unconfirmed_rows": 0,
+                "rule": "requires clock_source=binance_server_time and close_time < as_of_ms",
+            },
+        }
+
     if not isinstance(result, dict):
-        return result
+        return invalid_result("Binance returned a malformed kline result; candle data was withheld.")
+
+    if "data" not in result:
+        return result if result.get("error") else invalid_result(
+            "Binance kline result is missing its data array; candle data was withheld."
+        )
 
     rows = result.get("data")
     if not isinstance(rows, list):
-        return result
+        return invalid_result("Binance kline data is not an array; candle data was withheld.")
+    if any(not isinstance(row, dict) for row in rows):
+        return invalid_result("Binance kline data contains malformed rows; all candle data was withheld.")
 
     normalized = dict(result)
     as_of_ms = result.get("as_of_ms")
@@ -720,9 +744,14 @@ def _normalize_crypto_klines_for_model(result):
         normalized["clock_uncertainty_ms"] = None
         normalized["data"] = [
             {**row, "is_closed": False, "candle_status": "unverified"}
-            if isinstance(row, dict) else row
             for row in rows
         ]
+        normalized["candle_confirmation"] = {
+            "clock_verified": False,
+            "confirmed_closed_rows": 0,
+            "unconfirmed_rows": len(rows),
+            "rule": "requires clock_source=binance_server_time and close_time < as_of_ms",
+        }
         return normalized
 
     confirmed_count = 0
