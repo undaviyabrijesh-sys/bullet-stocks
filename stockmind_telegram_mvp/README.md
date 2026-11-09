@@ -81,7 +81,7 @@ The bot now returns a second image with translucent supply (red) and demand (gre
 
 ## Intraday data boundaries
 - Tapetide's Indian-equity intraday bars are historical and update after the session closes; they are not a live candle feed. A separate session-live quote route is integrated for supported stocks; availability/coverage and provider timestamp must be checked on every request.
-- Binance public ticker/candle endpoints provide crypto market data without API credentials. The latest candle may still be forming; the assistant must label it accordingly.
+- Binance public ticker/candle endpoints provide crypto market data without API credentials. The latest candle may still be forming; the assistant must label it accordingly. Server-time samples are cached independently for spot and USD-M futures for 30 seconds. If a time request fails or returns malformed data, the adapter briefly caches the unverified state for 5 seconds to avoid repeating the failing time request on every kline call; candles remain unverified throughout that cooldown, and the adapter retries after it expires. It never falls back to the machine wall clock.
 - This version does not provide a verified live Indian index/stock-options feed, broker execution, order routing, or exchange-grade streaming. Do not present delayed or end-of-session candles as real-time.
 - Indian cash-market session reference: 09:15–15:30 IST. Crypto markets trade 24/7.
 
