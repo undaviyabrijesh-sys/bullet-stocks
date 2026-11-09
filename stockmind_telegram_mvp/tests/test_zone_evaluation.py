@@ -276,6 +276,27 @@ class ZoneEvaluationTests(unittest.TestCase):
         self.assertEqual(summary["unscored_match_count"], 1)
         self.assertIsNone(summary["mean_boundary_abs_disagreement"])
 
+    def test_overflowing_reported_price_percentage_is_unscored_not_serialized_as_infinity(self):
+        result = evaluate(
+            [prediction(
+                price_low="9999999999999999999999999999",
+                price_high="99999999999999999999999999999",
+            )],
+            [zone()],
+            price_axis_anchors=[
+                {"y": 0.2, "price": 1e-280},
+                {"y": 0.5, "price": 1e-290},
+                {"y": 0.8, "price": 1e-300},
+            ],
+            price_axis_scale="log",
+            price_axis_plot_bounds=PLOT_BOUNDS,
+            predicted_plot_bounds=PLOT_BOUNDS,
+        )
+
+        consistency = result["matches"][0]["reported_price_consistency"]
+        self.assertEqual(consistency["status"], "unscored")
+        self.assertIn("numeric range", consistency["reason"])
+
     def test_price_axis_anchors_require_a_manually_marked_plot(self):
         with self.assertRaisesRegex(ValueError, "price_axis_plot_bounds is required"):
             evaluate([prediction()], [zone()], price_axis_anchors=AXIS_ANCHORS)
