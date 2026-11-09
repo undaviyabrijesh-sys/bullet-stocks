@@ -122,7 +122,7 @@ class BinanceMarketData:
                 {"open_time": row[0], "open": row[1], "high": row[2], "low": row[3],
                  "close": row[4], "volume": row[5], "close_time": row[6],
                  "quote_volume": row[7], "trades": row[8]}
-                for row in rows
+                for row in validated_rows
             ],
             "note": "The final candle may still be forming; do not treat it as closed until close_time has passed."
         }
