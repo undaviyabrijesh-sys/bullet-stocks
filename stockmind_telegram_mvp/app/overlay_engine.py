@@ -192,8 +192,13 @@ def normalized_zone_to_pixel_box(
     if x1 <= x0 or y1 <= y0 or y1 - y0 > 0.45:
         return None
 
-    left, right = round(x0 * width), round(x1 * width)
-    top, bottom = round(y0 * height), round(y1 * height)
+    try:
+        left, right = round(x0 * width), round(x1 * width)
+        top, bottom = round(y0 * height), round(y1 * height)
+    except (OverflowError, ValueError):
+        # Public geometry helpers also receive manifest dimensions. Reject
+        # unrepresentable scaling rather than leaking an arithmetic exception.
+        return None
     if right - left < min_width or bottom - top < min_height:
         return None
     return left, top, right, bottom
@@ -223,8 +228,13 @@ def normalized_plot_bounds_to_pixel_box(
         return None
     if x1 <= x0 or y1 <= y0:
         return None
-    left, right = round(x0 * width), round(x1 * width)
-    top, bottom = round(y0 * height), round(y1 * height)
+    try:
+        left, right = round(x0 * width), round(x1 * width)
+        top, bottom = round(y0 * height), round(y1 * height)
+    except (OverflowError, ValueError):
+        # Public geometry helpers also receive manifest dimensions. Reject
+        # unrepresentable scaling rather than leaking an arithmetic exception.
+        return None
     if right - left < 3 or bottom - top < 2:
         return None
     return left, top, right, bottom
