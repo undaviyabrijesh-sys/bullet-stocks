@@ -85,6 +85,15 @@ class PriceAxisCalibrationTests(unittest.TestCase):
             ))
         self.assertTrue(math.isfinite(calibration.max_anchor_relative_error))
 
+    def test_rejects_anchor_residual_that_overflows_relative_error(self):
+        anchors = [
+            {"y": 0.1, "price": 1e307},
+            {"y": 0.4, "price": 9e306},
+            {"y": 0.5, "price": math.ulp(0.0)},
+        ]
+        with self.assertRaisesRegex(ValueError, "calibration residual exceeds"):
+            calibrate_price_axis(anchors)
+
     def test_rejects_linear_fit_that_cannot_be_represented_as_finite_slope(self):
         anchors = [
             {"y": 0.1, "price": 9e307},
