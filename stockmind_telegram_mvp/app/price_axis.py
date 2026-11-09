@@ -56,11 +56,16 @@ def parse_zone_price_bounds(zone):
 class PriceAxisCalibration:
     scale: str
     slope: float
-    intercept: float
+    intercept: float | None
     min_y: float
     max_y: float
     anchor_count: int
     max_anchor_relative_error: float
+    # New calibrations are evaluated around the anchor centroid instead of
+    # extrapolating the fitted line to screenshot coordinate y=0. These
+    # optional fields preserve compatibility with older direct constructors.
+    reference_y: float | None = None
+    reference_value: float | None = None
 
     def price_at_y(self, y: float) -> float:
         """Convert a normalized screenshot y-coordinate to price without extrapolation."""
@@ -70,7 +75,30 @@ class PriceAxisCalibration:
         if y < self.min_y - _Y_TOLERANCE or y > self.max_y + _Y_TOLERANCE:
             raise ValueError("y is outside the calibrated price-axis range")
 
-        fitted = self.intercept + self.slope * y
+        try:
+            if self.reference_y is not None and self.reference_value is not None:
+                # Evaluate locally around the anchor centroid. The legacy
+                # intercept at y=0 may be outside float range even when every
+                # price inside the calibrated screenshot region is representable.
+                fitted = math.fsum((
+                    self.reference_value,
+                    self.slope * (y - self.reference_y),
+                ))
+            else:
+                # Compatibility path for calibrations constructed with the
+                # original seven positional fields.
+                if self.intercept is None:
+                    raise ValueError(
+                        "calibration has no finite intercept or centered reference"
+                    )
+                fitted = math.fsum((self.intercept, self.slope * y))
+        except (OverflowError, ValueError) as exc:
+            raise ValueError(
+                "calibrated price is outside the supported numeric range"
+            ) from exc
+
+        if not math.isfinite(fitted):
+            raise ValueError("calibrated price is outside the supported numeric range")
         try:
             price = math.exp(fitted) if self.scale == "log" else fitted
         except OverflowError as exc:
@@ -157,13 +185,25 @@ def calibrate_price_axis(
         (y - mean_y) * (value - mean_value)
         for y, value in zip(ys, fit_values)
     ) / denominator
-    intercept_scaled = mean_value - slope_scaled * mean_y
     slope = slope_scaled * value_scale
-    intercept = intercept_scaled * value_scale
-    if not math.isfinite(slope) or not math.isfinite(intercept):
+    reference_value = mean_value * value_scale if scale == "linear" else mean_value
+    if (
+        not math.isfinite(slope)
+        or not math.isfinite(reference_value)
+        or (scale == "linear" and reference_value <= 0)
+    ):
         raise ValueError("price-axis fit exceeds the supported numeric range")
     if slope >= 0:
         raise ValueError("price-axis fit is not a descending price scale")
+
+    # Keep the old intercept available for ordinary ranges, but do not reject
+    # a valid calibrated region merely because extrapolating to y=0 overflows.
+    try:
+        intercept = math.fsum((reference_value, -(slope * mean_y)))
+    except (OverflowError, ValueError):
+        intercept = None
+    if intercept is not None and not math.isfinite(intercept):
+        intercept = None
 
     calibration = PriceAxisCalibration(
         scale=scale,
@@ -173,6 +213,8 @@ def calibrate_price_axis(
         max_y=ys[-1],
         anchor_count=len(points),
         max_anchor_relative_error=0.0,
+        reference_y=mean_y,
+        reference_value=reference_value,
     )
     relative_errors = []
     for y, observed_price in points:
