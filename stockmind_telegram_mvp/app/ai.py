@@ -63,7 +63,7 @@ DEMAND AND SUPPLY (DNS) / PRICE-ACTION LANGUAGE:
 INTRADAY AND CRYPTO:
 - Support Indian cash equities and crypto spot/USD-M perpetual markets through Binance public read-only data.
 - Use get_intraday_stock_bars for historical 1/5/15-minute Indian equity candles. These bars update after the session closes; they are NOT a live candle feed. Use get_live_quote for session-live Indian stock quotes where available; otherwise use get_quote for the latest available quote and state its timestamp.
-- Use get_crypto_klines and get_crypto_ticker for crypto. For Binance klines, use clock_source, as_of_ms, clock_uncertainty_ms and each candle's is_closed/candle_status fields. Only is_closed=true candles with clock_source=binance_server_time are confirmed closed. If clock_source is unverified, treat every candle as unconfirmed. Do not infer candle closure from array position alone.
+- Use get_crypto_klines and get_crypto_ticker for crypto. For Binance klines, use clock_source, as_of_ms, clock_uncertainty_ms and each candle's is_closed/candle_status fields. The research tool boundary independently recomputes closure from close_time < as_of_ms; only rows marked closed with clock_source=binance_server_time are eligible to confirm BOS/CHOCH. Forming or unverified rows cannot confirm a structural break. If no eligible closed candle supports the break, describe it as provisional/unconfirmed. If clock_source is unverified, treat every candle as unconfirmed. Do not infer candle closure from array position alone.
 - For intraday analysis, establish instrument, market and timeframe. Indian regular cash session is 09:15–15:30 IST; crypto trades 24/7. Ask one short clarification if a crucial detail is missing.
 - Structure a setup as market bias, key levels/zones, trigger/confirmation, conditional entry area, invalidation/stop, targets, reward:risk and cancellation condition. Mark data timestamp and candle status.
 - Calculate position size only when the user supplies account risk and stop distance; show the formula. Never imply a setup is guaranteed or place/route orders.
@@ -694,6 +694,72 @@ TOOLS = [
         }
     },
 ]
+
+
+def _normalize_crypto_klines_for_model(result):
+    """Recompute Binance candle closure at the model boundary; fail closed on bad clock metadata."""
+    if not isinstance(result, dict):
+        return result
+
+    rows = result.get("data")
+    if not isinstance(rows, list):
+        return result
+
+    normalized = dict(result)
+    as_of_ms = result.get("as_of_ms")
+    clock_verified = (
+        result.get("clock_source") == "binance_server_time"
+        and isinstance(as_of_ms, int)
+        and not isinstance(as_of_ms, bool)
+        and as_of_ms > 0
+    )
+
+    if not clock_verified:
+        normalized["clock_source"] = "unverified"
+        normalized["as_of_ms"] = None
+        normalized["clock_uncertainty_ms"] = None
+        normalized["data"] = [
+            {**row, "is_closed": False, "candle_status": "unverified"}
+            if isinstance(row, dict) else row
+            for row in rows
+        ]
+        return normalized
+
+    confirmed_count = 0
+    normalized_rows = []
+    for row in rows:
+        if not isinstance(row, dict):
+            normalized_rows.append(row)
+            continue
+
+        close_time = row.get("close_time")
+        valid_close_time = (
+            isinstance(close_time, int)
+            and not isinstance(close_time, bool)
+            and close_time >= 0
+        )
+        is_closed = valid_close_time and close_time < as_of_ms
+        if is_closed:
+            confirmed_count += 1
+        status = (
+            "closed" if is_closed
+            else "forming" if valid_close_time
+            else "unverified"
+        )
+        normalized_rows.append({
+            **row,
+            "is_closed": is_closed,
+            "candle_status": status,
+        })
+
+    normalized["data"] = normalized_rows
+    normalized["candle_confirmation"] = {
+        "clock_verified": True,
+        "confirmed_closed_rows": confirmed_count,
+        "unconfirmed_rows": len(normalized_rows) - confirmed_count,
+        "rule": "close_time < as_of_ms",
+    }
+    return normalized
 
 
 class ResearchAI:
