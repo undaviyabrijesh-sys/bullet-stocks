@@ -260,6 +260,7 @@ Price-axis calibration:
 - fits either a linear price axis or a linear fit in log-price space;
 - normalizes linear anchor prices before least-squares fitting and evaluates the fitted mapping around the anchor centroid instead of extrapolating to y=0; an unrepresentable legacy intercept is retained as null without rejecting finite prices inside the calibrated region, while an unrepresentable slope or anchor residual is rejected; logarithmic calibration is tested across the finite floating-point price range;
 - requires centered calibration references (`reference_y` and `reference_value`) to be supplied together; a partial pair is rejected instead of silently falling back to a potentially stale legacy intercept;
+- validates the calibration object again at lookup (supported scale, finite descending slope, ordered finite y-range and complete in-range centered references); coordinates within 1e-9 of an anchor boundary are clamped to that boundary to absorb binary-rounding drift without extrapolating;
 - rejects reversed/non-monotonic anchors and fits whose maximum anchor residual exceeds 2% by default (the caller may set a stricter tolerance, up to 10%);
 - never extrapolates beyond the first/last anchor y-coordinate;
 - reports matched-zone high/low boundary error from normalized, pixel-rounded geometry in price units and as a percentage, separately from IoU;
