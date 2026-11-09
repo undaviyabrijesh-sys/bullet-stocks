@@ -72,8 +72,19 @@ class PriceAxisCalibration:
         y = _finite_number(y, "y")
         if not 0 <= y <= 1:
             raise ValueError("y must be a finite normalized coordinate")
-        if y < self.min_y - _Y_TOLERANCE or y > self.max_y + _Y_TOLERANCE:
-            raise ValueError("y is outside the calibrated price-axis range")
+        if not isinstance(self.scale, str) or self.scale not in {"linear", "log"}:
+            raise ValueError("calibration scale must be 'linear' or 'log'")
+        min_y = _finite_number(self.min_y, "calibration min_y")
+        max_y = _finite_number(self.max_y, "calibration max_y")
+        if not 0 <= min_y < max_y <= 1:
+            raise ValueError("calibration y range must be ordered within 0..1")
+        slope = _finite_number(self.slope, "calibration slope")
+        if slope >= 0:
+            raise ValueError("calibration slope must be negative")
+        intercept = (
+            _finite_number(self.intercept, "calibration intercept")
+            if self.intercept is not None else None
+        )
 
         has_reference_y = self.reference_y is not None
         has_reference_value = self.reference_value is not None
@@ -81,6 +92,37 @@ class PriceAxisCalibration:
             raise ValueError(
                 "centered calibration requires both reference_y and reference_value"
             )
+        if has_reference_y:
+            reference_y = _finite_number(self.reference_y, "calibration reference_y")
+            reference_value = _finite_number(
+                self.reference_value, "calibration reference_value"
+            )
+            if not min_y <= reference_y <= max_y:
+                raise ValueError("calibration reference_y must be inside its anchor range")
+            if self.scale == "linear" and reference_value <= 0:
+                raise ValueError("linear calibration reference_value must be positive")
+        else:
+            reference_y = None
+            reference_value = None
+            # Compatibility path for calibrations constructed with the
+            # original seven positional fields.
+            if intercept is None:
+                raise ValueError(
+                    "calibration has no finite intercept or centered reference"
+                )
+
+        # Tolerate only tiny binary-rounding drift at an anchor edge. Clamp
+        # that drift to the verified boundary instead of extrapolating.
+        if y < min_y:
+            if min_y - y <= _Y_TOLERANCE:
+                y = min_y
+            else:
+                raise ValueError("y is outside the calibrated price-axis range")
+        elif y > max_y:
+            if y - max_y <= _Y_TOLERANCE:
+                y = max_y
+            else:
+                raise ValueError("y is outside the calibrated price-axis range")
 
         try:
             if has_reference_y:
@@ -88,17 +130,13 @@ class PriceAxisCalibration:
                 # intercept at y=0 may be outside float range even when every
                 # price inside the calibrated screenshot region is representable.
                 fitted = math.fsum((
-                    self.reference_value,
-                    self.slope * (y - self.reference_y),
+                    reference_value,
+                    slope * (y - reference_y),
                 ))
             else:
                 # Compatibility path for calibrations constructed with the
                 # original seven positional fields.
-                if self.intercept is None:
-                    raise ValueError(
-                        "calibration has no finite intercept or centered reference"
-                    )
-                fitted = math.fsum((self.intercept, self.slope * y))
+                fitted = math.fsum((intercept, slope * y))
         except (OverflowError, ValueError) as exc:
             raise ValueError(
                 "calibrated price is outside the supported numeric range"
