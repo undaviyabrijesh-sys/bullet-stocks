@@ -542,7 +542,7 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
         record.get("market_context"), line_number, fixture_id
     )
     image_hash = _load_and_verify_image(record, manifest_dir, line_number, max_image_bytes)
-    _validate_adjudication_metadata(
+    adjudication_metadata = _validate_adjudication_metadata(
         record["adjudication_metadata"],
         line_number,
         fixture_id,
@@ -635,6 +635,7 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
         "iou_threshold": result["iou_threshold"],
         "prediction_metadata": prediction_metadata,
         "annotation_metadata": annotation_metadata,
+        "adjudication_metadata": adjudication_metadata,
         "market_context": market_context,
         "_prediction_profile": prediction_profile,
         "_prediction_profile_sha256": prediction_profile_sha256,
