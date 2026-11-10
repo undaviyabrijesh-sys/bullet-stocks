@@ -555,6 +555,25 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
             "The 10-person beta is currently full. Please try again later."
         )
 
+    async def test_photo_preflight_uses_telegram_language_for_beta_rejection(self):
+        bot_module.beta_users.add(self.user_id + 1)
+        photo_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=self.user_id, language_code="hi-IN"),
+            photo=[SimpleNamespace(file_id="telegram-file-id", file_size=1024)],
+            caption="BTC 1H",
+            answer=AsyncMock(),
+        )
+
+        with patch.object(bot_module, "BETA_USER_LIMIT", 1), patch.object(
+            bot_module.bot, "get_file", new=AsyncMock()
+        ) as get_file:
+            await bot_module.handle_chart_photo(photo_message)
+
+        get_file.assert_not_awaited()
+        reply = photo_message.answer.await_args.args[0]
+        self.assertIn("बीटा सीमा", reply)
+        self.assertNotIn("The 10-person beta", reply)
+
     async def test_daily_limit_document_is_rejected_before_telegram_download(self):
         today = datetime.now(bot_module.IST).date().isoformat()
         bot_module.usage_day[self.user_id] = today
