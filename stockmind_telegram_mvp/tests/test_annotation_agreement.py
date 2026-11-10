@@ -12,7 +12,10 @@ from pathlib import Path
 
 from PIL import Image
 
-from stockmind_telegram_mvp.app.annotation_agreement import compare_reviewed_annotations
+from stockmind_telegram_mvp.app.annotation_agreement import (
+    _price_axis_agreement,
+    compare_reviewed_annotations,
+)
 from stockmind_telegram_mvp.app.annotation_editor import apply_manual_annotations, review_annotation_draft
 from stockmind_telegram_mvp.app.annotation_intake import prepare_annotation_draft
 
@@ -228,6 +231,43 @@ class AnnotationAgreementTests(unittest.TestCase):
         agreement = compare_reviewed_annotations(path_a, path_b)["price_axis_agreement"]
         self.assertEqual(agreement["status"], "no_overlap")
         self.assertIsNone(agreement.get("sample_count"))
+        self.assertEqual(agreement["overlap_fraction_of_annotator_a_range"], 0.0)
+        self.assertEqual(agreement["overlap_fraction_of_annotator_b_range"], 0.0)
+        self.assertEqual(agreement["overlap_fraction_of_union_range"], 0.0)
+
+    def test_reports_how_much_of_each_price_axis_range_is_shared(self):
+        anchors_a = [
+            {"y": 0.2, "price": 98000},
+            {"y": 0.5, "price": 95000},
+            {"y": 0.8, "price": 92000},
+        ]
+        anchors_b = [
+            {"y": 0.5, "price": 95000},
+            {"y": 0.7, "price": 93000},
+            {"y": 0.9, "price": 91000},
+        ]
+        path_a = self._make_reviewed(
+            "axis-overlap-a", _png_bytes(), "ann-015", "rev-115", [], PLOT,
+            anchors_a, "linear",
+        )
+        path_b = self._make_reviewed(
+            "axis-overlap-b", _png_bytes(), "ann-016", "rev-116", [], PLOT,
+            anchors_b, "linear",
+        )
+
+        agreement = compare_reviewed_annotations(path_a, path_b)["price_axis_agreement"]
+
+        self.assertEqual(agreement["status"], "compared")
+        self.assertAlmostEqual(agreement["overlap_span"], 0.3)
+        self.assertAlmostEqual(agreement["overlap_fraction_of_annotator_a_range"], 0.5)
+        self.assertAlmostEqual(agreement["overlap_fraction_of_annotator_b_range"], 0.75)
+        self.assertAlmostEqual(agreement["overlap_fraction_of_union_range"], 3 / 7)
+
+    def test_rejects_invalid_price_axis_sample_counts(self):
+        for sample_count in (True, 1, 1.5, 102):
+            with self.subTest(sample_count=sample_count):
+                with self.assertRaisesRegex(ValueError, "sample_count"):
+                    _price_axis_agreement({}, {}, sample_count=sample_count)
 
     def test_compares_different_manual_axis_scales_without_conflating_them(self):
         linear_anchors = [
