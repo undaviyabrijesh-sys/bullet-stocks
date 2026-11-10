@@ -141,6 +141,21 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         return evaluate_benchmark_manifest(manifest)
 
 
+
+    def test_rejects_tampered_adjudication_report_hash_in_benchmark_report(self):
+        baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
+        candidate = self._report("candidate", [{**_zone(), "draw_overlay": True}])
+        baseline["fixtures"][0]["adjudication_metadata"]["agreement_report_sha256"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "agreement_report_sha256 does not match"):
+            compare_benchmark_reports(baseline, candidate)
+
+    def test_paired_models_must_use_identical_adjudication_evidence(self):
+        baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
+        candidate = self._report("candidate", [{**_zone(), "draw_overlay": True}])
+        candidate["fixtures"][0]["adjudication_metadata"]["adjudicator_id"] = "adj-008"
+        with self.assertRaisesRegex(ValueError, "paired reports differ.*adjudication_metadata"):
+            compare_benchmark_reports(baseline, candidate)
+
     def test_compares_and_revalidates_confidence_stratified_results(self):
         baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
         candidate = self._report("candidate", [])
