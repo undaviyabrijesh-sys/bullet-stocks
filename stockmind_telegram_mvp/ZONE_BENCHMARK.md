@@ -35,7 +35,7 @@ Every fixture must include an `annotation_metadata` object. Only annotations tha
 ~~~
 
 - Use pseudonymous IDs with the `ann-` and `rev-` prefixes. Never put names, email addresses, chat handles or other personal information in benchmark metadata; the validator rejects extra fields.
-- Use a distinct reviewer ID (`rev-...`). The suffix token after `ann-` and `rev-` must differ case-insensitively; this rejects obvious reuse of one pseudonym across both roles. Project controls must still ensure that the IDs map to different humans. A pending, rejected or self-reviewed annotation cannot be scored.
+- For each annotation, use a distinct reviewer ID (`rev-...`). Across the pair, the two reviewer suffix tokens must differ case-insensitively, and neither reviewer may share an identity token with either annotator. This rejects obvious pseudonym reuse across roles. Project controls must still ensure that the IDs map to different humans. A pending, rejected or self-reviewed annotation cannot be scored.
 - The validator checks declared metadata, role prefixes and suffix-token separation; it cannot authenticate annotators or prove that a human review actually occurred. Keep reviewer-to-ID mappings and audit evidence in an access-controlled system outside this repository.
 - Both timestamps must be ISO-8601 with an explicit timezone, and review time cannot precede annotation time.
 - Use one guideline version throughout a manifest. When annotation rules change, increment the version and benchmark that release separately.
