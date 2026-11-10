@@ -197,7 +197,8 @@ class OverlayRendererTests(unittest.TestCase):
 
     def test_zone_and_label_are_constrained_to_price_plot(self):
         zone = {
-            "zone_type": "supply", "label": "AI SUPPLY", "draw_overlay": True,
+            "zone_type": "supply", "origin": "ai_inferred",
+            "label": "USER DEMAND", "draw_overlay": True,
             "confidence": "high",
             "x_start": 0.2, "x_end": 0.8, "y_top": 0.3, "y_bottom": 0.5,
         }
@@ -211,19 +212,21 @@ class OverlayRendererTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(count, 1)
         self.assertEqual(rect.call_args.args[1], (128, 108, 511, 179))
+        self.assertEqual(text_draw.call_args.args[2], "AI SUPPLY")
         label_x, label_y = text_draw.call_args.args[1]
         self.assertGreaterEqual(label_x, 32)
         self.assertLess(label_x, 576)
         self.assertGreaterEqual(label_y, 36)
         self.assertLess(label_y, 324)
 
-    def test_long_label_is_omitted_when_it_cannot_fit_inside_plot(self):
+    def test_derived_label_is_omitted_when_it_cannot_fit_inside_plot(self):
         zone = {
-            "zone_type": "demand", "label": "X" * 32, "draw_overlay": True,
+            "zone_type": "demand", "origin": "ai_inferred",
+            "label": "X" * 32, "draw_overlay": True,
             "confidence": "high",
-            "x_start": 0.22, "x_end": 0.28, "y_top": 0.3, "y_bottom": 0.5,
+            "x_start": 0.21, "x_end": 0.24, "y_top": 0.3, "y_bottom": 0.5,
         }
-        bounds = {"x_start": 0.2, "x_end": 0.3, "y_top": 0.1, "y_bottom": 0.9}
+        bounds = {"x_start": 0.2, "x_end": 0.25, "y_top": 0.1, "y_bottom": 0.9}
         with patch.object(overlay_engine.ImageDraw.ImageDraw, "text", autospec=True) as text_draw:
             result, count = render_overlay(
                 sample_image(), [zone], plot_bounds=bounds, require_plot_bounds=True
@@ -429,18 +432,29 @@ class OverlayRendererTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertEqual(count, 0)
 
-    def test_overlay_label_preserves_zone_origin_and_safely_falls_back(self):
+    def test_overlay_label_is_derived_from_origin_not_untrusted_model_text(self):
         self.assertEqual(
-            _zone_overlay_label({"label": "USER DEMAND"}, "demand"),
+            _zone_overlay_label(
+                {"origin": "user_marked", "label": "AI SUPPLY"},
+                "demand",
+            ),
             "USER DEMAND",
         )
         self.assertEqual(
-            _zone_overlay_label({"label": "AI SUPPLY – 10,000"}, "supply"),
-            "AI SUPPLY  10,000",
+            _zone_overlay_label(
+                {"origin": "ai_inferred", "label": "USER SUPPLY"},
+                "supply",
+            ),
+            "AI SUPPLY",
         )
-        self.assertEqual(_zone_overlay_label({"label": "ગુજરાતી"}, "demand"), "DEMAND")
-        self.assertEqual(_zone_overlay_label({"label": " "}, "supply"), "SUPPLY")
-        self.assertEqual(_zone_overlay_label({"label": "X" * 80}, "demand"), "X" * 32)
+        self.assertEqual(
+            _zone_overlay_label({"label": "USER DEMAND"}, "demand"),
+            "AI DEMAND",
+        )
+        self.assertEqual(
+            _zone_overlay_label({"origin": "user_marked"}, "supply"),
+            "USER SUPPLY",
+        )
 
     def test_public_renderer_always_prepares_image_before_drawing(self):
         canonical = sample_image()
