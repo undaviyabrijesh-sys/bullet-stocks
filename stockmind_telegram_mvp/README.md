@@ -195,3 +195,16 @@ The 4,000-character chunk budget is measured in UTF-16 code units so
 supplementary Unicode characters (including emoji) cannot exceed Telegram's
 entity-length accounting or be split in the middle of a code point.
 
+## Multilingual Binance evidence notes
+
+The deterministic candle-closure note appended after crypto research follows the
+language of the user's latest request when there is a clear signal: Gujarati
+script, Devanagari Hindi, romanized Gujarati, or Hinglish. English remains the
+fallback when the prompt is ambiguous. The note keeps instrument, timeframe,
+market, row counts and technical terms such as BOS/CHOCH visible so that
+localization does not change the underlying evidence.
+
+These notes report candle closure only. Even when every model-visible candle
+is closed, the note explicitly does not treat that fact as proof of a BOS or
+CHOCH. When the sample is truncated, the note also discloses that limitation.
+
