@@ -1011,6 +1011,15 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
             settings["zone_origin_policy"] = "user_marked_only_when_visibly_marked"
         return _prediction_metadata(prompt_version="dns-chart-v7", settings=settings)
 
+    def _v8_metadata(self, include_evidence_policy=True, include_origin_policy=True):
+        metadata = self._v7_metadata(include_origin_policy=include_origin_policy)
+        metadata["prompt_version"] = "dns-chart-v8"
+        if include_evidence_policy:
+            metadata["settings"]["zone_evidence_policy"] = (
+                "compact_base_plus_directional_displacement_v1"
+            )
+        return metadata
+
     def test_v7_metadata_requires_explicit_origin_policy(self):
         record = self._record(prediction_metadata=self._v7_metadata(include_origin_policy=False))
         self._write(record)
@@ -1051,6 +1060,43 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         self.assertEqual(result["overall"]["predicted"], 2)
         self.assertEqual(result["overall"]["true_positive"], 1)
         self.assertEqual(result["overall"]["false_positive"], 1)
+
+
+    def test_v8_metadata_requires_explicit_zone_evidence_policy(self):
+        record = self._record(
+            prediction_metadata=self._v8_metadata(include_evidence_policy=False)
+        )
+        self._write(record)
+        with self.assertRaisesRegex(ValueError, "zone_evidence_policy"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_v8_manifest_rejects_missing_zone_origin(self):
+        record = self._record(
+            prediction_metadata=self._v8_metadata(),
+            predicted_zones=[_prediction(confidence="high")],
+        )
+        self._write(record)
+        with self.assertRaisesRegex(ValueError, r"predicted_zones\\[0\\].origin"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_v8_manifest_rejects_label_that_conflicts_with_origin(self):
+        zone = _prediction(confidence="high", origin="ai_inferred", label="USER DEMAND")
+        record = self._record(
+            prediction_metadata=self._v8_metadata(), predicted_zones=[zone]
+        )
+        self._write(record)
+        with self.assertRaisesRegex(ValueError, "label must match its origin"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_v8_manifest_accepts_evidence_policy_and_consistent_zone_provenance(self):
+        zone = _prediction(confidence="high", origin="ai_inferred", label="AI DEMAND")
+        record = self._record(
+            prediction_metadata=self._v8_metadata(), predicted_zones=[zone]
+        )
+        self._write(record)
+        result = evaluate_benchmark_manifest(self.manifest)
+        self.assertEqual(result["fixture_count"], 1)
+        self.assertEqual(result["overall"]["predicted"], 1)
 
     def test_rejects_malformed_jsonl(self):
         self.manifest.write_text('{"fixture_id":\n', encoding="utf-8")
