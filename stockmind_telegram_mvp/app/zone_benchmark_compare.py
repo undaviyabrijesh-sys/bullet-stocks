@@ -13,6 +13,7 @@ from .zone_benchmark import (
     _aggregate_macro_metrics,
     _aggregate_price_accuracy,
     _aggregate_confidence_stratified_results,
+    _validate_adjudication_metadata,
     _validate_annotation_metadata,
     _validate_market_context,
     _validate_prediction_metadata,
@@ -619,9 +620,21 @@ def _validate_report(report, label):
         if annotation["guideline_version"] != guideline:
             raise ValueError(f"{prefix} annotation guideline does not match report")
         try:
-            _validate_market_context(fixture.get("market_context"), index + 1, fixture_id)
+            market_context = _validate_market_context(
+                fixture.get("market_context"), index + 1, fixture_id
+            )
+            _validate_adjudication_metadata(
+                fixture.get("adjudication_metadata"),
+                index + 1,
+                fixture_id,
+                image_hash=fixture["image_sha256"],
+                image_width=fixture.get("image_width"),
+                image_height=fixture.get("image_height"),
+                market_context=market_context,
+                annotation_metadata=annotation,
+            )
         except (TypeError, ValueError) as exc:
-            raise ValueError(f"{prefix} has invalid market_context: {exc}") from exc
+            raise ValueError(f"{prefix} has invalid adjudication or market-context provenance: {exc}") from exc
         threshold = fixture.get("iou_threshold")
         if not _finite(threshold) or not 0 < threshold <= 1:
             raise ValueError(f"{prefix} has an invalid iou_threshold")
@@ -901,7 +914,7 @@ def compare_benchmark_reports(baseline_report, candidate_report):
             "image_sha256", "image_width", "image_height",
             "reference_zones_sha256", "reference_plot_bounds_sha256",
             "price_axis_calibration_sha256", "iou_threshold",
-            "annotation_metadata", "market_context"
+            "annotation_metadata", "adjudication_metadata", "market_context"
         ):
             if base.get(field) != cand.get(field):
                 raise ValueError(f"paired reports differ for fixture {fixture_id!r}: {field}")
