@@ -14,6 +14,7 @@ from stockmind_telegram_mvp.app.annotation_editor import (
 from stockmind_telegram_mvp.app.annotation_fixture import (
     assemble_benchmark_fixture,
     build_prediction_capture,
+    write_adjudication_record,
     write_prediction_capture,
 )
 from stockmind_telegram_mvp.app.annotation_intake import prepare_annotation_draft
@@ -94,6 +95,47 @@ class AnnotationFixtureAssemblyTests(unittest.TestCase):
         )
         self.reviewed_path = self.inbox / "btc-1h-001.reviewed.json"
         self.reviewed_path.write_text(json.dumps(approved), encoding="utf-8")
+        self.inbox_b = self.root / "inbox-b"
+        intake_b = prepare_annotation_draft(
+            self.source,
+            self.inbox_b,
+            "btc-1h-001",
+            market_context={
+                "asset_class": "crypto",
+                "symbol": "BTCUSDT",
+                "exchange": "binance",
+                "timeframe": "1h",
+            },
+        )
+        draft_b_path = self.inbox_b / intake_b["draft_file"]
+        draft_b = json.loads(draft_b_path.read_text(encoding="utf-8"))
+        annotated_b = apply_manual_annotations(
+            draft_b,
+            PLOT,
+            [{**ZONE, "x_start": 0.25, "x_end": 0.85}],
+            "ann-003",
+            annotated_at="2026-11-07T12:01:00Z",
+        )
+        approved_b = review_annotation_draft(
+            annotated_b,
+            "rev-004",
+            approve=True,
+            reviewed_at="2026-11-07T12:06:00Z",
+        )
+        self.reviewed_b_path = self.inbox_b / "btc-1h-001.reviewed.json"
+        self.reviewed_b_path.write_text(json.dumps(approved_b), encoding="utf-8")
+        adjudication_info = write_adjudication_record(
+            self.reviewed_path,
+            self.reviewed_b_path,
+            adjudicator_id="adj-005",
+            adjudicated_at="2026-11-07T12:10:00Z",
+            decision="accept_a",
+            rationale=(
+                "Annotation A follows the documented zone boundary rule after "
+                "reviewing the independent geometry comparison."
+            ),
+        )
+        self.adjudication_path = Path(adjudication_info["adjudication_file"])
         self.image_hash = hashlib.sha256(self.image_bytes).hexdigest()
         self.result = {
             "analysis": "Visible demand structure; verify against source chart.",
@@ -167,7 +209,12 @@ class AnnotationFixtureAssemblyTests(unittest.TestCase):
         capture_info = write_prediction_capture(self.reviewed_path, self.result)
         capture_path = Path(capture_info["capture_file"])
         self.assertFalse(capture_info["benchmark_ready"])
-        assembled = assemble_benchmark_fixture(self.reviewed_path, capture_path)
+        assembled = assemble_benchmark_fixture(
+            self.reviewed_path,
+            capture_path,
+            second_reviewed_draft_path=self.reviewed_b_path,
+            adjudication_path=self.adjudication_path,
+        )
         manifest = Path(assembled["manifest_file"])
         self.assertTrue(assembled["benchmark_ready"])
         self.assertEqual(assembled["validation_fixture_count"], 1)
@@ -178,6 +225,77 @@ class AnnotationFixtureAssemblyTests(unittest.TestCase):
         self.assertEqual(scored["overall"]["false_positive"], 0)
         self.assertEqual(scored["overall"]["false_negative"], 0)
         self.assertEqual(scored["fixtures"][0]["image_sha256"], self.image_hash)
+
+
+    def test_assembler_requires_second_annotation_and_adjudication(self):
+        capture_info = write_prediction_capture(self.reviewed_path, self.result)
+        with self.assertRaisesRegex(ValueError, "requires second_reviewed_draft_path and adjudication_path"):
+            assemble_benchmark_fixture(self.reviewed_path, capture_info["capture_file"])
+
+    def test_rejects_adjudication_report_that_differs_from_recomputed_annotations(self):
+        capture_info = write_prediction_capture(self.reviewed_path, self.result)
+        tampered = json.loads(self.adjudication_path.read_text(encoding="utf-8"))
+        tampered["adjudication_metadata"]["agreement_report"]["zone_agreement"] = {
+            "agreement_f1": 1.0
+        }
+        tampered_path = self.inbox / "tampered.adjudication.json"
+        tampered_path.write_text(json.dumps(tampered), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "does not match independently recomputed"):
+            assemble_benchmark_fixture(
+                self.reviewed_path,
+                capture_info["capture_file"],
+                second_reviewed_draft_path=self.reviewed_b_path,
+                adjudication_path=tampered_path,
+            )
+
+    def test_rejects_annotation_file_changed_after_adjudication(self):
+        capture_info = write_prediction_capture(self.reviewed_path, self.result)
+        self.reviewed_b_path.write_text(
+            self.reviewed_b_path.read_text(encoding="utf-8") + " ",
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "provenance does not match"):
+            assemble_benchmark_fixture(
+                self.reviewed_path,
+                capture_info["capture_file"],
+                second_reviewed_draft_path=self.reviewed_b_path,
+                adjudication_path=self.adjudication_path,
+            )
+
+    def test_adjudicator_must_be_distinct_from_annotators_and_reviewers(self):
+        with self.assertRaisesRegex(ValueError, "distinct from both annotators"):
+            write_adjudication_record(
+                self.reviewed_path,
+                self.reviewed_b_path,
+                adjudicator_id="adj-001",
+                adjudicated_at="2026-11-07T12:10:00Z",
+                decision="accept_a",
+                rationale="This selection follows the documented chart-zone boundary rule.",
+            )
+
+    def test_adjudicator_can_select_annotation_b_as_reference(self):
+        capture_info = write_prediction_capture(self.reviewed_path, self.result)
+        selected_b = write_adjudication_record(
+            self.reviewed_path,
+            self.reviewed_b_path,
+            adjudicator_id="adj-008",
+            adjudicated_at="2026-11-07T12:11:00Z",
+            decision="accept_b",
+            rationale=(
+                "Annotation B better follows the documented zone boundary rule "
+                "after reviewing the independent geometry comparison."
+            ),
+            output_path=self.inbox / "accept-b.adjudication.json",
+        )
+        assembled = assemble_benchmark_fixture(
+            self.reviewed_path,
+            capture_info["capture_file"],
+            second_reviewed_draft_path=self.reviewed_b_path,
+            adjudication_path=selected_b["adjudication_file"],
+        )
+        record = json.loads(Path(assembled["manifest_file"]).read_text(encoding="utf-8"))
+        self.assertEqual(assembled["decision"], "accept_b")
+        self.assertEqual(record["reference_zones"][0]["x_start"], 0.25)
 
     def test_copies_manual_price_axis_calibration_into_fixture(self):
         draft = json.loads(self.reviewed_path.read_text(encoding="utf-8"))
@@ -217,10 +335,45 @@ class AnnotationFixtureAssemblyTests(unittest.TestCase):
         approved["fixture_id"] = "btc-1h-axis"
         axis_path = self.inbox / "btc-1h-axis.reviewed.json"
         axis_path.write_text(json.dumps(approved), encoding="utf-8")
+        draft["fixture_id"] = "btc-1h-axis"
+        annotated_b = apply_manual_annotations(
+            draft,
+            PLOT,
+            [ZONE],
+            "ann-005",
+            annotated_at="2026-11-07T12:01:00Z",
+            price_axis_anchors=[
+                {"y": 0.2, "price": 120},
+                {"y": 0.5, "price": 90},
+                {"y": 0.8, "price": 60},
+            ],
+            price_axis_scale="linear",
+        )
+        approved_b = review_annotation_draft(
+            annotated_b, "rev-006", approve=True, reviewed_at="2026-11-07T12:06:00Z"
+        )
+        axis_b_path = self.inbox / "btc-1h-axis-b.reviewed.json"
+        axis_b_path.write_text(json.dumps(approved_b), encoding="utf-8")
+        axis_adjudication = write_adjudication_record(
+            axis_path,
+            axis_b_path,
+            adjudicator_id="adj-007",
+            adjudicated_at="2026-11-07T12:10:00Z",
+            decision="accept_a",
+            rationale=(
+                "Annotation A follows the documented zone boundary rule after "
+                "reviewing the independent geometry comparison."
+            ),
+        )
         capture_obj = build_prediction_capture(axis_path, self.result)
         capture_path = self.inbox / "btc-1h-axis.prediction.json"
         capture_path.write_text(json.dumps(capture_obj), encoding="utf-8")
-        output = assemble_benchmark_fixture(axis_path, capture_path)
+        output = assemble_benchmark_fixture(
+            axis_path,
+            capture_path,
+            second_reviewed_draft_path=axis_b_path,
+            adjudication_path=axis_adjudication["adjudication_file"],
+        )
         record = json.loads(Path(output["manifest_file"]).read_text(encoding="utf-8"))
         self.assertEqual(record["price_axis_scale"], "linear")
         self.assertEqual(len(record["price_axis_anchors"]), 3)
@@ -232,7 +385,12 @@ class AnnotationFixtureAssemblyTests(unittest.TestCase):
         capture_path = self.inbox / "tampered.prediction.json"
         capture_path.write_text(json.dumps(capture), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "fixture_id"):
-            assemble_benchmark_fixture(self.reviewed_path, capture_path)
+            assemble_benchmark_fixture(
+            self.reviewed_path,
+            capture_path,
+            second_reviewed_draft_path=self.reviewed_b_path,
+            adjudication_path=self.adjudication_path,
+        )
 
     def test_refuses_to_overwrite_existing_capture_or_manifest(self):
         capture_info = write_prediction_capture(self.reviewed_path, self.result)
@@ -242,11 +400,21 @@ class AnnotationFixtureAssemblyTests(unittest.TestCase):
             write_prediction_capture(self.reviewed_path, self.result)
         self.assertEqual(capture_path.read_bytes(), original_capture)
 
-        manifest_info = assemble_benchmark_fixture(self.reviewed_path, capture_path)
+        manifest_info = assemble_benchmark_fixture(
+            self.reviewed_path,
+            capture_path,
+            second_reviewed_draft_path=self.reviewed_b_path,
+            adjudication_path=self.adjudication_path,
+        )
         manifest_path = Path(manifest_info["manifest_file"])
         original_manifest = manifest_path.read_bytes()
         with self.assertRaises(FileExistsError):
-            assemble_benchmark_fixture(self.reviewed_path, capture_path)
+            assemble_benchmark_fixture(
+            self.reviewed_path,
+            capture_path,
+            second_reviewed_draft_path=self.reviewed_b_path,
+            adjudication_path=self.adjudication_path,
+        )
         self.assertEqual(manifest_path.read_bytes(), original_manifest)
 
     def test_manifest_must_be_next_to_reviewed_draft(self):
@@ -254,7 +422,11 @@ class AnnotationFixtureAssemblyTests(unittest.TestCase):
         outside = self.root / "outside" / "fixture.jsonl"
         with self.assertRaisesRegex(ValueError, "beside the reviewed annotation"):
             assemble_benchmark_fixture(
-                self.reviewed_path, capture_info["capture_file"], outside
+                self.reviewed_path,
+                capture_info["capture_file"],
+                outside,
+                second_reviewed_draft_path=self.reviewed_b_path,
+                adjudication_path=self.adjudication_path,
             )
 
 
@@ -270,7 +442,12 @@ class AnnotationFixtureAssemblyTests(unittest.TestCase):
         )
         capture_path.write_text(raw, encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "duplicate JSON object key"):
-            assemble_benchmark_fixture(self.reviewed_path, capture_path)
+            assemble_benchmark_fixture(
+            self.reviewed_path,
+            capture_path,
+            second_reviewed_draft_path=self.reviewed_b_path,
+            adjudication_path=self.adjudication_path,
+        )
 
     def test_rejects_non_standard_constants_in_prediction_capture_json(self):
         capture = build_prediction_capture(self.reviewed_path, self.result)
@@ -278,7 +455,12 @@ class AnnotationFixtureAssemblyTests(unittest.TestCase):
         raw = json.dumps(capture).replace('"image_width": 64', '"image_width": NaN', 1)
         capture_path.write_text(raw, encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "non-standard JSON constant"):
-            assemble_benchmark_fixture(self.reviewed_path, capture_path)
+            assemble_benchmark_fixture(
+            self.reviewed_path,
+            capture_path,
+            second_reviewed_draft_path=self.reviewed_b_path,
+            adjudication_path=self.adjudication_path,
+        )
 
 if __name__ == "__main__":
     unittest.main()
