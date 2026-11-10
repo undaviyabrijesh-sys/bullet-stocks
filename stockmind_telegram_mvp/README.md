@@ -151,20 +151,32 @@ stricter: both the press and release must remain inside the image and the marked
 main price plot. Changing zoom during an active drag is blocked to avoid mixing
 coordinate frames.
 
-After an annotation has been independently approved, save the actual
+After two annotators have independently marked and separately reviewed
+the same screenshot, have a third person adjudicate their measured agreement
+and explicitly select annotation A or B. Save the actual
 ResearchAI.analyze_chart_image result as JSON. The result includes
 source_image_sha256, which binds it to the exact screenshot bytes used by the
-vision request. The offline assembler refuses missing provider-returned model
-or timestamp metadata, a different screenshot hash, unapproved annotations,
-tampered geometry, and output overwrites.
+vision request. The offline assembler refuses missing adjudication evidence,
+changed annotation files, missing provider-returned model/time metadata,
+a different screenshot hash, tampered geometry, and output overwrites.
 
 ~~~bash
 python -m stockmind_telegram_mvp.app.annotation_fixture capture \
   benchmark/inbox/btc-1h-001.reviewed.json path/to/actual-chart-result.json
 
+python -m stockmind_telegram_mvp.app.annotation_fixture adjudicate \
+  benchmark/inbox/btc-1h-001.reviewed.json \
+  benchmark/inbox-b/btc-1h-001.reviewed.json \
+  --adjudicator-id adj-003 \
+  --adjudicated-at 2026-11-10T12:30:00Z \
+  --decision accept_a \
+  --rationale "Annotation A follows the agreed boundary rule after reviewing the measured disagreements."
+
 python -m stockmind_telegram_mvp.app.annotation_fixture assemble \
   benchmark/inbox/btc-1h-001.reviewed.json \
-  benchmark/inbox/btc-1h-001.prediction.json
+  benchmark/inbox/btc-1h-001.prediction.json \
+  --annotation-b benchmark/inbox-b/btc-1h-001.reviewed.json \
+  --adjudication benchmark/inbox/btc-1h-001.adjudication.json
 
 python -m stockmind_telegram_mvp.app.zone_benchmark \
   benchmark/inbox/btc-1h-001.fixture.jsonl
