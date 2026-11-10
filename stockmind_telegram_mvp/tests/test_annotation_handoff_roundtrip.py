@@ -50,7 +50,7 @@ def _prediction_metadata():
         "provider": "openai",
         "model": "vision-model-test",
         "requested_model": "vision-model",
-        "prompt_version": "dns-chart-v4",
+        "prompt_version": "dns-chart-v6",
         "prompt_sha256": "a" * 64,
         "generated_at": "2026-11-09T10:00:00Z",
         "system_fingerprint": "fp-test",
@@ -60,6 +60,7 @@ def _prediction_metadata():
             "response_format": "json_schema:chart_zone_map",
             "conversation_context": "caption_only",
             "plot_bounds_policy": "required_for_overlay",
+            "confidence_policy": "high_medium_only",
         },
     }
 
@@ -95,6 +96,7 @@ class AnnotationHandoffRoundTripTests(unittest.TestCase):
             "plot_bounds": dict(PLOT),
             "zones": [{
                 "zone_type": "demand",
+                "confidence": "high",
                 "label": "AI DEMAND",
                 "price_low": None,
                 "price_high": None,
