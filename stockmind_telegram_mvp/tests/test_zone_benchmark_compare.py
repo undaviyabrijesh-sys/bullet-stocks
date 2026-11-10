@@ -113,6 +113,9 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         baseline["fixtures"][0]["confidence_stratified_results"][
             "not_reported_or_invalid"
         ]["matched_count"] = 0
+        baseline["fixtures"][0]["confidence_stratified_results"][
+            "not_reported_or_invalid"
+        ]["false_positive_count"] = 1
         with self.assertRaisesRegex(ValueError, "matched count does not match match rows"):
             compare_benchmark_reports(baseline, candidate)
 
