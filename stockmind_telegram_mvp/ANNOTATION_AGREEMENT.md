@@ -86,3 +86,63 @@ either annotator read the screenshot correctly.
   a reference as benchmark ground truth.
 - Synthetic unit-test images validate the software path only. They are not
   chart fixtures and provide no evidence of market-chart detection accuracy.
+
+## Human adjudication before benchmark admission
+
+Pairwise agreement is a review aid, not an automatic winner-selection rule. A
+screenshot is not admitted as benchmark ground truth until a third, distinct
+adjudicator has inspected the two approved annotations and explicitly selected
+one of them. The supported decisions are **accept_a** and **accept_b**.
+If neither annotation is acceptable, do not assemble the fixture; repeat the
+manual annotation/review process or exclude the screenshot. Merging annotations
+is intentionally not automated.
+
+Create a hash-bound adjudication sidecar from the two reviewed JSON files:
+
+~~~bash
+python -m stockmind_telegram_mvp.app.annotation_fixture adjudicate \
+  path/to/annotator-a.reviewed.json \
+  path/to/annotator-b.reviewed.json \
+  --adjudicator-id adj-003 \
+  --adjudicated-at 2026-11-10T12:30:00Z \
+  --decision accept_a \
+  --rationale "Annotation A follows the agreed boundary rule after reviewing the measured disagreements."
+~~~
+
+The adjudicator ID must be distinct from both annotators and both reviewers.
+The timestamp must include a timezone and cannot precede either review. The
+rationale must contain 20..1000 printable characters. The sidecar embeds the
+pairwise agreement report and its canonical SHA-256, plus SHA-256 hashes of the
+exact two reviewed JSON files. Editing either reviewed file after adjudication
+invalidates the sidecar.
+
+Capture the actual model response for the same screenshot, then assemble with
+both annotations and the adjudication sidecar:
+
+~~~bash
+python -m stockmind_telegram_mvp.app.annotation_fixture assemble \
+  path/to/annotator-a.reviewed.json \
+  path/to/actual-chart-result.prediction.json \
+  --annotation-b path/to/annotator-b.reviewed.json \
+  --adjudication path/to/btc-1h-001.adjudication.json
+~~~
+
+The prediction capture may be bound to either reviewed annotation because both
+must identify the exact same screenshot hash, dimensions and fixture ID. The
+selected annotation supplies the final reference geometry and price-axis
+anchors; the JSONL manifest is written beside that selected annotation so its
+relative screenshot path remains valid.
+
+The assembler recomputes pairwise agreement from the two current reviewed
+files, verifies both raw-file hashes, verifies the embedded report hash and
+contents, checks the adjudicator's role separation and timestamp, and runs the
+normal benchmark preflight before writing. The benchmark runner also requires
+adjudication_metadata in every JSONL record and validates its schema,
+identities, timestamp, selected annotation, fixture context and report hash.
+A hand-written record without this evidence is rejected.
+
+This is an auditable pseudonymous attestation, not a digital signature or
+identity-verification service. It cannot prove that humans are who their IDs
+claim to be or that they worked independently. Preserve the reviewed files and
+adjudication sidecar with the manifest. Synthetic test annotations only test
+the software contract; they are not real chart ground truth.
