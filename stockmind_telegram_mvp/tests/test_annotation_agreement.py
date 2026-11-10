@@ -53,7 +53,10 @@ class AnnotationAgreementTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def _make_reviewed(self, folder, image_bytes, annotator_id, reviewer_id, zones, plot):
+    def _make_reviewed(
+        self, folder, image_bytes, annotator_id, reviewer_id, zones, plot,
+        anchors=None, scale=None,
+    ):
         root = self.root / folder
         root.mkdir()
         image_path = root / "source.png"
@@ -73,6 +76,8 @@ class AnnotationAgreementTests(unittest.TestCase):
             zones,
             annotator_id,
             annotated_at="2026-11-10T04:00:00Z",
+            price_axis_anchors=anchors,
+            price_axis_scale=scale,
         )
         approved = review_annotation_draft(
             annotated,
@@ -157,6 +162,95 @@ class AnnotationAgreementTests(unittest.TestCase):
         report = compare_reviewed_annotations(path_a, path_b)
         self.assertIsNone(report["zone_agreement"]["agreement_f1"])
         self.assertIsNone(report["zone_agreement"]["mean_matched_iou"])
+
+
+    def test_reports_matching_manual_price_axis_calibrations(self):
+        anchors_a = [
+            {"y": 0.2, "price": 70000},
+            {"y": 0.5, "price": 60000},
+            {"y": 0.8, "price": 50000},
+        ]
+        anchors_b = [
+            {"y": 0.2, "price": 70700},
+            {"y": 0.5, "price": 60600},
+            {"y": 0.8, "price": 50500},
+        ]
+        path_a = self._make_reviewed(
+            "axis-a", _png_bytes(), "ann-008", "rev-108", [], PLOT,
+            anchors_a, "linear",
+        )
+        path_b = self._make_reviewed(
+            "axis-b", _png_bytes(), "ann-009", "rev-109", [], PLOT,
+            anchors_b, "linear",
+        )
+        agreement = compare_reviewed_annotations(path_a, path_b)["price_axis_agreement"]
+        self.assertEqual(agreement["status"], "compared")
+        self.assertTrue(agreement["scale_match"])
+        self.assertEqual(agreement["sample_count"], 11)
+        self.assertGreater(agreement["mean_relative_price_disagreement"], 0.009)
+        self.assertLess(agreement["mean_relative_price_disagreement"], 0.011)
+
+    def test_reports_price_axis_missing_on_one_side(self):
+        anchors = [
+            {"y": 0.2, "price": 70000},
+            {"y": 0.5, "price": 60000},
+            {"y": 0.8, "price": 50000},
+        ]
+        path_a = self._make_reviewed(
+            "axis-present", _png_bytes(), "ann-010", "rev-110", [], PLOT,
+            anchors, "linear",
+        )
+        agreement = compare_reviewed_annotations(path_a, self.path_b)["price_axis_agreement"]
+        self.assertEqual(agreement["status"], "missing_on_one_side")
+        self.assertEqual(agreement["annotator_a_anchor_count"], 3)
+        self.assertEqual(agreement["annotator_b_anchor_count"], 0)
+
+    def test_reports_non_overlapping_price_axis_ranges_without_extrapolation(self):
+        anchors_a = [
+            {"y": 0.15, "price": 70000},
+            {"y": 0.2, "price": 60000},
+            {"y": 0.25, "price": 50000},
+        ]
+        anchors_b = [
+            {"y": 0.75, "price": 70000},
+            {"y": 0.8, "price": 60000},
+            {"y": 0.85, "price": 50000},
+        ]
+        path_a = self._make_reviewed(
+            "axis-range-a", _png_bytes(), "ann-011", "rev-111", [], PLOT,
+            anchors_a, "linear",
+        )
+        path_b = self._make_reviewed(
+            "axis-range-b", _png_bytes(), "ann-012", "rev-112", [], PLOT,
+            anchors_b, "linear",
+        )
+        agreement = compare_reviewed_annotations(path_a, path_b)["price_axis_agreement"]
+        self.assertEqual(agreement["status"], "no_overlap")
+        self.assertIsNone(agreement.get("sample_count"))
+
+    def test_compares_different_manual_axis_scales_without_conflating_them(self):
+        linear_anchors = [
+            {"y": 0.2, "price": 70000},
+            {"y": 0.5, "price": 60000},
+            {"y": 0.8, "price": 50000},
+        ]
+        log_anchors = [
+            {"y": 0.2, "price": 72000},
+            {"y": 0.5, "price": 60000},
+            {"y": 0.8, "price": 50000},
+        ]
+        path_a = self._make_reviewed(
+            "axis-linear", _png_bytes(), "ann-013", "rev-113", [], PLOT,
+            linear_anchors, "linear",
+        )
+        path_b = self._make_reviewed(
+            "axis-log", _png_bytes(), "ann-014", "rev-114", [], PLOT,
+            log_anchors, "log",
+        )
+        agreement = compare_reviewed_annotations(path_a, path_b)["price_axis_agreement"]
+        self.assertEqual(agreement["status"], "compared")
+        self.assertFalse(agreement["scale_match"])
+        self.assertGreater(agreement["max_relative_price_disagreement"], 0)
 
     def test_rejects_unhashable_zone_type_as_validation_error(self):
         from stockmind_telegram_mvp.app.zone_evaluation import evaluate_manual_annotation_agreement
