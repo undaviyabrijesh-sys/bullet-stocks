@@ -59,6 +59,15 @@ overlap, it is `no_overlap`. Only a shared range produces numeric comparison
 metrics. A different selected scale is reported explicitly rather than
 silently normalized away.
 
+The report also includes the shared y-range as a fraction of annotator A's
+calibrated range, annotator B's calibrated range, and the union of both ranges.
+These coverage values matter because two fits can agree closely over a narrow
+overlap while covering only a small part of the chart. A non-overlapping range,
+or an overlap of at most 1e-9 in normalized screenshot coordinates, is reported
+as `no_overlap` with zero coverage fractions; no price samples are generated.
+The comparison uses 2..101 evenly spaced samples, defaults to 11, and never
+extrapolates beyond either annotator's manually anchored range.
+
 This measures agreement between two fitted manual calibrations. It does not
 verify the visible labels against an external exchange price or prove that
 either annotator read the screenshot correctly.
