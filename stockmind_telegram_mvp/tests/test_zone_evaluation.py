@@ -6,6 +6,10 @@ from stockmind_telegram_mvp.app.zone_evaluation import (
     _price_comparison,
     evaluate_zone_predictions,
 )
+from stockmind_telegram_mvp.app.plot_evaluation import (
+    aggregate_plot_boundary_accuracy,
+    compare_plot_boundary_accuracy,
+)
 
 def evaluate(predicted_zones, reference_zones, **kwargs):
     # Most geometry-only unit tests use the full screenshot as a known plot.
@@ -589,6 +593,54 @@ class ZoneEvaluationTests(unittest.TestCase):
                 )
                 self.assertEqual(result["overall"]["true_positive"], 1)
                 self.assertEqual(result["matches"][0]["iou"], 1.0)
+
+
+    def test_plot_boundary_metrics_report_left_toolbar_and_top_controls_spill(self):
+        result = evaluate(
+            [
+                prediction(
+                    x_start=0.05, x_end=0.20,
+                    y_top=0.20, y_bottom=0.40,
+                ),
+                prediction(
+                    x_start=0.40, x_end=0.60,
+                    y_top=0.05, y_bottom=0.30,
+                ),
+            ],
+            [],
+            reference_plot_bounds=PLOT_BOUNDS,
+            predicted_plot_bounds={
+                "x_start": 0.05, "x_end": 0.95,
+                "y_top": 0.05, "y_bottom": 0.95,
+            },
+        )
+
+        accuracy = result["plot_boundary_accuracy"]
+        self.assertGreater(accuracy["left_toolbar_overlap_pct"], 0)
+        self.assertGreater(accuracy["top_controls_overlap_pct"], 0)
+        self.assertGreater(accuracy["left_toolbar_zone_area_pct"], 0)
+        self.assertGreater(accuracy["top_controls_zone_area_pct"], 0)
+
+        aggregate = aggregate_plot_boundary_accuracy([
+            {"plot_boundary_accuracy": accuracy}
+        ])
+        self.assertEqual(
+            aggregate["mean_left_toolbar_overlap_pct"],
+            accuracy["left_toolbar_overlap_pct"],
+        )
+        self.assertEqual(
+            aggregate["mean_top_controls_overlap_pct"],
+            accuracy["top_controls_overlap_pct"],
+        )
+        comparison = compare_plot_boundary_accuracy(aggregate, aggregate)
+        self.assertEqual(comparison["delta"]["mean_left_toolbar_overlap_pct"], 0.0)
+        self.assertEqual(comparison["delta"]["mean_top_controls_overlap_pct"], 0.0)
+        self.assertEqual(
+            comparison["delta"]["mean_left_toolbar_zone_area_pct"], 0.0
+        )
+        self.assertEqual(
+            comparison["delta"]["mean_top_controls_zone_area_pct"], 0.0
+        )
 
 
 if __name__ == "__main__":
