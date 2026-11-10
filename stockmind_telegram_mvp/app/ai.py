@@ -88,6 +88,14 @@ Analyse in this order:
 2. Identify meaningful supply and demand as distinct PRICE BANDS anchored to visible bases,
    displacement/impulse candles and swing structure. Keep multiple meaningful zones separate.
    Do not compress zones into thin stacked lines or place them at the bottom of the chart.
+   Apply the zone-evidence gate: a candidate must be anchored to a compact base or the last
+   opposing candle/cluster immediately before a clear directional displacement away from it.
+   Demand requires an upward departure; supply requires a downward departure. Do not create a
+   zone from an isolated wick, a single rejection without follow-through, a horizontal level
+   alone, or a pause without a clear departure. Prefer fewer supported zones over filling the
+   eight-zone limit; return an empty list when none qualify. Do not duplicate one base as
+   overlapping boxes. Bound the zone to the visible base/last opposing candle structure, not
+   the full displacement leg. If the base edges are ambiguous, withhold its overlay.
 3. If the user has already drawn zones, assess those first and preserve them as the reference.
    For each zone, set origin=user_marked only when the screenshot clearly shows that the user
    manually marked that zone; otherwise set origin=ai_inferred. Do not infer user authorship
@@ -124,7 +132,7 @@ Use this response structure:
 The user may ask in English, Hinglish, Hindi, Gujarati or mixed language. Reply in their style.
 """
 
-CHART_PROMPT_VERSION = "dns-chart-v7"
+CHART_PROMPT_VERSION = "dns-chart-v8"
 CHART_IMAGE_INSTRUCTIONS = """
 Return structured JSON. First identify plot_bounds: the visible main price-candle plotting
 rectangle, excluding the price scale, toolbars, legends and separate indicator/volume panels.
@@ -1164,6 +1172,7 @@ class ResearchAI:
             "plot_bounds_policy": "required_for_overlay",
             "confidence_policy": "high_medium_only",
             "zone_origin_policy": "user_marked_only_when_visibly_marked",
+            "zone_evidence_policy": "compact_base_plus_directional_displacement_v1",
         }
         request_options = {
             "model": self.vision_model,
