@@ -7,6 +7,7 @@ canonical screenshot and annotation guideline before comparing their geometry.
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 from .annotation_editor import load_draft_and_image
