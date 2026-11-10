@@ -443,9 +443,9 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
 
     def test_rejects_adjudication_timestamp_before_both_reviews(self):
         record = self._record()
-        record["adjudication_metadata"]["adjudicated_at"] = "2026-11-05T19:10:00Z"
+        record["adjudication_metadata"]["adjudicated_at"] = "2026-11-05T19:17:00Z"
         self._write(record)
-        with self.assertRaisesRegex(ValueError, "cannot be earlier than both annotation reviews"):
+        with self.assertRaisesRegex(ValueError, "cannot precede either annotation review"):
             evaluate_benchmark_manifest(self.manifest)
 
     def test_rejects_non_manual_annotation_source(self):
