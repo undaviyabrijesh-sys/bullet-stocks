@@ -35,6 +35,24 @@ python -m app.bot
 
 Windows activation: `.venv\\Scripts\\activate`.
 
+## Telegram interface language
+
+The fixed bot interface supports English, Hindi and Gujarati. Telegram's
+`language_code` selects Hindi or Gujarati automatically when Telegram reports
+one of those locales; English is the fallback. Users can override that choice
+at any time with `/language en`, `/language hi` or `/language gu` (the
+short alias `/lang` is also accepted). Sending `/language` without an
+argument shows the current selection and usage. The explicit choice overrides
+Telegram's locale for welcome text, progress messages, quota/admission notices,
+chart-overlay explanations, common upload errors and reset/help responses.
+
+The model-generated research answer continues to follow the language of the
+latest user question; the interface-language command does not force research
+answers into another language. Explicit preferences are currently kept in
+process memory and reset when the bot process restarts, consistent with the
+prototype's other beta state. Low-level image-decoder validation messages may
+still be returned in English.
+
 ## Configuration
 - TELEGRAM_BOT_TOKEN
 - OPENAI_API_KEY
