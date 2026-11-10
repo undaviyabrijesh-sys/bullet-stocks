@@ -331,7 +331,7 @@ python -m stockmind_telegram_mvp.app.annotation_intake path/to/chart.png \
 
 The command accepts static JPEG, PNG or WEBP images only. It applies the same decoded-image validation used by the Telegram upload path, reads at most the configured byte limit plus one byte, copies the original encoded bytes unchanged, and records SHA-256 plus actual pixel dimensions. It refuses path-like fixture IDs, overwrites, output image-directory symlinks that escape the inbox, oversized or malformed files, animated images, and unsupported market-context fields. Context values are normalized using the benchmark's grouping conventions. The draft does not record the source machine's path or any user identity.
 
-The output contains `images/<fixture-id>.<ext>` and `<fixture-id>.draft.json`. The draft deliberately has `benchmark_ready: false`, empty reference zones, null plot bounds, pending annotation metadata, and no AI prediction/provenance. **It is not a benchmark JSONL record and must not be passed to the benchmark runner.** A human annotator must add the visible supply/demand rectangles and reviewed main-plot bounds, then a different human must review them and fill pseudonymous annotator/reviewer IDs plus timezone-aware timestamps. Capture the actual AI prediction and provider-returned prediction metadata for the exact same screenshot separately. Only after those steps should a benchmark JSONL fixture be assembled using the schema above.
+The output contains `images/<fixture-id>.<ext>` and `<fixture-id>.draft.json`. The draft deliberately has `benchmark_ready: false`, empty reference zones, null plot bounds, pending annotation metadata, and no AI prediction/provenance. **It is not a benchmark JSONL record and must not be passed to the benchmark runner.** Two different annotators must independently mark the same screenshot, and each annotation must be separately reviewed by a different reviewer. A third, distinct adjudicator must inspect the pairwise agreement report and explicitly select one annotation with a rationale. Capture the actual AI prediction and provider-returned prediction metadata for the exact same screenshot separately. Only after all of those steps should a benchmark JSONL fixture be assembled using the schema above.
 
 The intake helper never invents chart levels, zone coordinates, model output, annotator identities or approval times. Its tests use synthetic images only to verify file handling; they are not chart-accuracy fixtures. The inbox path is ignored by Git so private chart screenshots and unfinished drafts are not accidentally committed. Keep the original screenshot and reviewer audit evidence in access-controlled storage; the manifest's pseudonymous IDs alone do not authenticate the humans who approved an annotation.
 
@@ -358,7 +358,7 @@ For optional price-boundary scoring, select `axis_anchor`, choose `linear` or `l
 
 The annotation pass writes a new `.annotated.json` file with `status: pending_review`, a timezone-aware timestamp and pending review metadata. Review mode is read-only: a separate reviewer enters an ID such as `rev-002` and explicitly approves or rejects the rectangles. The review pass writes a new `.reviewed.json` file. Existing files are never overwritten. Both approved and rejected drafts remain `benchmark_ready: false`; approval alone does not create a benchmark fixture.
 
-The editor records the manually marked main plot rectangle, supply/demand geometry, and optional manually read price-axis anchors plus the chosen linear/log scale. Before annotation can be saved or reviewed, each reference zone is checked at the original screenshot dimensions using the evaluator's pixel rounding and reference-zone rules: it must remain at least one pixel wide and high and cannot exceed 45% of screenshot height. This prevents approval of boxes that the benchmark would later reject as unscorable. When anchors are present, the saved `price_axis_plot_bounds` must match the reviewed main plot and the 3..20 anchors must pass the calibration fit. The reviewer sees the anchor markers and values in read-only mode and revalidates them before approval. After approval, capture the actual AI prediction and provider-returned prediction metadata for the exact same screenshot, then assemble the benchmark JSONL record using the schema above. The benchmark runner remains the final validator. The editor's geometry/state-transition tests run headlessly; an interactive Tk window still needs a manual desktop smoke test on the target operating system. The CLI reports success only when the current editor session completes its own save operation; an output file appearing concurrently from another process does not count as a successful save. Closing the window without saving exits with status 1; successfully saving an annotation or review in the current session exits with status 0.
+The editor records the manually marked main plot rectangle, supply/demand geometry, and optional manually read price-axis anchors plus the chosen linear/log scale. Before annotation can be saved or reviewed, each reference zone is checked at the original screenshot dimensions using the evaluator's pixel rounding and reference-zone rules: it must remain at least one pixel wide and high and cannot exceed 45% of screenshot height. This prevents approval of boxes that the benchmark would later reject as unscorable. When anchors are present, the saved `price_axis_plot_bounds` must match the reviewed main plot and the 3..20 anchors must pass the calibration fit. The reviewer sees the anchor markers and values in read-only mode and revalidates them before approval. Repeat the full annotation and review process with a second annotator, then use the adjudication command to record a separate human selection and rationale. Only then capture the actual AI prediction and provider-returned metadata for the exact same screenshot and assemble the benchmark JSONL record. The benchmark runner remains the final validator. The editor's geometry/state-transition tests run headlessly; an interactive Tk window still needs a manual desktop smoke test on the target operating system. The CLI reports success only when the current editor session completes its own save operation; an output file appearing concurrently from another process does not count as a successful save. Closing the window without saving exits with status 1; successfully saving an annotation or review in the current session exits with status 0.
 
 
 ## Prediction capture and fixture assembly
@@ -387,9 +387,19 @@ python -m stockmind_telegram_mvp.app.annotation_fixture capture \
 Then assemble and preflight one JSONL fixture:
 
 ~~~bash
+python -m stockmind_telegram_mvp.app.annotation_fixture adjudicate \
+  stockmind_telegram_mvp/benchmark/inbox/btc-1h-001.reviewed.json \
+  stockmind_telegram_mvp/benchmark/inbox-b/btc-1h-001.reviewed.json \
+  --adjudicator-id adj-003 \
+  --adjudicated-at 2026-11-10T12:30:00Z \
+  --decision accept_a \
+  --rationale "Annotation A follows the agreed boundary rule after reviewing the measured disagreements."
+
 python -m stockmind_telegram_mvp.app.annotation_fixture assemble \
   stockmind_telegram_mvp/benchmark/inbox/btc-1h-001.reviewed.json \
-  stockmind_telegram_mvp/benchmark/inbox/btc-1h-001.prediction.json
+  stockmind_telegram_mvp/benchmark/inbox/btc-1h-001.prediction.json \
+  --annotation-b stockmind_telegram_mvp/benchmark/inbox-b/btc-1h-001.reviewed.json \
+  --adjudication stockmind_telegram_mvp/benchmark/inbox/btc-1h-001.adjudication.json
 
 python -m stockmind_telegram_mvp.app.zone_benchmark \
   stockmind_telegram_mvp/benchmark/inbox/btc-1h-001.fixture.jsonl
@@ -397,12 +407,12 @@ python -m stockmind_telegram_mvp.app.zone_benchmark \
 
 The capture contains only the screenshot hash/dimensions, fixture ID and
 sanitized model result/provenance; it does not copy the screenshot or store a
-Telegram user/chat ID. The assembler requires an independently approved
-annotation, validates the manual geometry and optional price-axis calibration,
-checks fixture ID/hash/dimensions, rejects altered or non-sanitized model
-geometry, and requires real provider-returned model/time metadata. It writes
-the manifest beside the reviewed draft so the relative image_file remains
-valid. Existing outputs are never overwritten.
+Telegram user/chat ID. The assembler requires two independently approved annotations plus
+a valid adjudication sidecar, validates the manual geometry and optional
+price-axis calibration, checks fixture ID/hash/dimensions, rejects altered or
+non-sanitized model geometry, and requires real provider-returned model/time
+metadata. It writes the manifest beside the adjudicated annotation so the
+relative image_file remains valid. Existing outputs are never overwritten.
 
 Before writing the JSONL file, the assembler runs the exact benchmark manifest
 validator against a temporary one-record manifest. A successful preflight
