@@ -32,6 +32,7 @@ From the repository root:
 The JSON report includes:
 
 - plot-boundary IoU and edge displacement in screenshot pixels;
+- manual price-axis calibration agreement over the overlapping, manually anchored y range;
 - one-to-one zone matches, separately for supply and demand;
 - unmatched zones from each annotator;
 - each annotator's matched-zone coverage;
@@ -41,6 +42,26 @@ The JSON report includes:
 Matching uses the same screenshot pixel quantization and maximum-cardinality,
 then maximum-IoU assignment rule as the AI zone evaluator. A supply zone never
 matches a demand zone.
+
+## Manual price-axis agreement
+
+When both annotators provide at least three validated manual price-axis anchors,
+the report fits each annotator's declared linear or logarithmic calibration and
+compares the two fitted prices at 11 evenly spaced y positions within their
+shared anchor range. It reports mean and maximum absolute and relative price
+disagreement, each fit's maximum anchor residual, and whether the annotators
+selected the same scale.
+
+No values are extrapolated beyond either annotator's manually anchored range.
+If neither annotator supplied anchors, the status is `not_provided`; if only
+one did, it is `missing_on_one_side`; and if their anchor ranges do not
+overlap, it is `no_overlap`. Only a shared range produces numeric comparison
+metrics. A different selected scale is reported explicitly rather than
+silently normalized away.
+
+This measures agreement between two fitted manual calibrations. It does not
+verify the visible labels against an external exchange price or prove that
+either annotator read the screenshot correctly.
 
 ## Interpretation and limitations
 
