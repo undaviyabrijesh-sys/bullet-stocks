@@ -431,6 +431,23 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "distinct from both annotators"):
             evaluate_benchmark_manifest(self.manifest)
 
+
+    def test_rejects_malformed_adjudication_decision_without_type_error(self):
+        for decision in ([], {}):
+            with self.subTest(decision=decision):
+                record = self._record()
+                record["adjudication_metadata"]["decision"] = decision
+                self._write(record)
+                with self.assertRaisesRegex(ValueError, "decision must be accept_a or accept_b"):
+                    evaluate_benchmark_manifest(self.manifest)
+
+    def test_rejects_adjudication_timestamp_before_both_reviews(self):
+        record = self._record()
+        record["adjudication_metadata"]["adjudicated_at"] = "2026-11-05T19:10:00Z"
+        self._write(record)
+        with self.assertRaisesRegex(ValueError, "cannot be earlier than both annotation reviews"):
+            evaluate_benchmark_manifest(self.manifest)
+
     def test_rejects_non_manual_annotation_source(self):
         self._write(
             self._record(
