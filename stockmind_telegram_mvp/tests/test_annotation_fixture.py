@@ -225,6 +225,9 @@ class AnnotationFixtureAssemblyTests(unittest.TestCase):
         self.assertEqual(scored["overall"]["false_positive"], 0)
         self.assertEqual(scored["overall"]["false_negative"], 0)
         self.assertEqual(scored["fixtures"][0]["image_sha256"], self.image_hash)
+        self.assertEqual(
+            scored["fixtures"][0]["adjudication_metadata"]["decision"], "accept_a"
+        )
 
 
     def test_assembler_requires_second_annotation_and_adjudication(self):
