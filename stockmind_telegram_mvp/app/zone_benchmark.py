@@ -30,10 +30,12 @@ _REQUIRED_FIELDS = {
     "predicted_zones",
     "prediction_metadata",
     "annotation_metadata",
+    "adjudication_metadata",
 }
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _ANNOTATOR_ID_RE = re.compile(r"^ann-[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 _REVIEWER_ID_RE = re.compile(r"^rev-[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
+_ADJUDICATOR_ID_RE = re.compile(r"^adj-[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 _GUIDELINE_VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024
 _MARKET_CONTEXT_FIELDS = ("asset_class", "symbol", "exchange", "timeframe")
@@ -254,6 +256,145 @@ def _validate_annotation_metadata(metadata, line_number, fixture_id):
     }
 
 
+def _validate_adjudication_metadata(
+    metadata,
+    line_number,
+    fixture_id,
+    *,
+    image_hash,
+    image_width,
+    image_height,
+    market_context,
+    annotation_metadata,
+):
+    """Require a hash-bound pairwise review and explicit human adjudication."""
+    prefix = f"line {line_number} ({fixture_id}): adjudication_metadata"
+    if not isinstance(metadata, dict):
+        raise ValueError(f"{prefix} must be a JSON object")
+    required = {
+        "schema",
+        "decision",
+        "selected_annotation",
+        "adjudicator_id",
+        "adjudicated_at",
+        "rationale",
+        "annotation_a",
+        "annotation_b",
+        "agreement_report",
+        "agreement_report_sha256",
+    }
+    missing = sorted(required - set(metadata))
+    extra = sorted(set(metadata) - required)
+    if missing:
+        raise ValueError(f"{prefix} is missing fields: {', '.join(missing)}")
+    if extra:
+        raise ValueError(f"{prefix} contains unsupported fields: {', '.join(extra)}")
+    if metadata["schema"] != "stockmind.annotation-adjudication.v1":
+        raise ValueError(f"{prefix}.schema is unsupported")
+    if metadata["decision"] not in {"accept_a", "accept_b"}:
+        raise ValueError(f"{prefix}.decision must be accept_a or accept_b")
+    expected_selection = "a" if metadata["decision"] == "accept_a" else "b"
+    if metadata["selected_annotation"] != expected_selection:
+        raise ValueError(f"{prefix}.selected_annotation does not match decision")
+
+    adjudicator_id = metadata["adjudicator_id"]
+    if not isinstance(adjudicator_id, str) or not _ADJUDICATOR_ID_RE.fullmatch(adjudicator_id):
+        raise ValueError(f"{prefix}.adjudicator_id must be an anonymized ID like 'adj-003'")
+
+    rationale = metadata["rationale"]
+    if (
+        not isinstance(rationale, str)
+        or not 20 <= len(rationale.strip()) <= 1000
+        or any(not character.isprintable() for character in rationale.strip())
+    ):
+        raise ValueError(f"{prefix}.rationale must be 20..1000 printable characters")
+
+    def parse_timestamp(value, field):
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{prefix}.{field} must be an ISO-8601 timestamp with a timezone")
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError(
+                f"{prefix}.{field} must be an ISO-8601 timestamp with a timezone"
+            ) from exc
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise ValueError(f"{prefix}.{field} must include a timezone")
+        return parsed
+
+    adjudicated_at = parse_timestamp(metadata["adjudicated_at"], "adjudicated_at")
+    annotation_records = []
+    for label in ("annotation_a", "annotation_b"):
+        item = metadata[label]
+        if not isinstance(item, dict) or set(item) != {
+            "file_sha256", "annotator_id", "reviewer_id", "reviewed_at"
+        }:
+            raise ValueError(f"{prefix}.{label} fields do not match the supported schema")
+        if not isinstance(item["file_sha256"], str) or not _SHA256_RE.fullmatch(item["file_sha256"]):
+            raise ValueError(f"{prefix}.{label}.file_sha256 must be a SHA-256 digest")
+        if not isinstance(item["annotator_id"], str) or not _ANNOTATOR_ID_RE.fullmatch(item["annotator_id"]):
+            raise ValueError(f"{prefix}.{label}.annotator_id is invalid")
+        if not isinstance(item["reviewer_id"], str) or not _REVIEWER_ID_RE.fullmatch(item["reviewer_id"]):
+            raise ValueError(f"{prefix}.{label}.reviewer_id is invalid")
+        reviewed_at = parse_timestamp(item["reviewed_at"], f"{label}.reviewed_at")
+        annotation_records.append((item, reviewed_at))
+
+    first, first_reviewed_at = annotation_records[0]
+    second, second_reviewed_at = annotation_records[1]
+    token = lambda value: value.split("-", 1)[1].casefold()
+    if token(first["annotator_id"]) == token(second["annotator_id"]):
+        raise ValueError(f"{prefix} requires two different annotator identities")
+    if (
+        token(first["reviewer_id"]) == token(second["annotator_id"])
+        or token(second["reviewer_id"]) == token(first["annotator_id"])
+    ):
+        raise ValueError(f"{prefix} reviewer identities must not overlap the other annotator")
+    if token(adjudicator_id) in {
+        token(first["annotator_id"]),
+        token(first["reviewer_id"]),
+        token(second["annotator_id"]),
+        token(second["reviewer_id"]),
+    }:
+        raise ValueError(f"{prefix}.adjudicator_id must be distinct from both annotators and reviewers")
+    if adjudicated_at < max(first_reviewed_at, second_reviewed_at):
+        raise ValueError(f"{prefix}.adjudicated_at cannot be earlier than both annotation reviews")
+
+    report = metadata["agreement_report"]
+    if not isinstance(report, dict):
+        raise ValueError(f"{prefix}.agreement_report must be an object")
+    expected_report_values = {
+        "report_schema": "stockmind.annotation-agreement.v1",
+        "fixture_id": fixture_id,
+        "image_sha256": image_hash.lower(),
+        "image_width": image_width,
+        "image_height": image_height,
+        "market_context": market_context,
+        "guideline_version": annotation_metadata["guideline_version"],
+        "annotator_ids": [first["annotator_id"], second["annotator_id"]],
+        "reviewer_ids": [first["reviewer_id"], second["reviewer_id"]],
+    }
+    for field, expected in expected_report_values.items():
+        if report.get(field) != expected:
+            raise ValueError(f"{prefix}.agreement_report.{field} does not match the fixture annotations")
+    report_hash = metadata["agreement_report_sha256"]
+    if not isinstance(report_hash, str) or not _SHA256_RE.fullmatch(report_hash):
+        raise ValueError(f"{prefix}.agreement_report_sha256 must be a SHA-256 digest")
+    try:
+        actual_report_hash = _canonical_json_sha256(report)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{prefix}.agreement_report must contain finite JSON values") from exc
+    if actual_report_hash != report_hash.lower():
+        raise ValueError(f"{prefix}.agreement_report_sha256 does not match agreement_report")
+
+    selected = first if expected_selection == "a" else second
+    if (
+        annotation_metadata["annotator_id"] != selected["annotator_id"]
+        or annotation_metadata["reviewer_id"] != selected["reviewer_id"]
+    ):
+        raise ValueError(f"{prefix} selected annotation does not match annotation_metadata")
+    return metadata
+
+
 def _image_path(manifest_dir, image_file):
     if not isinstance(image_file, str) or not image_file.strip():
         raise ValueError("image_file must be a non-empty relative path")
@@ -398,6 +539,16 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
         record.get("market_context"), line_number, fixture_id
     )
     image_hash = _load_and_verify_image(record, manifest_dir, line_number, max_image_bytes)
+    _validate_adjudication_metadata(
+        record["adjudication_metadata"],
+        line_number,
+        fixture_id,
+        image_hash=image_hash,
+        image_width=record["image_width"],
+        image_height=record["image_height"],
+        market_context=market_context,
+        annotation_metadata=annotation_metadata,
+    )
 
     for field in ("reference_zones", "predicted_zones"):
         if not isinstance(record[field], list):
