@@ -99,6 +99,7 @@ class AnnotationAgreementTests(unittest.TestCase):
         self.assertEqual(report["zone_agreement"]["agreement_f1"], 1.0)
         self.assertEqual(report["zone_agreement"]["mean_matched_iou"], 1.0)
         self.assertEqual(report["plot_agreement"]["iou"], 1.0)
+        self.assertEqual(report["price_axis_agreement"]["status"], "not_provided")
 
     def test_reports_partial_geometry_disagreement_without_adjudicating(self):
         shifted = {
