@@ -328,7 +328,8 @@ def _render_overlay_prepared(
             continue
         # Treat the renderer as a final trust boundary: direct callers must
         # provide the same explicit confidence required by the v6 sanitizer.
-        if zone.get("confidence") not in {"high", "medium"}:
+        confidence = zone.get("confidence")
+        if not isinstance(confidence, str) or confidence not in {"high", "medium"}:
             continue
         zone_type = zone.get("zone_type")
         pixel_box = normalized_zone_to_pixel_box(zone, width, height)
