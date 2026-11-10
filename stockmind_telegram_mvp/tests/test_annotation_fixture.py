@@ -276,6 +276,20 @@ class AnnotationFixtureAssemblyTests(unittest.TestCase):
                 rationale="This selection follows the documented chart-zone boundary rule.",
             )
 
+    def test_adjudication_rejects_same_reviewer_for_both_annotations(self):
+        reviewed_b = json.loads(self.reviewed_b_path.read_text(encoding="utf-8"))
+        reviewed_b["annotation_metadata"]["reviewer_id"] = "rev-002"
+        self.reviewed_b_path.write_text(json.dumps(reviewed_b), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "two distinct reviewer identities"):
+            write_adjudication_record(
+                self.reviewed_path,
+                self.reviewed_b_path,
+                adjudicator_id="adj-005",
+                adjudicated_at="2026-11-07T12:10:00Z",
+                decision="accept_a",
+                rationale="The selected annotation follows the documented zone boundary rule after pairwise review.",
+            )
+
     def test_adjudicator_can_select_annotation_b_as_reference(self):
         capture_info = write_prediction_capture(self.reviewed_path, self.result)
         selected_b = write_adjudication_record(
