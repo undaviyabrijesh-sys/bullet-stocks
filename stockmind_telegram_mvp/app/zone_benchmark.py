@@ -111,7 +111,10 @@ def _validate_prediction_metadata(metadata, line_number, fixture_id):
 
     # Generated time is fixture-specific; the remaining fields define the
     # inference profile and must be identical within one aggregate report.
-    if normalized["prompt_version"] in {"dns-chart-v6", "dns-chart-v7"} and settings.get("confidence_policy") != "high_medium_only":
+    if (
+        normalized["prompt_version"] in {"dns-chart-v6", "dns-chart-v7"}
+        and settings.get("confidence_policy") != "high_medium_only"
+    ):
         raise ValueError(
             f"line {line_number} ({fixture_id}): {normalized['prompt_version']} prediction metadata "
             "must declare confidence_policy=high_medium_only"
@@ -147,8 +150,10 @@ def _validate_prediction_metadata(metadata, line_number, fixture_id):
     return normalized, profile, profile_sha256
 
 
-def _validate_v6_prediction_confidence(prediction_metadata, predicted_zones, line_number, fixture_id):
-    """Enforce the v6 confidence gate in hand-authored benchmark manifests too."""
+def _validate_versioned_prediction_confidence(
+    prediction_metadata, predicted_zones, line_number, fixture_id
+):
+    """Enforce the v6/v7 confidence gate in hand-authored benchmark manifests too."""
     prompt_version = prediction_metadata.get("prompt_version")
     if prompt_version not in {"dns-chart-v6", "dns-chart-v7"}:
         return
@@ -179,7 +184,9 @@ def _validate_v6_prediction_confidence(prediction_metadata, predicted_zones, lin
             )
 
 
-def _validate_v7_prediction_origin(prediction_metadata, predicted_zones, line_number, fixture_id):
+def _validate_v7_prediction_origin(
+    prediction_metadata, predicted_zones, line_number, fixture_id
+):
     """Require explicit origin provenance and prevent contradictory overlay labels in v7."""
     if prediction_metadata.get("prompt_version") != "dns-chart-v7":
         return
@@ -596,7 +603,7 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
         if not isinstance(record[field], list):
             raise ValueError(f"line {line_number} ({fixture_id}): {field} must be a JSON array")
 
-    _validate_v6_prediction_confidence(
+    _validate_versioned_prediction_confidence(
         prediction_metadata, record["predicted_zones"], line_number, fixture_id
     )
     _validate_v7_prediction_origin(
