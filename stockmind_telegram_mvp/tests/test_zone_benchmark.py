@@ -162,6 +162,13 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         self.assertEqual(summary["drawable_count"], 1)
         self.assertEqual(summary["matched_count"], 1)
         self.assertEqual(summary["precision"], 1.0)
+        self.assertEqual(summary["fixture_count_with_candidates"], 1)
+        self.assertEqual(summary["fixture_count_with_drawable_predictions"], 1)
+        self.assertEqual(summary["fixture_count_with_matches"], 1)
+        empty_summary = result["fixtures"][1]["confidence_stratified_results"]["not_reported_or_invalid"]
+        self.assertEqual(empty_summary["fixture_count_with_candidates"], 0)
+        self.assertEqual(empty_summary["fixture_count_with_drawable_predictions"], 0)
+        self.assertEqual(empty_summary["fixture_count_with_matches"], 0)
         self.assertEqual(result["confidence_stratified_results"]["low"]["candidate_count"], 0)
         self.assertEqual(
             result["fixtures"][0]["confidence_stratified_results"]["not_reported_or_invalid"]["matched_count"],

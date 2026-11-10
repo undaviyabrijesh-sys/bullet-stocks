@@ -119,6 +119,9 @@ def _validate_confidence_stratified_results(summary, matches, overall, ignored, 
     count_fields = (
         "candidate_count", "drawable_count", "matched_count",
         "false_positive_count", "suppressed_or_invalid_count",
+        "fixture_count_with_candidates",
+        "fixture_count_with_drawable_predictions",
+        "fixture_count_with_matches",
     )
     metric_fields = ("precision", "mean_iou", "mean_center_error_normalized")
     candidate_total = drawable_total = matched_total = false_positive_total = suppressed_total = 0
@@ -133,6 +136,13 @@ def _validate_confidence_stratified_results(summary, matches, overall, ignored, 
             value = row[field]
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{label}.{level}.{field} must be a non-negative integer")
+        for field, source in (
+            ("fixture_count_with_candidates", "candidate_count"),
+            ("fixture_count_with_drawable_predictions", "drawable_count"),
+            ("fixture_count_with_matches", "matched_count"),
+        ):
+            if row[field] != int(row[source] > 0):
+                raise ValueError(f"{label}.{level}.{field} does not match {source}")
         if row["candidate_count"] != row["drawable_count"] + row["suppressed_or_invalid_count"]:
             raise ValueError(f"{label}.{level} candidate count does not reconcile")
         if row["drawable_count"] != row["matched_count"] + row["false_positive_count"]:
@@ -792,6 +802,9 @@ def _compare_confidence_stratified_results(baseline, candidate):
     fields = (
         "candidate_count", "drawable_count", "matched_count",
         "false_positive_count", "suppressed_or_invalid_count",
+        "fixture_count_with_candidates",
+        "fixture_count_with_drawable_predictions",
+        "fixture_count_with_matches",
         "precision", "mean_iou", "mean_center_error_normalized",
     )
     for level in _CONFIDENCE_GROUPS:

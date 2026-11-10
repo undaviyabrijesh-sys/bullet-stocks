@@ -103,6 +103,11 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         self.assertEqual(confidence["precision"]["baseline"], 1.0)
         self.assertIsNone(confidence["precision"]["candidate"])
         self.assertEqual(confidence["drawable_count"]["delta"], -1)
+        self.assertEqual(confidence["fixture_count_with_candidates"]["baseline"], 1)
+        self.assertEqual(confidence["fixture_count_with_candidates"]["candidate"], 0)
+        self.assertEqual(confidence["fixture_count_with_candidates"]["delta"], -1)
+        self.assertEqual(confidence["fixture_count_with_matches"]["baseline"], 1)
+        self.assertEqual(confidence["fixture_count_with_matches"]["candidate"], 0)
         self.assertEqual(
             result["fixtures"][0]["confidence_stratified_results"]["not_reported_or_invalid"][
                 "matched_count"
@@ -117,6 +122,18 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
             "not_reported_or_invalid"
         ]["false_positive_count"] = 1
         with self.assertRaisesRegex(ValueError, "matched count does not match match rows"):
+            compare_benchmark_reports(baseline, candidate)
+
+    def test_rejects_confidence_fixture_coverage_counts_that_do_not_match_evidence(self):
+        baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
+        candidate = self._report("candidate", [])
+        baseline["fixtures"][0]["confidence_stratified_results"][
+            "not_reported_or_invalid"
+        ]["fixture_count_with_candidates"] = 0
+
+        with self.assertRaisesRegex(
+            ValueError, "fixture_count_with_candidates does not match candidate_count"
+        ):
             compare_benchmark_reports(baseline, candidate)
 
     def test_compares_models_on_identical_reviewed_fixtures(self):

@@ -546,6 +546,11 @@ def _aggregate_confidence_stratified_results(fixtures):
             "matched_count": matched_count,
             "false_positive_count": drawable_count - matched_count,
             "suppressed_or_invalid_count": candidate_count - drawable_count,
+            "fixture_count_with_candidates": sum(row["fixture_count_with_candidates"] for row in rows),
+            "fixture_count_with_drawable_predictions": sum(
+                row["fixture_count_with_drawable_predictions"] for row in rows
+            ),
+            "fixture_count_with_matches": sum(row["fixture_count_with_matches"] for row in rows),
             "precision": matched_count / drawable_count if drawable_count else None,
             "mean_iou": _finite_mean([match["iou"] for match in matches]),
             "mean_center_error_normalized": _finite_mean(

@@ -94,9 +94,13 @@ Use the same IoU threshold across a benchmark release. Report aggregate and per-
 The evaluator and batch report separate drawable predictions by the model-reported
 qualitative confidence category (high and medium). For each category they
 report candidate count, drawable count, matched count, false positives,
-suppressed/invalid count, precision, mean matched IoU and mean matched center
-error. These are descriptive results on the manually reviewed fixture set; they
-do not turn model confidence into a calibrated probability.
+suppressed/invalid count, the number of fixtures containing candidates,
+drawable predictions and matches, precision, mean matched IoU and mean matched
+center error. The fixture counts disclose when pooled zone metrics come from
+only a small number of screenshots; they are counts of distinct reviewed
+images, not a claim that market observations are statistically independent.
+These are descriptive results on the manually reviewed fixture set; they do
+not turn model confidence into a calibrated probability.
 
 Per-confidence recall is intentionally omitted: a missed manual reference has
 no model confidence label and cannot honestly be assigned to a confidence

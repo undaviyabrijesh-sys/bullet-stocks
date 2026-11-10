@@ -157,6 +157,9 @@ def _confidence_stratified_results(predicted_zones, drawable_predictions, matche
             "matched_count": matched_count,
             "false_positive_count": drawable_count - matched_count,
             "suppressed_or_invalid_count": candidate_count - drawable_count,
+            "fixture_count_with_candidates": int(candidate_count > 0),
+            "fixture_count_with_drawable_predictions": int(drawable_count > 0),
+            "fixture_count_with_matches": int(matched_count > 0),
             "precision": matched_count / drawable_count if drawable_count else None,
             "mean_iou": _finite_mean([item["iou"] for item in matched]),
             "mean_center_error_normalized": _finite_mean(
