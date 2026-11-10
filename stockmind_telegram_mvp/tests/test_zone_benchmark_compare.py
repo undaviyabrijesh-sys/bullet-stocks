@@ -38,6 +38,47 @@ def _annotation():
     }
 
 
+def _adjudication_metadata(fixture_id, image_hash, context, annotation):
+    annotation_a = {
+        "file_sha256": "c" * 64,
+        "annotator_id": annotation["annotator_id"],
+        "reviewer_id": annotation["reviewer_id"],
+        "reviewed_at": annotation["reviewed_at"],
+    }
+    annotation_b = {
+        "file_sha256": "d" * 64,
+        "annotator_id": "ann-003",
+        "reviewer_id": "rev-004",
+        "reviewed_at": "2026-11-05T19:20:00Z",
+    }
+    report = {
+        "report_schema": "stockmind.annotation-agreement.v1",
+        "fixture_id": fixture_id,
+        "image_sha256": image_hash,
+        "image_width": 40,
+        "image_height": 30,
+        "market_context": context,
+        "guideline_version": annotation["guideline_version"],
+        "annotator_ids": [annotation_a["annotator_id"], annotation_b["annotator_id"]],
+        "reviewer_ids": [annotation_a["reviewer_id"], annotation_b["reviewer_id"]],
+    }
+    report_hash = hashlib.sha256(
+        json.dumps(report, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    ).hexdigest()
+    return {
+        "schema": "stockmind.annotation-adjudication.v1",
+        "decision": "accept_a",
+        "selected_annotation": "a",
+        "adjudicator_id": "adj-999",
+        "adjudicated_at": "2026-11-05T19:30:00Z",
+        "rationale": "The selected annotation follows the agreed zone-boundary guideline after review.",
+        "annotation_a": annotation_a,
+        "annotation_b": annotation_b,
+        "agreement_report": report,
+        "agreement_report_sha256": report_hash,
+    }
+
+
 class PairedBenchmarkComparisonTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -79,6 +120,12 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
             "predicted_zones": predicted, "prediction_metadata": metadata,
             "annotation_metadata": _annotation(),
             "market_context": context if context is not None else self.context,
+            "adjudication_metadata": _adjudication_metadata(
+                fixture_id,
+                self.image_hash,
+                context if context is not None else self.context,
+                _annotation(),
+            ),
             "iou_threshold": threshold,
             "reference_plot_bounds": reference_plot_bounds,
             "predicted_plot_bounds": predicted_plot_bounds,
