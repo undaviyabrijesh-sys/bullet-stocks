@@ -58,6 +58,7 @@ class OverlayRendererTests(unittest.TestCase):
         zone = {
             "zone_type": "demand",
             "draw_overlay": True,
+                "confidence": "high",
             "x_start": 0.2,
             "x_end": 0.8,
             "y_top": 0.2,
@@ -149,6 +150,7 @@ class OverlayRendererTests(unittest.TestCase):
             "y_top": 0.55,
             "y_bottom": 0.68,
             "draw_overlay": True,
+                "confidence": "high",
         }]
         result, count = render_overlay(sample_image(), zones)
         self.assertEqual(count, 1)
@@ -173,6 +175,7 @@ class OverlayRendererTests(unittest.TestCase):
     def test_required_plot_bounds_suppress_overlays_when_missing(self):
         zone = {
             "zone_type": "demand", "draw_overlay": True,
+                "confidence": "high",
             "x_start": 0.2, "x_end": 0.8, "y_top": 0.3, "y_bottom": 0.5,
         }
         result, count = render_overlay(sample_image(), [zone], require_plot_bounds=True)
@@ -182,6 +185,7 @@ class OverlayRendererTests(unittest.TestCase):
     def test_zone_outside_price_plot_is_not_drawn(self):
         zone = {
             "zone_type": "demand", "draw_overlay": True,
+                "confidence": "high",
             "x_start": 0.2, "x_end": 0.95, "y_top": 0.3, "y_bottom": 0.5,
         }
         bounds = {"x_start": 0.05, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9}
@@ -194,6 +198,7 @@ class OverlayRendererTests(unittest.TestCase):
     def test_zone_and_label_are_constrained_to_price_plot(self):
         zone = {
             "zone_type": "supply", "label": "AI SUPPLY", "draw_overlay": True,
+                "confidence": "high",
             "x_start": 0.2, "x_end": 0.8, "y_top": 0.3, "y_bottom": 0.5,
         }
         bounds = {"x_start": 0.05, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9}
@@ -215,6 +220,7 @@ class OverlayRendererTests(unittest.TestCase):
     def test_long_label_is_omitted_when_it_cannot_fit_inside_plot(self):
         zone = {
             "zone_type": "demand", "label": "X" * 32, "draw_overlay": True,
+                "confidence": "high",
             "x_start": 0.22, "x_end": 0.28, "y_top": 0.3, "y_bottom": 0.5,
         }
         bounds = {"x_start": 0.2, "x_end": 0.3, "y_top": 0.1, "y_bottom": 0.9}
@@ -231,26 +237,32 @@ class OverlayRendererTests(unittest.TestCase):
             {"zone_type": "supply", "draw_overlay": False},
             {
                 "zone_type": "demand", "draw_overlay": True,
+                    "confidence": "high",
                 "x_start": 0.8, "x_end": 0.2, "y_top": 0.3, "y_bottom": 0.4,
             },
             {
                 "zone_type": "other", "draw_overlay": True,
+                    "confidence": "high",
                 "x_start": 0.1, "x_end": 0.9, "y_top": 0.3, "y_bottom": 0.4,
             },
             {
                 "zone_type": "demand", "draw_overlay": True,
+                    "confidence": "high",
                 "x_start": True, "x_end": 0.9, "y_top": 0.3, "y_bottom": 0.4,
             },
             {
                 "zone_type": "supply", "draw_overlay": True,
+                    "confidence": "high",
                 "x_start": 0.1, "x_end": 0.9, "y_top": float("nan"), "y_bottom": 0.4,
             },
             {
                 "zone_type": "demand", "draw_overlay": True,
+                    "confidence": "high",
                 "x_start": 0.2, "x_end": 0.2001, "y_top": 0.3, "y_bottom": 0.4,
             },
             {
                 "zone_type": "supply", "draw_overlay": True,
+                    "confidence": "high",
                 "x_start": 0.1, "x_end": 0.9, "y_top": 0.3, "y_bottom": 0.301,
             },
         ]
@@ -262,6 +274,7 @@ class OverlayRendererTests(unittest.TestCase):
         zones = [{
             "zone_type": "demand",
             "draw_overlay": True,
+                "confidence": "high",
             "x_start": 10 ** 400,
             "x_end": 0.9,
             "y_top": 0.3,
@@ -277,11 +290,13 @@ class OverlayRendererTests(unittest.TestCase):
         zones = [
             {
                 "zone_type": "demand", "draw_overlay": True,
+                    "confidence": "high",
                 "x_start": 0.2, "x_end": 0.4,
                 "y_top": 0.2, "y_bottom": 0.4,
             },
             {
                 "zone_type": "supply", "draw_overlay": True,
+                    "confidence": "high",
                 "x_start": 0.0, "x_end": 1.0,
                 "y_top": 0.0, "y_bottom": 0.45,
             },
@@ -304,10 +319,12 @@ class OverlayRendererTests(unittest.TestCase):
     def test_invalid_early_candidates_do_not_consume_overlay_limit(self):
         invalid = {
             "zone_type": "demand", "draw_overlay": True,
+                "confidence": "high",
             "x_start": 0.8, "x_end": 0.2, "y_top": 0.3, "y_bottom": 0.4,
         }
         valid = {
             "zone_type": "supply", "draw_overlay": True,
+                "confidence": "high",
             "x_start": 0.2, "x_end": 0.6, "y_top": 0.3, "y_bottom": 0.4,
         }
 
@@ -325,6 +342,7 @@ class OverlayRendererTests(unittest.TestCase):
             {
                 "zone_type": "demand" if index % 2 == 0 else "supply",
                 "draw_overlay": True,
+                    "confidence": "high",
                 "x_start": 0.02 + index * 0.1,
                 "x_end": 0.08 + index * 0.1,
                 "y_top": 0.2,
@@ -346,6 +364,7 @@ class OverlayRendererTests(unittest.TestCase):
         zone = {
             "zone_type": "demand",
             "draw_overlay": True,
+                "confidence": "high",
             "x_start": 0.2,
             "x_end": 0.4,
             "y_top": 0.2,
@@ -360,6 +379,28 @@ class OverlayRendererTests(unittest.TestCase):
         result, count = render_overlay(sample_image(size=(10, 10)), [zone])
         self.assertIsNone(result)
         self.assertEqual(count, 0)
+
+    def test_final_renderer_requires_explicit_high_or_medium_confidence(self):
+        base = {
+            "zone_type": "demand",
+            "draw_overlay": True,
+            "x_start": 0.2,
+            "x_end": 0.8,
+            "y_top": 0.3,
+            "y_bottom": 0.5,
+        }
+        zones = [
+            dict(base),
+            dict(base, confidence=None),
+            dict(base, confidence="certain"),
+            dict(base, confidence="low"),
+            dict(base, confidence="high"),
+        ]
+
+        result, count = render_overlay(sample_image(), zones)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(count, 1)
 
     def test_low_confidence_zone_is_rejected_by_pixel_geometry_and_renderer(self):
         zone = {
@@ -403,6 +444,7 @@ class OverlayRendererTests(unittest.TestCase):
         canonical = sample_image()
         zones = [{
             "zone_type": "demand", "draw_overlay": True,
+                "confidence": "high",
             "x_start": 0.2, "x_end": 0.6, "y_top": 0.3, "y_bottom": 0.5,
         }]
         bounds = {
@@ -492,11 +534,13 @@ class ExifOrientationMatrixTests(unittest.TestCase):
     def test_half_open_pixel_footprint_matches_pillow_at_multiple_resolutions(self):
         interior = {
             "zone_type": "demand", "draw_overlay": True,
+                "confidence": "high",
             "x_start": 0.123, "x_end": 0.987,
             "y_top": 0.111, "y_bottom": 0.444,
         }
         edge = {
             "zone_type": "supply", "draw_overlay": True,
+                "confidence": "high",
             "x_start": 0.0, "x_end": 1.0,
             "y_top": 0.0, "y_bottom": 0.45,
         }
@@ -540,6 +584,7 @@ class ExifOrientationMatrixTests(unittest.TestCase):
         huge_dimension = 10 ** 400
         zone = {
             "zone_type": "demand", "draw_overlay": True,
+                "confidence": "high",
             "x_start": 0.2, "x_end": 0.8,
             "y_top": 0.2, "y_bottom": 0.4,
         }

@@ -326,6 +326,10 @@ def _render_overlay_prepared(
             break
         if not isinstance(zone, dict) or zone.get("draw_overlay") is not True:
             continue
+        # Treat the renderer as a final trust boundary: direct callers must
+        # provide the same explicit confidence required by the v6 sanitizer.
+        if zone.get("confidence") not in {"high", "medium"}:
+            continue
         zone_type = zone.get("zone_type")
         pixel_box = normalized_zone_to_pixel_box(zone, width, height)
         if pixel_box is None:
