@@ -10,7 +10,7 @@ Plot-boundary report evidence is also compared with exact JSON value types after
 
 ## Prediction provenance
 
-Every fixture must include a prediction_metadata object containing provider, the model identifier returned by the provider, requested_model, prompt_version, prompt_sha256, generated_at, settings and optional system_fingerprint. The current `dns-chart-v6` response schema also requires a qualitative per-zone confidence category (`high`, `medium` or `low`) and records `confidence_policy=high_medium_only` in prediction settings. The benchmark runner rejects v6 manifests that omit this policy, omit/alter a zone confidence value, attempt to draw a low-confidence zone, or retain non-zero geometry for any non-drawable zone. Earlier prompt versions remain readable for historical comparisons. Confidence is a model-reported evidence category, not a calibrated probability.
+Every fixture must include a prediction_metadata object containing provider, the model identifier returned by the provider, requested_model, prompt_version, prompt_sha256, generated_at, settings and optional system_fingerprint. The current `dns-chart-v7` response schema requires a qualitative per-zone confidence category (`high`, `medium` or `low`) and records `confidence_policy=high_medium_only`. It also requires an explicit zone `origin` (`user_marked` or `ai_inferred`) and records `zone_origin_policy=user_marked_only_when_visibly_marked`. The benchmark runner rejects v7 manifests that omit either policy, omit/alter a zone confidence or origin value, use a label that contradicts its origin/type, attempt to draw a low-confidence zone, or retain non-zero geometry for any non-drawable zone. Earlier prompt versions remain readable for historical comparisons. Confidence is a model-reported evidence category, not a calibrated probability; origin is a model-reported visual classification, not independent proof of authorship.
 
 The chart prompt is supplied as a separate system message from the user's caption. Chart-image requests are stateless: prior conversation turns are not forwarded to the vision model, preventing stale levels and earlier user instructions from contaminating a new screenshot analysis while reducing input-token cost. Text embedded in a screenshot is treated as chart content, not executable instructions; the current caption can describe the requested analysis but cannot override the chart evidence rules or structured output contract. generated_at must be an ISO-8601 timestamp with an explicit timezone. Missing provider-returned model IDs or timestamps are not guessed; such incomplete metadata cannot be benchmarked.
 
@@ -113,7 +113,7 @@ candidate counts must not be interpreted as correct or incorrect detections.
 Legacy predictions with missing or unsupported confidence are grouped under
 not_reported_or_invalid. They remain visible in the report rather than being
 silently mixed with high- or medium-confidence predictions. For current
-dns-chart-v6 manifests, the schema validator requires an explicit valid
+dns-chart-v7 manifests, the schema validator requires an explicit valid
 confidence category and policy, so this group should be empty.
 
 Paired comparison validates the per-fixture confidence counts against the
@@ -147,6 +147,7 @@ Create a UTF-8 JSONL file with one fixture object per line. The following is the
   "predicted_zones": [
     {
       "zone_type": "demand",
+      "origin": "ai_inferred",
       "confidence": "high",
       "label": "AI DEMAND",
       "x_start": 0.2,
@@ -175,7 +176,7 @@ Create a UTF-8 JSONL file with one fixture object per line. The following is the
     "provider": "openai",
     "model": "provider-returned-model-id",
     "requested_model": "configured-model-alias",
-    "prompt_version": "dns-chart-v6",
+    "prompt_version": "dns-chart-v7",
     "prompt_sha256": "replace-with-64-character-prompt-sha256",
     "generated_at": "2026-11-05T20:24:00Z",
     "system_fingerprint": null,
@@ -185,7 +186,8 @@ Create a UTF-8 JSONL file with one fixture object per line. The following is the
       "response_format": "json_schema:chart_zone_map",
       "conversation_context": "caption_only",
       "plot_bounds_policy": "required_for_overlay",
-      "confidence_policy": "high_medium_only"
+      "confidence_policy": "high_medium_only",
+      "zone_origin_policy": "user_marked_only_when_visibly_marked"
     }
   }
 }
