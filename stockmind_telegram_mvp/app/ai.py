@@ -517,7 +517,7 @@ def sanitize_chart_analysis(data: dict) -> dict:
             # Missing/invalid provenance must never be upgraded to user-marked.
             origin = "ai_inferred"
         label_prefix = "USER" if origin == "user_marked" else "AI"
-        label = f"{label_prefix} {zone_type.upper()}
+        label = f"{label_prefix} {zone_type.upper()}"
         raw_price_low = zone.get("price_low")
         raw_price_high = zone.get("price_high")
         try:
