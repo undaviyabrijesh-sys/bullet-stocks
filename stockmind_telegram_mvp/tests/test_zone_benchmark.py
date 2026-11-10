@@ -116,6 +116,23 @@ def _market_context(**overrides):
     return value
 
 
+def _normalized_market_context(context):
+    fields = ("asset_class", "symbol", "exchange", "timeframe")
+    if context is None:
+        return {field: None for field in fields}
+    if not isinstance(context, dict):
+        return context
+    normalized = {}
+    for field in fields:
+        value = context.get(field)
+        if isinstance(value, str):
+            cleaned = value.strip()
+            normalized[field] = cleaned.upper() if field == "symbol" else cleaned.casefold()
+        else:
+            normalized[field] = value
+    return normalized
+
+
 def _prediction(zone_type="demand", **overrides):
     value = _zone(zone_type, **overrides)
     value["draw_overlay"] = True
@@ -163,7 +180,7 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
             "annotation_metadata": _annotation_metadata(),
         }
         record.update(overrides)
-        record.setdefault("market_context", _market_context())
+        record.setdefault("market_context", None)
         # Only ordinary fixtures get a convenient full-image plot. Preserve
         # one-sided explicit bounds so tests can exercise missing-model and
         # missing-manual-reference validation paths.
@@ -187,7 +204,7 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
                 record["image_sha256"],
                 record["image_width"],
                 record["image_height"],
-                record["market_context"],
+                _normalized_market_context(record["market_context"]),
                 record["annotation_metadata"],
             )
         return record
