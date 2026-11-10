@@ -341,7 +341,10 @@ def _validate_adjudication_metadata(
 
     first, first_reviewed_at = annotation_records[0]
     second, second_reviewed_at = annotation_records[1]
-    token = lambda value: value.split("-", 1)[1].casefold()
+    def identity_token(value):
+        return value.split("-", 1)[1].casefold()
+
+    token = identity_token
     if token(first["annotator_id"]) == token(second["annotator_id"]):
         raise ValueError(f"{prefix} requires two different annotator identities")
     if (
@@ -357,7 +360,7 @@ def _validate_adjudication_metadata(
     }:
         raise ValueError(f"{prefix}.adjudicator_id must be distinct from both annotators and reviewers")
     if adjudicated_at < max(first_reviewed_at, second_reviewed_at):
-        raise ValueError(f"{prefix}.adjudicated_at cannot be earlier than both annotation reviews")
+        raise ValueError(f"{prefix}.adjudicated_at cannot precede either annotation review")
 
     report = metadata["agreement_report"]
     if not isinstance(report, dict):
