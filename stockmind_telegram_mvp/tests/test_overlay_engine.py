@@ -455,6 +455,11 @@ class OverlayRendererTests(unittest.TestCase):
             _zone_overlay_label({"origin": "user_marked"}, "supply"),
             "USER SUPPLY",
         )
+        self.assertEqual(
+            _zone_overlay_label({"origin": "USER"}, "demand"),
+            "AI DEMAND",
+        )
+        self.assertEqual(_zone_overlay_label({}, []), "AI DEMAND")
 
     def test_public_renderer_always_prepares_image_before_drawing(self):
         canonical = sample_image()
