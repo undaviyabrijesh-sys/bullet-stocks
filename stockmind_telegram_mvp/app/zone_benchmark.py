@@ -109,6 +109,12 @@ def _validate_prediction_metadata(metadata, line_number, fixture_id):
 
     # Generated time is fixture-specific; the remaining fields define the
     # inference profile and must be identical within one aggregate report.
+    if normalized["prompt_version"] == "dns-chart-v6" and settings.get("confidence_policy") != "high_medium_only":
+        raise ValueError(
+            f"line {line_number} ({fixture_id}): dns-chart-v6 prediction metadata "
+            "must declare confidence_policy=high_medium_only"
+        )
+
     profile = {
         "provider": normalized["provider"],
         "model": normalized["model"],
@@ -129,6 +135,37 @@ def _validate_prediction_metadata(metadata, line_number, fixture_id):
         ) from exc
     profile_sha256 = hashlib.sha256(canonical_profile.encode("utf-8")).hexdigest()
     return normalized, profile, profile_sha256
+
+
+def _validate_v6_prediction_confidence(prediction_metadata, predicted_zones, line_number, fixture_id):
+    """Enforce the v6 confidence gate in hand-authored benchmark manifests too."""
+    if prediction_metadata.get("prompt_version") != "dns-chart-v6":
+        return
+
+    prefix = f"line {line_number} ({fixture_id}): predicted_zones"
+    for index, zone in enumerate(predicted_zones):
+        if not isinstance(zone, dict):
+            raise ValueError(f"{prefix}[{index}] must be an object for dns-chart-v6")
+        confidence = zone.get("confidence")
+        if not isinstance(confidence, str) or confidence not in {"high", "medium", "low"}:
+            raise ValueError(
+                f"{prefix}[{index}].confidence must be high, medium or low for dns-chart-v6"
+            )
+        draw_overlay = zone.get("draw_overlay")
+        if not isinstance(draw_overlay, bool):
+            raise ValueError(f"{prefix}[{index}].draw_overlay must be a boolean")
+        coordinates = [zone.get(field) for field in ("x_start", "x_end", "y_top", "y_bottom")]
+        if confidence == "low" and draw_overlay:
+            raise ValueError(
+                f"{prefix}[{index}] cannot draw a low-confidence dns-chart-v6 candidate"
+            )
+        if not draw_overlay and any(
+            isinstance(value, bool) or not isinstance(value, (int, float)) or value != 0
+            for value in coordinates
+        ):
+            raise ValueError(
+                f"{prefix}[{index}] must zero all coordinates when draw_overlay is false"
+            )
 
 
 def _validate_annotation_metadata(metadata, line_number, fixture_id):
@@ -365,6 +402,10 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
     for field in ("reference_zones", "predicted_zones"):
         if not isinstance(record[field], list):
             raise ValueError(f"line {line_number} ({fixture_id}): {field} must be a JSON array")
+
+    _validate_v6_prediction_confidence(
+        prediction_metadata, record["predicted_zones"], line_number, fixture_id
+    )
 
     anchors = record.get("price_axis_anchors")
     axis_plot_bounds = record.get("price_axis_plot_bounds")

@@ -10,7 +10,9 @@ Plot-boundary report evidence is also compared with exact JSON value types after
 
 ## Prediction provenance
 
-Every fixture must include a prediction_metadata object containing provider, the model identifier returned by the provider, requested_model, prompt_version, prompt_sha256, generated_at, settings and optional system_fingerprint. The chart prompt is supplied as a separate system message from the user's caption. Chart-image requests are stateless: prior conversation turns are not forwarded to the vision model, preventing stale levels and earlier user instructions from contaminating a new screenshot analysis while reducing input-token cost. Text embedded in a screenshot is treated as chart content, not executable instructions; the current caption can describe the requested analysis but cannot override the chart evidence rules or structured output contract. generated_at must be an ISO-8601 timestamp with an explicit timezone. Missing provider-returned model IDs or timestamps are not guessed; such incomplete metadata cannot be benchmarked.
+Every fixture must include a prediction_metadata object containing provider, the model identifier returned by the provider, requested_model, prompt_version, prompt_sha256, generated_at, settings and optional system_fingerprint. The current `dns-chart-v6` response schema also requires a qualitative per-zone confidence category (`high`, `medium` or `low`) and records `confidence_policy=high_medium_only` in prediction settings. The benchmark runner rejects v6 manifests that omit this policy, omit/alter a zone confidence value, attempt to draw a low-confidence zone, or retain non-zero geometry for any non-drawable zone. Earlier prompt versions remain readable for historical comparisons. Confidence is a model-reported evidence category, not a calibrated probability.
+
+The chart prompt is supplied as a separate system message from the user's caption. Chart-image requests are stateless: prior conversation turns are not forwarded to the vision model, preventing stale levels and earlier user instructions from contaminating a new screenshot analysis while reducing input-token cost. Text embedded in a screenshot is treated as chart content, not executable instructions; the current caption can describe the requested analysis but cannot override the chart evidence rules or structured output contract. generated_at must be an ISO-8601 timestamp with an explicit timezone. Missing provider-returned model IDs or timestamps are not guessed; such incomplete metadata cannot be benchmarked.
 
 The chart analyzer returns this metadata with its structured result. prompt_sha256 hashes the static system/chart instructions, structured response schema and chart context policy (not the screenshot, user caption or prior conversation). Bump CHART_PROMPT_VERSION when the intended prompt behavior changes; the hash also detects accidental prompt edits that were not accompanied by a version bump. settings records the chart request's temperature, image detail, response format, reasoning setting and context policy.
 
@@ -140,14 +142,17 @@ Create a UTF-8 JSONL file with one fixture object per line. The following is the
     "provider": "openai",
     "model": "provider-returned-model-id",
     "requested_model": "configured-model-alias",
-    "prompt_version": "dns-chart-v1",
+    "prompt_version": "dns-chart-v6",
     "prompt_sha256": "replace-with-64-character-prompt-sha256",
     "generated_at": "2026-11-05T20:24:00Z",
     "system_fingerprint": null,
     "settings": {
       "temperature": 0.1,
       "image_detail": "high",
-      "response_format": "json_schema:chart_zone_map"
+      "response_format": "json_schema:chart_zone_map",
+      "conversation_context": "caption_only",
+      "plot_bounds_policy": "required_for_overlay",
+      "confidence_policy": "high_medium_only"
     }
   }
 }

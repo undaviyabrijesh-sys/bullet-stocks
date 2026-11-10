@@ -771,6 +771,66 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate screenshot image_sha256"):
             evaluate_benchmark_manifest(self.manifest)
 
+    def _v6_metadata(self, include_policy=True):
+        settings = {
+            "temperature": 0.1,
+            "image_detail": "high",
+            "response_format": "json_schema:chart_zone_map",
+            "conversation_context": "caption_only",
+            "plot_bounds_policy": "required_for_overlay",
+        }
+        if include_policy:
+            settings["confidence_policy"] = "high_medium_only"
+        return _prediction_metadata(prompt_version="dns-chart-v6", settings=settings)
+
+    def test_v6_metadata_requires_confidence_policy(self):
+        record = self._record(prediction_metadata=self._v6_metadata(include_policy=False))
+        self._write(record)
+        with self.assertRaisesRegex(ValueError, "confidence_policy"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_v6_manifest_rejects_missing_zone_confidence(self):
+        record = self._record(prediction_metadata=self._v6_metadata())
+        self._write(record)
+        with self.assertRaisesRegex(ValueError, r"predicted_zones\[0\].confidence"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_v6_manifest_rejects_drawable_low_confidence_zone(self):
+        record = self._record(
+            prediction_metadata=self._v6_metadata(),
+            predicted_zones=[_prediction(confidence="low")],
+        )
+        self._write(record)
+        with self.assertRaisesRegex(ValueError, "cannot draw a low-confidence"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_v6_manifest_rejects_nonzero_coordinates_for_non_drawable_zone(self):
+        low = _prediction(confidence="low")
+        low["draw_overlay"] = False
+        record = self._record(
+            prediction_metadata=self._v6_metadata(), predicted_zones=[low]
+        )
+        self._write(record)
+        with self.assertRaisesRegex(ValueError, "must zero all coordinates"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_v6_manifest_accepts_sanitized_confidence_gate(self):
+        high = _prediction(confidence="high")
+        low = _prediction(confidence="low")
+        low.update({
+            "draw_overlay": False,
+            "x_start": 0.0, "x_end": 0.0, "y_top": 0.0, "y_bottom": 0.0,
+        })
+        record = self._record(
+            prediction_metadata=self._v6_metadata(),
+            predicted_zones=[high, low],
+        )
+        self._write(record)
+        result = evaluate_benchmark_manifest(self.manifest)
+        self.assertEqual(result["fixture_count"], 1)
+        self.assertEqual(result["overall"]["true_positive"], 1)
+        self.assertEqual(result["ignored_prediction_count"], 1)
+
     def test_rejects_malformed_jsonl(self):
         self.manifest.write_text('{"fixture_id":\n', encoding="utf-8")
 
