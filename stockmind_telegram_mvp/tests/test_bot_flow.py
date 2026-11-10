@@ -95,6 +95,7 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
         bot_module.usage_day.clear()
         bot_module.beta_users.clear()
         bot_module.user_locks.clear()
+        bot_module.user_languages.clear()
 
         self.user_id = 987654321
         self.status = SimpleNamespace(edit_text=AsyncMock())
@@ -103,6 +104,52 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
             answer=AsyncMock(return_value=self.status),
             answer_photo=AsyncMock(),
         )
+
+    async def test_language_command_sets_explicit_gujarati_preference(self):
+        language_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=self.user_id, language_code="en"),
+            text="/language gu",
+            answer=AsyncMock(),
+        )
+
+        await bot_module.set_language(language_message)
+
+        self.assertEqual(bot_module.user_languages[self.user_id], "gu")
+        reply = language_message.answer.await_args.args[0]
+        self.assertIn("Interface ભાષા", reply)
+        self.assertIn("ગુજરાતી", reply)
+
+    async def test_language_command_help_uses_telegram_locale(self):
+        language_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=self.user_id, language_code="hi-IN"),
+            text="/language",
+            answer=AsyncMock(),
+        )
+
+        await bot_module.set_language(language_message)
+
+        reply = language_message.answer.await_args.args[0]
+        self.assertIn("इंटरफ़ेस भाषा", reply)
+        self.assertIn("/language gu", reply)
+
+    async def test_start_uses_explicit_language_before_telegram_locale(self):
+        start_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=self.user_id, language_code="hi-IN"),
+            answer=AsyncMock(),
+        )
+        bot_module.user_languages[self.user_id] = "gu"
+
+        await bot_module.start(start_message)
+
+        reply = start_message.answer.await_args.args[0]
+        self.assertIn("બીટામાં આપનું સ્વાગત છે", reply)
+        self.assertNotIn("बीटा में आपका स्वागत है", reply)
+
+    async def test_admission_error_uses_requested_ui_language(self):
+        bot_module.beta_users.add(self.user_id + 1)
+        with patch.object(bot_module, "BETA_USER_LIMIT", 1):
+            error = bot_module._research_admission_error(self.user_id, "hi")
+        self.assertIn("बीटा सीमा", error)
 
     def use_research(self, **methods):
         research = SimpleNamespace(**methods)
