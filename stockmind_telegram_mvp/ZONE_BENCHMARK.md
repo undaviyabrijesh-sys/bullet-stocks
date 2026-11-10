@@ -516,3 +516,7 @@ select whichever annotation has the higher IoU. If neither annotation is
 acceptable, do not admit that screenshot as ground truth. Pseudonymous IDs and
 rationale are an audit trail, not cryptographic identity proof. Keep both
 reviewed files and the adjudication sidecar with the benchmark source manifest.
+
+## Directional plot-boundary spill diagnostics
+
+Plot-boundary reports separately measure predicted plot and drawable-zone area that extends beyond the manually marked main price plot on all four sides. The right price-scale margin and bottom indicator panel retain their existing metrics; left-toolbar spill and top-control spill are now reported as `left_toolbar_overlap_pct` / `top_controls_overlap_pct` for the plot and `left_toolbar_zone_area_pct` / `top_controls_zone_area_pct` for drawn zones. These are geometric overlap proxies based on the manually reviewed reference rectangle, not semantic detection of toolbar or indicator content. The directional values are included in aggregate reports and paired baseline-versus-candidate deltas. They are diagnostic breakdowns and can overlap at corners; do not sum the four percentages as if they were disjoint regions.
