@@ -89,6 +89,35 @@ The evaluator:
 
 Use the same IoU threshold across a benchmark release. Report aggregate and per-fixture results, and retain the fixture/image hash so future model changes can be compared on identical inputs.
 
+## Confidence-stratified evidence
+
+The evaluator and batch report separate drawable predictions by the model-reported
+qualitative confidence category (high and medium). For each category they
+report candidate count, drawable count, matched count, false positives,
+suppressed/invalid count, precision, mean matched IoU and mean matched center
+error. These are descriptive results on the manually reviewed fixture set; they
+do not turn model confidence into a calibrated probability.
+
+Per-confidence recall is intentionally omitted: a missed manual reference has
+no model confidence label and cannot honestly be assigned to a confidence
+bucket. The report also counts low-confidence candidates, but marks their
+geometry as unscored. The v6 sanitizer intentionally zeroes low-confidence
+coordinates before rendering and benchmark intake, so the benchmark cannot
+measure whether those hidden rectangles would have matched. Low-confidence
+candidate counts must not be interpreted as correct or incorrect detections.
+
+Legacy predictions with missing or unsupported confidence are grouped under
+not_reported_or_invalid. They remain visible in the report rather than being
+silently mixed with high- or medium-confidence predictions. For current
+dns-chart-v6 manifests, the schema validator requires an explicit valid
+confidence category and policy, so this group should be empty.
+
+Paired comparison validates the per-fixture confidence counts against the
+matched-zone evidence and overall drawable/ignored counts, then reports
+baseline-to-candidate deltas for each confidence group. This is still a
+descriptive benchmark, not statistical calibration; use enough independently
+reviewed screenshots across symbols and timeframes before drawing conclusions.
+
 ## Batch manifest runner
 
 The batch runner verifies that each fixture still points to the exact annotated screenshot before scoring it. It reads at most the configured byte limit plus one byte, checks the SHA-256, actual image format, decoded image limit and recorded dimensions; rejects duplicate fixture IDs, duplicate screenshot SHA-256 hashes (so identical image bytes cannot silently overweight the sample), and paths that escape the manifest directory; then reports per-fixture results and micro-aggregated precision, recall, F1, IoU, center displacement and optional price-boundary errors. The default byte limit is 5 MiB, matching the Telegram bot's default upload cap. Use `--max-image-bytes` when the bot's `MAX_CHART_IMAGE_BYTES` setting has been overridden.
