@@ -141,7 +141,11 @@ def _zone_overlay_label(zone: dict, zone_type: str) -> str:
     make an inferred zone look user-marked by supplying a forged label.
     Missing or invalid provenance is conservatively treated as AI-inferred.
     """
-    safe_zone_type = zone_type.upper() if zone_type in {"supply", "demand"} else "DEMAND"
+    safe_zone_type = (
+        zone_type.upper()
+        if isinstance(zone_type, str) and zone_type in {"supply", "demand"}
+        else "DEMAND"
+    )
     origin = zone.get("origin") if isinstance(zone, dict) else None
     prefix = "USER" if origin == "user_marked" else "AI"
     return f"{prefix} {safe_zone_type}"
