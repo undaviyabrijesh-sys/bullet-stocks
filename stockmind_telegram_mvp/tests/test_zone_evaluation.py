@@ -643,5 +643,87 @@ class ZoneEvaluationTests(unittest.TestCase):
         )
 
 
+    def test_corner_spill_is_the_residual_after_disjoint_side_strips(self):
+        # Four zones deliberately cross each corner of the manual plot.
+        # Side-strip metrics cover only the four non-corner strips; the
+        # remaining outside area is the corner contribution.
+        corner_boxes = (
+            (0.05, 0.20, 0.05, 0.20),
+            (0.80, 0.95, 0.05, 0.20),
+            (0.05, 0.20, 0.80, 0.95),
+            (0.80, 0.95, 0.80, 0.95),
+        )
+        result = evaluate(
+            [
+                prediction(
+                    x_start=x_start,
+                    x_end=x_end,
+                    y_top=y_top,
+                    y_bottom=y_bottom,
+                )
+                for x_start, x_end, y_top, y_bottom in corner_boxes
+            ],
+            [],
+            reference_plot_bounds=PLOT_BOUNDS,
+            predicted_plot_bounds={
+                "x_start": 0.05, "x_end": 0.95,
+                "y_top": 0.05, "y_bottom": 0.95,
+            },
+        )
+
+        accuracy = result["plot_boundary_accuracy"]
+        plot_side_sum = sum(
+            accuracy[field]
+            for field in (
+                "right_margin_overlap_pct",
+                "bottom_panel_overlap_pct",
+                "left_toolbar_overlap_pct",
+                "top_controls_overlap_pct",
+            )
+        )
+        plot_corner_residual = (
+            accuracy["predicted_plot_outside_reference_pct"] - plot_side_sum
+        )
+        self.assertGreater(plot_corner_residual, 0)
+
+        zone_side_sum = sum(
+            accuracy[field]
+            for field in (
+                "right_margin_zone_area_pct",
+                "bottom_panel_zone_area_pct",
+                "left_toolbar_zone_area_pct",
+                "top_controls_zone_area_pct",
+            )
+        )
+        zone_corner_residual = (
+            accuracy["predicted_zone_area_outside_reference_pct"] - zone_side_sum
+        )
+        self.assertGreater(zone_corner_residual, 0)
+
+        # The exact pixel-aligned fixture is symmetric: four 32x18 corner
+        # rectangles out of a 576x324 predicted plot, and four 96x54 zones.
+        self.assertAlmostEqual(
+            plot_corner_residual,
+            100 * (4 * 32 * 18) / (576 * 324),
+        )
+        self.assertAlmostEqual(
+            zone_corner_residual,
+            100 * (4 * 32 * 18) / (4 * 96 * 54),
+        )
+
+        aggregate = aggregate_plot_boundary_accuracy([
+            {"plot_boundary_accuracy": accuracy}
+        ])
+        self.assertEqual(
+            aggregate["mean_predicted_plot_outside_reference_pct"],
+            accuracy["predicted_plot_outside_reference_pct"],
+        )
+        comparison = compare_plot_boundary_accuracy(aggregate, aggregate)
+        self.assertEqual(
+            comparison["delta"]["mean_predicted_plot_outside_reference_pct"],
+            0.0,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
