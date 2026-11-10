@@ -14,8 +14,9 @@ adjudicated reference automatically.
 3. Have each annotation reviewed and approved through the existing review step.
 4. Keep the source screenshot unchanged. The comparison verifies its SHA-256,
    dimensions, symbol/timeframe context and guideline version.
-5. Use distinct pseudonymous annotator IDs. Reviewer IDs must not overlap the
-   other annotation's annotator ID.
+5. Use distinct pseudonymous annotator IDs and distinct reviewer IDs. Each
+   reviewer must differ from both annotators, and the two reviewers must also
+   be different from each other.
 
 Do not copy one annotator's boxes into the second draft. The comparison is
 meaningful only when the drawings were made independently.
