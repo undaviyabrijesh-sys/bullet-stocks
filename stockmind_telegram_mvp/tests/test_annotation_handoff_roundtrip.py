@@ -26,6 +26,7 @@ from stockmind_telegram_mvp.app.annotation_fixture import (
     write_adjudication_record,
     write_prediction_capture,
 )
+from stockmind_telegram_mvp.app.ai import sanitize_chart_analysis
 from stockmind_telegram_mvp.app.annotation_intake import prepare_annotation_draft
 from stockmind_telegram_mvp.app.zone_benchmark import evaluate_benchmark_manifest
 
@@ -51,7 +52,7 @@ def _prediction_metadata():
         "provider": "openai",
         "model": "vision-model-test",
         "requested_model": "vision-model",
-        "prompt_version": "dns-chart-v6",
+        "prompt_version": "dns-chart-v8",
         "prompt_sha256": "a" * 64,
         "generated_at": "2026-11-09T10:00:00Z",
         "system_fingerprint": "fp-test",
@@ -62,6 +63,8 @@ def _prediction_metadata():
             "conversation_context": "caption_only",
             "plot_bounds_policy": "required_for_overlay",
             "confidence_policy": "high_medium_only",
+            "zone_origin_policy": "user_marked_only_when_visibly_marked",
+            "zone_evidence_policy": "compact_base_plus_directional_displacement_v1",
         },
     }
 
@@ -93,17 +96,19 @@ class AnnotationHandoffRoundTripTests(unittest.TestCase):
 
     def _prediction(self):
         return {
-            "analysis": "Synthetic fixture for annotation persistence testing.",
-            "plot_bounds": dict(PLOT),
-            "zones": [{
-                "zone_type": "demand",
-                "confidence": "high",
-                "label": "AI DEMAND",
-                "price_low": None,
-                "price_high": None,
-                **ZONE,
-                "draw_overlay": True,
-            }],
+            **sanitize_chart_analysis({
+                "analysis": "Synthetic fixture for annotation persistence testing.",
+                "plot_bounds": dict(PLOT),
+                "zones": [{
+                    "zone_type": "demand",
+                    "origin": "ai_inferred",
+                    "confidence": "high",
+                    "price_low": None,
+                    "price_high": None,
+                    **ZONE,
+                    "draw_overlay": True,
+                }],
+            }),
             "prediction_metadata": _prediction_metadata(),
             "source_image_sha256": self.image_sha256,
         }

@@ -165,7 +165,7 @@ class ChartPredictionProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result["prediction_metadata"]["generated_at"])
 
     def test_prompt_version_and_static_prompt_hash_are_present(self):
-        self.assertEqual(CHART_PROMPT_VERSION, "dns-chart-v7")
+        self.assertEqual(CHART_PROMPT_VERSION, "dns-chart-v8")
         self.assertRegex(CHART_PROMPT_SHA256, re.compile(r"^[0-9a-f]{64}$"))
 
 
