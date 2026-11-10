@@ -44,10 +44,10 @@ class AnnotationAgreementTests(unittest.TestCase):
             "timeframe": "1h",
         }
         self.path_a = self._make_reviewed(
-            "a", _png_bytes(), "ann-001", "rev-001", [ZONE], PLOT
+            "a", _png_bytes(), "ann-001", "rev-101", [ZONE], PLOT
         )
         self.path_b = self._make_reviewed(
-            "b", _png_bytes(), "ann-002", "rev-002", [dict(ZONE)], PLOT
+            "b", _png_bytes(), "ann-002", "rev-102", [dict(ZONE)], PLOT
         )
 
     def tearDown(self):
@@ -102,7 +102,7 @@ class AnnotationAgreementTests(unittest.TestCase):
             "x_end": 0.9,
         }
         path_b = self._make_reviewed(
-            "shifted", _png_bytes(), "ann-003", "rev-003", [shifted], PLOT
+            "shifted", _png_bytes(), "ann-003", "rev-103", [shifted], PLOT
         )
         report = compare_reviewed_annotations(self.path_a, path_b)
         self.assertEqual(report["zone_agreement"]["matched_zone_count"], 1)
@@ -112,7 +112,7 @@ class AnnotationAgreementTests(unittest.TestCase):
     def test_does_not_match_supply_against_demand(self):
         supply = {**ZONE, "zone_type": "supply"}
         path_b = self._make_reviewed(
-            "supply", _png_bytes(), "ann-004", "rev-004", [supply], PLOT
+            "supply", _png_bytes(), "ann-004", "rev-104", [supply], PLOT
         )
         report = compare_reviewed_annotations(self.path_a, path_b)
         self.assertEqual(report["zone_agreement"]["matched_zone_count"], 0)
@@ -120,7 +120,7 @@ class AnnotationAgreementTests(unittest.TestCase):
 
     def test_rejects_different_screenshot_hashes(self):
         path_b = self._make_reviewed(
-            "different-image", _png_bytes("black"), "ann-005", "rev-005", [ZONE], PLOT
+            "different-image", _png_bytes("black"), "ann-005", "rev-105", [ZONE], PLOT
         )
         with self.assertRaisesRegex(ValueError, "same screenshot SHA-256"):
             compare_reviewed_annotations(self.path_a, path_b)
@@ -138,6 +138,36 @@ class AnnotationAgreementTests(unittest.TestCase):
         self.path_b.write_text(json.dumps(draft), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "same guideline_version"):
             compare_reviewed_annotations(self.path_a, self.path_b)
+
+
+    def test_rejects_cross_role_identity_token_reuse(self):
+        draft = json.loads(self.path_b.read_text(encoding="utf-8"))
+        draft["annotation_metadata"]["reviewer_id"] = "rev-001"
+        self.path_b.write_text(json.dumps(draft), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "identity tokens must not overlap"):
+            compare_reviewed_annotations(self.path_a, self.path_b)
+
+    def test_empty_annotation_sets_are_not_reported_as_perfect_agreement(self):
+        path_a = self._make_reviewed(
+            "empty-a", _png_bytes(), "ann-006", "rev-106", [], PLOT
+        )
+        path_b = self._make_reviewed(
+            "empty-b", _png_bytes(), "ann-007", "rev-107", [], PLOT
+        )
+        report = compare_reviewed_annotations(path_a, path_b)
+        self.assertIsNone(report["zone_agreement"]["agreement_f1"])
+        self.assertIsNone(report["zone_agreement"]["mean_matched_iou"])
+
+    def test_rejects_unhashable_zone_type_as_validation_error(self):
+        from stockmind_telegram_mvp.app.zone_evaluation import evaluate_manual_annotation_agreement
+
+        with self.assertRaisesRegex(ValueError, "invalid zone_type"):
+            evaluate_manual_annotation_agreement(
+                [{"zone_type": []}],
+                [],
+                image_width=100,
+                image_height=80,
+            )
 
 if __name__ == "__main__":
     unittest.main()

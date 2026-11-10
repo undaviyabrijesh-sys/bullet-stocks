@@ -53,8 +53,11 @@ def _plot_agreement(first_bounds, second_bounds, image_width, image_height):
 
 
 def _load_reviewed(path):
-    draft, _ = load_draft_and_image(Path(path).expanduser())
-    return _validate_reviewed_draft(draft)
+    draft, image = load_draft_and_image(Path(path).expanduser())
+    try:
+        return _validate_reviewed_draft(draft)
+    finally:
+        image.close()
 
 
 def compare_reviewed_annotations(annotation_a_path, annotation_b_path, *, iou_threshold=0.5):
@@ -72,12 +75,16 @@ def compare_reviewed_annotations(annotation_a_path, annotation_b_path, *, iou_th
     metadata_b = second["annotation_metadata"]
     if metadata_a["guideline_version"] != metadata_b["guideline_version"]:
         raise ValueError("annotations must use the same guideline_version")
-    if metadata_a["annotator_id"] == metadata_b["annotator_id"]:
+    def identity_token(value):
+        return value.split("-", 1)[1].casefold()
+
+    if identity_token(metadata_a["annotator_id"]) == identity_token(metadata_b["annotator_id"]):
         raise ValueError("annotations must have different annotator_id values")
-    if metadata_a["reviewer_id"] == metadata_b["annotator_id"] or (
-        metadata_b["reviewer_id"] == metadata_a["annotator_id"]
+    if (
+        identity_token(metadata_a["reviewer_id"]) == identity_token(metadata_b["annotator_id"])
+        or identity_token(metadata_b["reviewer_id"]) == identity_token(metadata_a["annotator_id"])
     ):
-        raise ValueError("reviewer IDs must not overlap the other annotation's annotator ID")
+        raise ValueError("reviewer identity tokens must not overlap the other annotation's annotator ID")
 
     dimensions = {
         "image_width": first["image_width"],

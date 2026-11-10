@@ -613,7 +613,8 @@ def evaluate_manual_annotation_agreement(
             raise ValueError(f"{label} cannot exceed {MAX_EVALUATED_ZONES} entries")
         records = []
         for index, zone in enumerate(zones):
-            if not isinstance(zone, dict) or zone.get("zone_type") not in ZONE_TYPES:
+            zone_type = zone.get("zone_type") if isinstance(zone, dict) else None
+            if not isinstance(zone_type, str) or zone_type not in ZONE_TYPES:
                 raise ValueError(f"{label}[{index}] has an invalid zone_type")
             try:
                 validated = _valid_box(
