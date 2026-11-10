@@ -231,9 +231,11 @@ def write_prediction_capture(reviewed_draft_path, chart_result, output_path=None
 
 def _file_sha256(path):
     path = Path(path).expanduser()
-    if path.stat().st_size > _MAX_JSON_BYTES:
+    with path.open("rb") as stream:
+        raw = stream.read(_MAX_JSON_BYTES + 1)
+    if len(raw) > _MAX_JSON_BYTES:
         raise ValueError(f"annotation JSON exceeds the {_MAX_JSON_BYTES}-byte limit")
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashlib.sha256(raw).hexdigest()
 
 
 def _load_reviewed_annotation(path):
