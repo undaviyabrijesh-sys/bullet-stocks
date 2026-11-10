@@ -113,6 +113,60 @@ def _metrics(predictions, references, matches):
     }
 
 
+_CONFIDENCE_GROUPS = ("high", "medium", "low", "not_reported_or_invalid")
+
+
+def _confidence_group(zone):
+    """Map untrusted model confidence to a small, report-safe category."""
+    if isinstance(zone, dict):
+        value = zone.get("confidence")
+        if isinstance(value, str) and value in {"high", "medium", "low"}:
+            return value
+    return "not_reported_or_invalid"
+
+
+def _confidence_stratified_results(predicted_zones, drawable_predictions, matches):
+    """Describe precision by reported confidence without inventing low-zone geometry.
+
+    Low-confidence candidates are deliberately coordinate-zeroed before they
+    reach the benchmark. Their count is reported, but their geometric quality
+    is explicitly unscored. Per-level recall is omitted because unmatched
+    manual references cannot be attributed to a model confidence category.
+    """
+    candidate_counts = {level: 0 for level in _CONFIDENCE_GROUPS}
+    drawable_counts = {level: 0 for level in _CONFIDENCE_GROUPS}
+    matched_by_level = {level: [] for level in _CONFIDENCE_GROUPS}
+
+    for zone in predicted_zones:
+        candidate_counts[_confidence_group(zone)] += 1
+    for zone in drawable_predictions:
+        drawable_counts[_confidence_group(zone["zone"])] += 1
+    for match in matches:
+        level = match["confidence_group"]
+        matched_by_level[level].append(match)
+
+    result = {}
+    for level in _CONFIDENCE_GROUPS:
+        candidate_count = candidate_counts[level]
+        drawable_count = drawable_counts[level]
+        matched = matched_by_level[level]
+        matched_count = len(matched)
+        result[level] = {
+            "candidate_count": candidate_count,
+            "drawable_count": drawable_count,
+            "matched_count": matched_count,
+            "false_positive_count": drawable_count - matched_count,
+            "suppressed_or_invalid_count": candidate_count - drawable_count,
+            "precision": matched_count / drawable_count if drawable_count else None,
+            "mean_iou": _finite_mean([item["iou"] for item in matched]),
+            "mean_center_error_normalized": _finite_mean(
+                [item["center_error_normalized"] for item in matched]
+            ),
+            "geometry_scored": level != "low" and drawable_count > 0,
+        }
+    return result
+
+
 def _finite_mean(values):
     """Compute a finite mean without overflowing an otherwise representable average."""
     if not values:
@@ -489,6 +543,7 @@ def evaluate_zone_predictions(
                 "prediction_index": pred["index"],
                 "reference_index": ref["index"],
                 "zone_type": zone_type,
+                "confidence_group": _confidence_group(pred["zone"]),
                 "iou": score,
                 "center_error_normalized": center_error,
                 "price_comparison": (
@@ -512,4 +567,7 @@ def evaluate_zone_predictions(
         "ignored_prediction_count": ignored_predictions,
         "matches": sorted(all_matches, key=lambda item: item["prediction_index"]),
         "price_accuracy": _price_accuracy(all_matches, calibration),
+        "confidence_stratified_results": _confidence_stratified_results(
+            predicted_zones, valid_predictions, all_matches
+        ),
     }
