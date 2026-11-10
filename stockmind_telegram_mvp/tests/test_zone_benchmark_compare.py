@@ -93,6 +93,29 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         manifest.write_text(json.dumps(record) + "\n", encoding="utf-8")
         return evaluate_benchmark_manifest(manifest)
 
+
+    def test_compares_and_revalidates_confidence_stratified_results(self):
+        baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
+        candidate = self._report("candidate", [])
+        result = compare_benchmark_reports(baseline, candidate)
+
+        confidence = result["confidence_stratified_results"]["not_reported_or_invalid"]
+        self.assertEqual(confidence["precision"]["baseline"], 1.0)
+        self.assertIsNone(confidence["precision"]["candidate"])
+        self.assertEqual(confidence["drawable_count"]["delta"], -1)
+        self.assertEqual(
+            result["fixtures"][0]["confidence_stratified_results"]["not_reported_or_invalid"][
+                "matched_count"
+            ]["baseline"],
+            1,
+        )
+
+        baseline["fixtures"][0]["confidence_stratified_results"][
+            "not_reported_or_invalid"
+        ]["matched_count"] = 0
+        with self.assertRaisesRegex(ValueError, "matched count does not match match rows"):
+            compare_benchmark_reports(baseline, candidate)
+
     def test_compares_models_on_identical_reviewed_fixtures(self):
         baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
         candidate = self._report("candidate", [])
