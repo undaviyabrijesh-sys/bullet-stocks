@@ -272,7 +272,7 @@ def build_adjudication_record(
     reviewed_a, reviewed_b, agreement_report = _load_reviewed_pair(
         annotation_a_path, annotation_b_path
     )
-    if decision not in {"accept_a", "accept_b"}:
+    if not isinstance(decision, str) or decision not in {"accept_a", "accept_b"}:
         raise ValueError("decision must be accept_a or accept_b")
     if not isinstance(adjudicator_id, str) or not _ADJUDICATOR_ID_RE.fullmatch(adjudicator_id):
         raise ValueError("adjudicator_id must be an anonymized ID like 'adj-003'")
@@ -316,7 +316,9 @@ def build_adjudication_record(
         "annotation_b": provenance(annotation_b_path, reviewed_b),
         "agreement_report": agreement_report,
         "agreement_report_sha256": hashlib.sha256(
-            _canonical_json(agreement_report).encode("utf-8")
+            json.dumps(
+                agreement_report, sort_keys=True, separators=(",", ":"), allow_nan=False
+            ).encode("utf-8")
         ).hexdigest(),
     }
     selected = reviewed_a if decision == "accept_a" else reviewed_b
