@@ -111,10 +111,18 @@ def _validate_prediction_metadata(metadata, line_number, fixture_id):
 
     # Generated time is fixture-specific; the remaining fields define the
     # inference profile and must be identical within one aggregate report.
-    if normalized["prompt_version"] == "dns-chart-v6" and settings.get("confidence_policy") != "high_medium_only":
+    if normalized["prompt_version"] in {"dns-chart-v6", "dns-chart-v7"} and settings.get("confidence_policy") != "high_medium_only":
         raise ValueError(
-            f"line {line_number} ({fixture_id}): dns-chart-v6 prediction metadata "
+            f"line {line_number} ({fixture_id}): {normalized['prompt_version']} prediction metadata "
             "must declare confidence_policy=high_medium_only"
+        )
+    if (
+        normalized["prompt_version"] == "dns-chart-v7"
+        and settings.get("zone_origin_policy") != "user_marked_only_when_visibly_marked"
+    ):
+        raise ValueError(
+            f"line {line_number} ({fixture_id}): dns-chart-v7 prediction metadata "
+            "must declare zone_origin_policy=user_marked_only_when_visibly_marked"
         )
 
     profile = {
@@ -141,17 +149,18 @@ def _validate_prediction_metadata(metadata, line_number, fixture_id):
 
 def _validate_v6_prediction_confidence(prediction_metadata, predicted_zones, line_number, fixture_id):
     """Enforce the v6 confidence gate in hand-authored benchmark manifests too."""
-    if prediction_metadata.get("prompt_version") != "dns-chart-v6":
+    prompt_version = prediction_metadata.get("prompt_version")
+    if prompt_version not in {"dns-chart-v6", "dns-chart-v7"}:
         return
 
     prefix = f"line {line_number} ({fixture_id}): predicted_zones"
     for index, zone in enumerate(predicted_zones):
         if not isinstance(zone, dict):
-            raise ValueError(f"{prefix}[{index}] must be an object for dns-chart-v6")
+            raise ValueError(f"{prefix}[{index}] must be an object for {prompt_version}")
         confidence = zone.get("confidence")
         if not isinstance(confidence, str) or confidence not in {"high", "medium", "low"}:
             raise ValueError(
-                f"{prefix}[{index}].confidence must be high, medium or low for dns-chart-v6"
+                f"{prefix}[{index}].confidence must be high, medium or low for {prompt_version}"
             )
         draw_overlay = zone.get("draw_overlay")
         if not isinstance(draw_overlay, bool):
@@ -159,7 +168,7 @@ def _validate_v6_prediction_confidence(prediction_metadata, predicted_zones, lin
         coordinates = [zone.get(field) for field in ("x_start", "x_end", "y_top", "y_bottom")]
         if confidence == "low" and draw_overlay:
             raise ValueError(
-                f"{prefix}[{index}] cannot draw a low-confidence dns-chart-v6 candidate"
+                f"{prefix}[{index}] cannot draw a low-confidence {prompt_version} candidate"
             )
         if not draw_overlay and any(
             isinstance(value, bool) or not isinstance(value, (int, float)) or value != 0
@@ -168,6 +177,29 @@ def _validate_v6_prediction_confidence(prediction_metadata, predicted_zones, lin
             raise ValueError(
                 f"{prefix}[{index}] must zero all coordinates when draw_overlay is false"
             )
+
+
+def _validate_v7_prediction_origin(prediction_metadata, predicted_zones, line_number, fixture_id):
+    """Require explicit origin provenance and prevent contradictory overlay labels in v7."""
+    if prediction_metadata.get("prompt_version") != "dns-chart-v7":
+        return
+
+    prefix = f"line {line_number} ({fixture_id}): predicted_zones"
+    for index, zone in enumerate(predicted_zones):
+        if not isinstance(zone, dict):
+            raise ValueError(f"{prefix}[{index}] must be an object for dns-chart-v7")
+        origin = zone.get("origin")
+        if not isinstance(origin, str) or origin not in {"user_marked", "ai_inferred"}:
+            raise ValueError(
+                f"{prefix}[{index}].origin must be user_marked or ai_inferred for dns-chart-v7"
+            )
+        zone_type = zone.get("zone_type")
+        if zone_type in {"supply", "demand"} and "label" in zone:
+            expected_label = f"{'USER' if origin == 'user_marked' else 'AI'} {zone_type.upper()}"
+            if zone.get("label") != expected_label:
+                raise ValueError(
+                    f"{prefix}[{index}].label must match its origin and zone_type"
+                )
 
 
 def _validate_annotation_metadata(metadata, line_number, fixture_id):
@@ -565,6 +597,9 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
             raise ValueError(f"line {line_number} ({fixture_id}): {field} must be a JSON array")
 
     _validate_v6_prediction_confidence(
+        prediction_metadata, record["predicted_zones"], line_number, fixture_id
+    )
+    _validate_v7_prediction_origin(
         prediction_metadata, record["predicted_zones"], line_number, fixture_id
     )
 
