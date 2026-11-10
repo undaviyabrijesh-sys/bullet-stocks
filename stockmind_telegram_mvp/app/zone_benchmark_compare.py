@@ -12,6 +12,7 @@ from .zone_benchmark import (
     _aggregate_metrics,
     _aggregate_macro_metrics,
     _aggregate_price_accuracy,
+    _aggregate_confidence_stratified_results,
     _validate_annotation_metadata,
     _validate_market_context,
     _validate_prediction_metadata,
@@ -34,6 +35,7 @@ _METRIC_FIELDS = _COUNT_FIELDS + (
     "precision", "recall", "f1", "mean_iou", "mean_center_error_normalized"
 )
 _CONTEXT_FIELDS = ("asset_class", "symbol", "exchange", "timeframe")
+_CONFIDENCE_GROUPS = ("high", "medium", "low", "not_reported_or_invalid")
 
 
 def _finite(value):
@@ -100,6 +102,87 @@ def _validate_metric_consistency(row, matches, label):
     for field, value in expected.items():
         if not _same_metric(row[field], value):
             raise ValueError(f"{label}.{field} does not agree with its counts and matches")
+
+
+def _validate_confidence_stratified_results(summary, matches, overall, ignored, label):
+    """Reconcile qualitative-confidence counts and matched-zone evidence."""
+    if not isinstance(summary, dict) or set(summary) != set(_CONFIDENCE_GROUPS):
+        raise ValueError(f"{label} must contain exactly the supported confidence groups")
+
+    grouped_matches = {level: [] for level in _CONFIDENCE_GROUPS}
+    for index, match in enumerate(matches):
+        level = match.get("confidence_group")
+        if not isinstance(level, str) or level not in grouped_matches:
+            raise ValueError(f"{label} match {index} has an invalid confidence_group")
+        grouped_matches[level].append(match)
+
+    count_fields = (
+        "candidate_count", "drawable_count", "matched_count",
+        "false_positive_count", "suppressed_or_invalid_count",
+    )
+    metric_fields = ("precision", "mean_iou", "mean_center_error_normalized")
+    candidate_total = drawable_total = matched_total = false_positive_total = suppressed_total = 0
+
+    for level in _CONFIDENCE_GROUPS:
+        row = summary[level]
+        if not isinstance(row, dict) or set(row) != set(
+            count_fields + metric_fields + ("geometry_scored",)
+        ):
+            raise ValueError(f"{label}.{level} has an invalid schema")
+        for field in count_fields:
+            value = row[field]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{label}.{level}.{field} must be a non-negative integer")
+        if row["candidate_count"] != row["drawable_count"] + row["suppressed_or_invalid_count"]:
+            raise ValueError(f"{label}.{level} candidate count does not reconcile")
+        if row["drawable_count"] != row["matched_count"] + row["false_positive_count"]:
+            raise ValueError(f"{label}.{level} drawable count does not reconcile")
+        if row["matched_count"] != len(grouped_matches[level]):
+            raise ValueError(f"{label}.{level} matched count does not match match rows")
+        if level == "low" and row["drawable_count"] != 0:
+            raise ValueError(f"{label}.low cannot contain drawable predictions")
+        expected_geometry_scored = level != "low" and row["drawable_count"] > 0
+        if not isinstance(row["geometry_scored"], bool) or row["geometry_scored"] is not expected_geometry_scored:
+            raise ValueError(f"{label}.{level}.geometry_scored is inconsistent")
+        expected_precision = (
+            row["matched_count"] / row["drawable_count"]
+            if row["drawable_count"] else None
+        )
+        expected_iou = _finite_mean([item["iou"] for item in grouped_matches[level]])
+        expected_center = _finite_mean([
+            item["center_error_normalized"] for item in grouped_matches[level]
+        ])
+        for field, expected in (
+            ("precision", expected_precision),
+            ("mean_iou", expected_iou),
+            ("mean_center_error_normalized", expected_center),
+        ):
+            value = row[field]
+            if value is not None and not _finite(value):
+                raise ValueError(f"{label}.{level}.{field} must be finite or null")
+            if field in {"precision", "mean_iou"} and value is not None and not 0 <= value <= 1:
+                raise ValueError(f"{label}.{level}.{field} must be between 0 and 1")
+            if field == "mean_center_error_normalized" and value is not None and value < 0:
+                raise ValueError(f"{label}.{level}.{field} cannot be negative")
+            if not _same_metric(value, expected):
+                raise ValueError(f"{label}.{level}.{field} does not match matched-zone evidence")
+
+        candidate_total += row["candidate_count"]
+        drawable_total += row["drawable_count"]
+        matched_total += row["matched_count"]
+        false_positive_total += row["false_positive_count"]
+        suppressed_total += row["suppressed_or_invalid_count"]
+
+    if candidate_total != overall["predicted"] + ignored:
+        raise ValueError(f"{label} candidate counts do not reconcile with predictions and ignored zones")
+    if drawable_total != overall["predicted"]:
+        raise ValueError(f"{label} drawable counts do not reconcile with overall predictions")
+    if matched_total != overall["true_positive"]:
+        raise ValueError(f"{label} matched counts do not reconcile with overall true positives")
+    if false_positive_total != overall["false_positive"]:
+        raise ValueError(f"{label} false-positive counts do not reconcile with overall metrics")
+    if suppressed_total != ignored:
+        raise ValueError(f"{label} suppressed counts do not reconcile with ignored predictions")
 
 
 def _validate_price_accuracy(price, matches, label):
@@ -424,6 +507,21 @@ def _validate_aggregate_report(report, fixtures, label):
         ):
             raise ValueError(f"{label} macro_by_zone_type metrics do not match its fixture results")
 
+
+    confidence_present = "confidence_stratified_results" in report
+    fixture_confidence_present = [
+        "confidence_stratified_results" in fixture for fixture in fixtures
+    ]
+    if confidence_present != all(fixture_confidence_present) or (
+        any(fixture_confidence_present) and not all(fixture_confidence_present)
+    ):
+        raise ValueError(f"{label} confidence summaries are incomplete")
+    if confidence_present and not _aggregate_values_match(
+        report["confidence_stratified_results"],
+        _aggregate_confidence_stratified_results(fixtures),
+    ):
+        raise ValueError(f"{label} confidence_stratified_results do not match its fixtures")
+
     expected_ignored = sum(fixture["ignored_prediction_count"] for fixture in fixtures)
     if not _aggregate_values_match(report.get("ignored_prediction_count"), expected_ignored):
         raise ValueError(f"{label} ignored_prediction_count does not match its fixtures")
@@ -620,6 +718,16 @@ def _validate_report(report, label):
         ignored = fixture.get("ignored_prediction_count")
         if isinstance(ignored, bool) or not isinstance(ignored, int) or ignored < 0:
             raise ValueError(f"{prefix} ignored_prediction_count must be non-negative")
+
+        confidence_summary = fixture.get("confidence_stratified_results")
+        if confidence_summary is not None:
+            _validate_confidence_stratified_results(
+                confidence_summary,
+                matches,
+                fixture["overall"],
+                ignored,
+                f"{prefix}.confidence_stratified_results",
+            )
         _validate_price_accuracy(
             fixture.get("price_accuracy"), matches, f"{prefix}.price_accuracy"
         )
@@ -676,6 +784,31 @@ def _compare_macro_metrics(baseline, candidate):
             for field in fields
         },
     }
+
+
+def _compare_confidence_stratified_results(baseline, candidate):
+    """Compare confidence-bucket precision without fabricating low-zone recall."""
+    result = {}
+    fields = (
+        "candidate_count", "drawable_count", "matched_count",
+        "false_positive_count", "suppressed_or_invalid_count",
+        "precision", "mean_iou", "mean_center_error_normalized",
+    )
+    for level in _CONFIDENCE_GROUPS:
+        base_row, candidate_row = baseline[level], candidate[level]
+        result[level] = {
+            field: {
+                "baseline": base_row[field],
+                "candidate": candidate_row[field],
+                "delta": _delta(base_row[field], candidate_row[field]),
+            }
+            for field in fields
+        }
+        result[level]["geometry_scored"] = {
+            "baseline": base_row["geometry_scored"],
+            "candidate": candidate_row["geometry_scored"],
+        }
+    return result
 
 
 def _compare_price(baseline, candidate):
@@ -737,6 +870,8 @@ def compare_benchmark_reports(baseline_report, candidate_report):
     """Compare reports only when every fixture and scoring input is identical."""
     baseline = _validate_report(baseline_report, "baseline")
     candidate = _validate_report(candidate_report, "candidate")
+    if ("confidence_stratified_results" in baseline_report) != ("confidence_stratified_results" in candidate_report):
+        raise ValueError("paired reports must both include confidence-stratified results or both omit them")
     if baseline_report["annotation_guideline_version"] != candidate_report["annotation_guideline_version"]:
         raise ValueError("paired reports use different annotation guideline versions")
     base_ids, candidate_ids = set(baseline), set(candidate)
@@ -806,6 +941,11 @@ def compare_benchmark_reports(baseline_report, candidate_report):
             "plot_boundary_accuracy": compare_plot_boundary_accuracy(
                 base["plot_boundary_accuracy"], cand["plot_boundary_accuracy"]
             ),
+            **({
+                "confidence_stratified_results": _compare_confidence_stratified_results(
+                    base["confidence_stratified_results"], cand["confidence_stratified_results"]
+                )
+            } if "confidence_stratified_results" in base and "confidence_stratified_results" in cand else {}),
         })
 
     base_ignored = sum(f["ignored_prediction_count"] for f in base_fixtures)
@@ -840,6 +980,12 @@ def compare_benchmark_reports(baseline_report, candidate_report):
             aggregate_plot_boundary_accuracy(base_fixtures),
             aggregate_plot_boundary_accuracy(candidate_fixtures),
         ),
+        **({
+            "confidence_stratified_results": _compare_confidence_stratified_results(
+                baseline_report["confidence_stratified_results"],
+                candidate_report["confidence_stratified_results"],
+            )
+        } if "confidence_stratified_results" in baseline_report else {}),
         "fixtures": fixture_results,
     }
 
