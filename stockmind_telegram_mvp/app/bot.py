@@ -336,7 +336,7 @@ async def handle_chart_photo(message: Message):
         return
 
     if message.from_user is not None:
-        admission_error = _research_admission_error(message.from_user.id)
+        admission_error = _research_admission_error(message.from_user.id, _language_for(message))
         if admission_error:
             await message.answer(admission_error)
             return
@@ -374,7 +374,7 @@ async def handle_chart_document(message: Message):
         return
 
     if message.from_user is not None:
-        admission_error = _research_admission_error(message.from_user.id)
+        admission_error = _research_admission_error(message.from_user.id, _language_for(message))
         if admission_error:
             await message.answer(admission_error)
             return
