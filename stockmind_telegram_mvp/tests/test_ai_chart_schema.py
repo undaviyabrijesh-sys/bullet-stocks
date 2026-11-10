@@ -26,8 +26,9 @@ def payload(zones, **overrides):
 def zone(**overrides):
     value = {
         "zone_type": "demand",
+        "origin": "ai_inferred",
         "confidence": "high",
-        "label": "Demand base",
+        "label": "USER SUPPLY",
         "price_low": "100",
         "price_high": "105",
         "x_start": 0.2,
@@ -50,6 +51,8 @@ class ChartResponseValidationTests(unittest.TestCase):
         self.assertEqual(result["analysis"], "Visible demand base near the prior impulse.")
         self.assertEqual(len(result["zones"]), 1)
         self.assertTrue(result["zones"][0]["draw_overlay"])
+        self.assertEqual(result["zones"][0]["origin"], "ai_inferred")
+        self.assertEqual(result["zones"][0]["label"], "AI DEMAND")
         self.assertEqual(result["zones"][0]["x_start"], 0.2)
         self.assertEqual(result["plot_bounds"], PLOT_BOUNDS)
 
@@ -71,6 +74,23 @@ class ChartResponseValidationTests(unittest.TestCase):
                 item = sanitize_chart_analysis(payload([candidate]))["zones"][0]
                 self.assertEqual(item["confidence"], "low")
                 self.assertFalse(item["draw_overlay"])
+
+    def test_user_marked_origin_generates_a_user_label(self):
+        item = sanitize_chart_analysis(payload([
+            zone(origin="user_marked", label="AI SUPPLY")
+        ]))["zones"][0]
+
+        self.assertEqual(item["origin"], "user_marked")
+        self.assertEqual(item["label"], "USER DEMAND")
+
+    def test_missing_or_invalid_origin_defaults_to_ai_inferred(self):
+        missing = zone()
+        missing.pop("origin")
+        for candidate in (missing, zone(origin="user"), zone(origin=True)):
+            with self.subTest(candidate=candidate):
+                item = sanitize_chart_analysis(payload([candidate]))["zones"][0]
+                self.assertEqual(item["origin"], "ai_inferred")
+                self.assertEqual(item["label"], "AI DEMAND")
 
     def test_medium_confidence_candidate_remains_drawable(self):
         item = sanitize_chart_analysis(payload([zone(confidence="medium")]))["zones"][0]
@@ -163,7 +183,7 @@ class ChartResponseValidationTests(unittest.TestCase):
         result = sanitize_chart_analysis(payload(zones))
 
         self.assertEqual(len(result["zones"]), 1)
-        self.assertEqual(result["zones"][0]["label"], "Late valid demand")
+        self.assertEqual(result["zones"][0]["label"], "AI DEMAND")
         self.assertTrue(result["zones"][0]["draw_overlay"])
 
     def test_sanitizes_untrusted_label_and_price_fields(self):
@@ -173,7 +193,8 @@ class ChartResponseValidationTests(unittest.TestCase):
         ))
 
         item = result["zones"][0]
-        self.assertEqual(len(item["label"]), 64)
+        self.assertEqual(item["label"], "AI DEMAND")
+        self.assertEqual(item["origin"], "ai_inferred")
         self.assertIsNone(item["price_low"])
         self.assertIsNone(item["price_high"])
         self.assertIn("Numeric price bounds were withheld", result["analysis"])
@@ -219,13 +240,16 @@ class ChartResponseValidationTests(unittest.TestCase):
         self.assertNotIn("Numeric price bounds were withheld", result["analysis"])
 
     def test_chart_prompt_requires_ordered_price_bounds_and_bumps_version(self):
-        self.assertEqual(CHART_PROMPT_VERSION, "dns-chart-v6")
+        self.assertEqual(CHART_PROMPT_VERSION, "dns-chart-v7")
         combined = CHART_IMAGE_PROMPT + CHART_IMAGE_INSTRUCTIONS
         self.assertIn("price_high", combined)
         self.assertIn("price_low < price_high", combined)
         self.assertIn("both null", combined)
         self.assertIn("qualitative", combined)
         self.assertIn("low-confidence candidate", combined)
+        self.assertIn("user_marked", combined)
+        self.assertIn("ai_inferred", combined)
+        self.assertIn("application derives", combined)
     def test_rejects_missing_or_wrongly_typed_response_fields(self):
         for payload in (
             None,
@@ -243,7 +267,10 @@ class ChartResponseValidationTests(unittest.TestCase):
         self.assertEqual(zone_schema["maxItems"], 8)
         properties = zone_schema["items"]["properties"]
         self.assertIn("confidence", zone_schema["items"]["required"])
+        self.assertIn("origin", zone_schema["items"]["required"])
         self.assertEqual(properties["confidence"]["enum"], ["high", "medium", "low"])
+        self.assertEqual(properties["origin"]["enum"], ["user_marked", "ai_inferred"])
+        self.assertNotIn("label", properties)
         self.assertIn("plot_bounds", schema["required"])
         plot_schema = schema["properties"]["plot_bounds"]
         self.assertEqual(plot_schema["type"], ["object", "null"])
