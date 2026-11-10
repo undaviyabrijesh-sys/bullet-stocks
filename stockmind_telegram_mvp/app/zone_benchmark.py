@@ -352,6 +352,13 @@ def _validate_adjudication_metadata(
         or token(second["reviewer_id"]) == token(first["annotator_id"])
     ):
         raise ValueError(f"{prefix} reviewer identities must not overlap the other annotator")
+    if (
+        token(first["reviewer_id"]) == token(first["annotator_id"])
+        or token(second["reviewer_id"]) == token(second["annotator_id"])
+    ):
+        raise ValueError(f"{prefix} each reviewer identity must differ from its own annotator")
+    if token(first["reviewer_id"]) == token(second["reviewer_id"]):
+        raise ValueError(f"{prefix} requires two distinct reviewer identities")
     if token(adjudicator_id) in {
         token(first["annotator_id"]),
         token(first["reviewer_id"]),
