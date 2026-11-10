@@ -1020,7 +1020,7 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
     def test_v7_manifest_rejects_missing_zone_origin(self):
         record = self._record(prediction_metadata=self._v7_metadata())
         self._write(record)
-        with self.assertRaisesRegex(ValueError, r"predicted_zones\\[0\\].origin"):
+        with self.assertRaisesRegex(ValueError, r"predicted_zones\[0\].origin"):
             evaluate_benchmark_manifest(self.manifest)
 
     def test_v7_manifest_rejects_label_that_conflicts_with_origin(self):
