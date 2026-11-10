@@ -89,9 +89,10 @@ Analyse in this order:
    displacement/impulse candles and swing structure. Keep multiple meaningful zones separate.
    Do not compress zones into thin stacked lines or place them at the bottom of the chart.
 3. If the user has already drawn zones, assess those first and preserve them as the reference.
-   Label user-drawn zones separately from any additional zones inferred from visible structure.
-   Use short English overlay labels: USER SUPPLY, USER DEMAND, AI SUPPLY or AI DEMAND.
-   Only use a USER label when the screenshot clearly shows that the user marked that zone; otherwise use AI.
+   For each zone, set origin=user_marked only when the screenshot clearly shows that the user
+   manually marked that zone; otherwise set origin=ai_inferred. Do not infer user authorship
+   from price-action structure alone. The application derives the overlay label from this field;
+   do not create or embellish labels.
 4. For each zone, give type, approximate upper/lower bounds (only if the price scale is readable),
    structural reason, freshness/mitigation state, and confidence (high/medium/low).
    For numeric bounds, price_high belongs at the zone y_top and price_low at y_bottom.
@@ -123,7 +124,7 @@ Use this response structure:
 The user may ask in English, Hinglish, Hindi, Gujarati or mixed language. Reply in their style.
 """
 
-CHART_PROMPT_VERSION = "dns-chart-v6"
+CHART_PROMPT_VERSION = "dns-chart-v7"
 CHART_IMAGE_INSTRUCTIONS = """
 Return structured JSON. First identify plot_bounds: the visible main price-candle plotting
 rectangle, excluding the price scale, toolbars, legends and separate indicator/volume panels.
@@ -143,6 +144,10 @@ zone range in the prose when its structured price pair is null. Never infer pric
 coordinates without a readable scale.
 Return at most 8 distinct zones. The text analysis must explain that the overlay is an estimate
 and needs visual verification.
+
+Each zone must include origin, exactly user_marked or ai_inferred. Use user_marked only when
+the screenshot clearly shows a manually marked zone; otherwise use ai_inferred. Do not return a
+label field: the application derives USER/AI SUPPLY/DEMAND labels from origin and zone_type.
 
 Each zone must include qualitative confidence: high, medium or low. Confidence is a visual-evidence
 category, not a probability or calibrated accuracy score. Set draw_overlay=true only for high or
@@ -211,11 +216,11 @@ CHART_RESPONSE_FORMAT = {
                     "items": {
                         "type": "object",
                         "additionalProperties": False,
-                        "required": ["zone_type", "confidence", "label", "price_low", "price_high", "x_start", "x_end", "y_top", "y_bottom", "draw_overlay"],
+                        "required": ["zone_type", "origin", "confidence", "price_low", "price_high", "x_start", "x_end", "y_top", "y_bottom", "draw_overlay"],
                         "properties": {
                             "zone_type": {"type": "string", "enum": ["supply", "demand"]},
                             "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
-                            "label": {"type": "string"},
+                            "origin": {"type": "string", "enum": ["user_marked", "ai_inferred"]},
                             "price_low": {"type": ["string", "null"]},
                             "price_high": {"type": ["string", "null"]},
                             "x_start": {"type": "number", "minimum": 0, "maximum": 1},
@@ -507,9 +512,12 @@ def sanitize_chart_analysis(data: dict) -> dict:
         if not isinstance(confidence, str) or confidence not in {"high", "medium", "low"}:
             confidence = "low"
 
-        label = zone.get("label")
-        if not isinstance(label, str) or not label.strip():
-            label = zone_type.upper()
+        origin = zone.get("origin")
+        if not isinstance(origin, str) or origin not in {"user_marked", "ai_inferred"}:
+            # Missing/invalid provenance must never be upgraded to user-marked.
+            origin = "ai_inferred"
+        label_prefix = "USER" if origin == "user_marked" else "AI"
+        label = f"{label_prefix} {zone_type.upper()}
         raw_price_low = zone.get("price_low")
         raw_price_high = zone.get("price_high")
         try:
@@ -553,8 +561,9 @@ def sanitize_chart_analysis(data: dict) -> dict:
 
         safe_zones.append({
             "zone_type": zone_type,
+            "origin": origin,
             "confidence": confidence,
-            "label": label.strip()[:64],
+            "label": label,
             "price_low": price_low[:32] if price_low is not None else None,
             "price_high": price_high[:32] if price_high is not None else None,
             "x_start": coordinates[0],
@@ -1154,6 +1163,7 @@ class ResearchAI:
             "conversation_context": CHART_CONTEXT_POLICY,
             "plot_bounds_policy": "required_for_overlay",
             "confidence_policy": "high_medium_only",
+            "zone_origin_policy": "user_marked_only_when_visibly_marked",
         }
         request_options = {
             "model": self.vision_model,
