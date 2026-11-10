@@ -60,6 +60,59 @@ AXIS_ANCHORS = [
 
 
 class ZoneEvaluationTests(unittest.TestCase):
+
+    def test_confidence_stratification_scores_drawn_high_and_medium_but_not_low_geometry(self):
+        high = prediction("demand", confidence="high")
+        medium = prediction("supply", confidence="medium")
+        low = prediction(
+            "demand",
+            confidence="low",
+            draw_overlay=False,
+            x_start=0.0,
+            x_end=0.0,
+            y_top=0.0,
+            y_bottom=0.0,
+        )
+
+        result = evaluate([high, medium, low], [zone()])
+        confidence = result["confidence_stratified_results"]
+
+        self.assertEqual(confidence["high"]["candidate_count"], 1)
+        self.assertEqual(confidence["high"]["drawable_count"], 1)
+        self.assertEqual(confidence["high"]["matched_count"], 1)
+        self.assertEqual(confidence["high"]["precision"], 1.0)
+        self.assertEqual(confidence["high"]["mean_iou"], 1.0)
+        self.assertTrue(confidence["high"]["geometry_scored"])
+
+        self.assertEqual(confidence["medium"]["candidate_count"], 1)
+        self.assertEqual(confidence["medium"]["drawable_count"], 1)
+        self.assertEqual(confidence["medium"]["matched_count"], 0)
+        self.assertEqual(confidence["medium"]["false_positive_count"], 1)
+        self.assertEqual(confidence["medium"]["precision"], 0.0)
+        self.assertIsNone(confidence["medium"]["mean_iou"])
+
+        self.assertEqual(confidence["low"]["candidate_count"], 1)
+        self.assertEqual(confidence["low"]["drawable_count"], 0)
+        self.assertEqual(confidence["low"]["suppressed_or_invalid_count"], 1)
+        self.assertIsNone(confidence["low"]["precision"])
+        self.assertFalse(confidence["low"]["geometry_scored"])
+        self.assertEqual(result["matches"][0]["confidence_group"], "high")
+
+        self.assertEqual(sum(row["candidate_count"] for row in confidence.values()), 3)
+        self.assertEqual(sum(row["drawable_count"] for row in confidence.values()), 2)
+        self.assertEqual(result["overall"]["predicted"], 2)
+        self.assertEqual(result["ignored_prediction_count"], 1)
+
+    def test_missing_legacy_confidence_is_reported_separately(self):
+        result = evaluate([prediction()], [zone()])
+        row = result["confidence_stratified_results"]["not_reported_or_invalid"]
+
+        self.assertEqual(row["candidate_count"], 1)
+        self.assertEqual(row["drawable_count"], 1)
+        self.assertEqual(row["matched_count"], 1)
+        self.assertEqual(row["precision"], 1.0)
+        self.assertTrue(row["geometry_scored"])
+
     def test_exact_match_has_perfect_scores(self):
         result = evaluate([prediction()], [zone()])
         self.assertEqual(result["overall"]["true_positive"], 1)
