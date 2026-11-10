@@ -12,6 +12,7 @@ from pathlib import Path
 from .annotation_editor import load_draft_and_image
 from .annotation_fixture import _validate_reviewed_draft
 from .overlay_engine import normalized_plot_bounds_to_pixel_box
+from .price_axis import calibrate_price_axis
 from .zone_evaluation import evaluate_manual_annotation_agreement
 
 
@@ -49,6 +50,81 @@ def _plot_agreement(first_bounds, second_bounds, image_width, image_height):
         },
         "annotator_a_bounds_px": list(first),
         "annotator_b_bounds_px": list(second),
+    }
+
+
+
+def _price_axis_agreement(first, second, *, sample_count=11):
+    """Compare two manual price-axis fits only across their shared anchor range.
+
+    Prices are sampled from each annotator's independently validated
+    calibration. No extrapolation is performed. This is calibration agreement,
+    not proof that either set of manually read labels is correct.
+    """
+    anchors_a = first["price_axis_anchors"]
+    anchors_b = second["price_axis_anchors"]
+    base = {
+        "annotator_a_anchor_count": len(anchors_a),
+        "annotator_b_anchor_count": len(anchors_b),
+        "annotator_a_scale": first["price_axis_scale"],
+        "annotator_b_scale": second["price_axis_scale"],
+    }
+    if not anchors_a and not anchors_b:
+        return {"status": "not_provided", **base}
+    if not anchors_a or not anchors_b:
+        return {"status": "missing_on_one_side", **base}
+
+    calibration_a = calibrate_price_axis(
+        anchors_a, scale=first["price_axis_scale"]
+    )
+    calibration_b = calibrate_price_axis(
+        anchors_b, scale=second["price_axis_scale"]
+    )
+    overlap_start = max(calibration_a.min_y, calibration_b.min_y)
+    overlap_end = min(calibration_a.max_y, calibration_b.max_y)
+    overlap_span = overlap_end - overlap_start
+    result = {
+        **base,
+        "scale_match": calibration_a.scale == calibration_b.scale,
+        "annotator_a_max_anchor_relative_error": calibration_a.max_anchor_relative_error,
+        "annotator_b_max_anchor_relative_error": calibration_b.max_anchor_relative_error,
+        "overlap_y": [overlap_start, overlap_end] if overlap_span > 1e-9 else None,
+        "overlap_span": max(0.0, overlap_span),
+    }
+    if overlap_span <= 1e-9:
+        return {"status": "no_overlap", **result}
+
+    relative_errors = []
+    absolute_errors = []
+    for index in range(sample_count):
+        y = overlap_start + overlap_span * index / (sample_count - 1)
+        price_a = calibration_a.price_at_y(y)
+        price_b = calibration_b.price_at_y(y)
+        high = max(price_a, price_b)
+        low = min(price_a, price_b)
+        midpoint = high / 2.0 + low / 2.0
+        absolute_error = high - low
+        relative_error = absolute_error / midpoint
+        if not math.isfinite(relative_error) or not math.isfinite(absolute_error):
+            raise ValueError("price-axis agreement exceeds the supported numeric range")
+        absolute_errors.append(absolute_error)
+        relative_errors.append(relative_error)
+
+    return {
+        "status": "compared",
+        **result,
+        "sample_count": sample_count,
+        "mean_absolute_price_disagreement": math.fsum(absolute_errors) / sample_count,
+        "max_absolute_price_disagreement": max(absolute_errors),
+        "mean_relative_price_disagreement": math.fsum(relative_errors) / sample_count,
+        "max_relative_price_disagreement": max(relative_errors),
+        "relative_disagreement_by_y": [
+            {
+                "y": overlap_start + overlap_span * index / (sample_count - 1),
+                "relative_disagreement": relative_errors[index],
+            }
+            for index in range(sample_count)
+        ],
     }
 
 
@@ -116,6 +192,7 @@ def compare_reviewed_annotations(annotation_a_path, annotation_b_path, *, iou_th
             second["reference_plot_bounds"],
             **dimensions,
         ),
+        "price_axis_agreement": _price_axis_agreement(first, second),
         "zone_agreement": zone_agreement,
         "interpretation": (
             "Pairwise manual agreement only; this report is not AI detection accuracy "
