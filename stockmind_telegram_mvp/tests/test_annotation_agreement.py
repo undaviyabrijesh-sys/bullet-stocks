@@ -156,6 +156,13 @@ class AnnotationAgreementTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "identity tokens must not overlap"):
             compare_reviewed_annotations(self.path_a, self.path_b)
 
+    def test_rejects_reused_reviewer_identity(self):
+        path_b = self._make_reviewed(
+            "shared-reviewer", _png_bytes(), "ann-017", "rev-101", [ZONE], PLOT
+        )
+        with self.assertRaisesRegex(ValueError, "different reviewer_id"):
+            compare_reviewed_annotations(self.path_a, path_b)
+
     def test_empty_annotation_sets_are_not_reported_as_perfect_agreement(self):
         path_a = self._make_reviewed(
             "empty-a", _png_bytes(), "ann-006", "rev-106", [], PLOT

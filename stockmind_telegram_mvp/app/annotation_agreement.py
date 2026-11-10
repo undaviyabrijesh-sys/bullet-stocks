@@ -183,6 +183,8 @@ def compare_reviewed_annotations(annotation_a_path, annotation_b_path, *, iou_th
         or identity_token(metadata_b["reviewer_id"]) == identity_token(metadata_a["annotator_id"])
     ):
         raise ValueError("reviewer identity tokens must not overlap the other annotation's annotator ID")
+    if identity_token(metadata_a["reviewer_id"]) == identity_token(metadata_b["reviewer_id"]):
+        raise ValueError("annotations must have different reviewer_id values")
 
     dimensions = {
         "image_width": first["image_width"],

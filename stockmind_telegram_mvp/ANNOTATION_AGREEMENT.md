@@ -17,6 +17,7 @@ adjudicated reference automatically.
 5. Use distinct pseudonymous annotator IDs and distinct reviewer IDs. Each
    reviewer must differ from both annotators, and the two reviewers must also
    be different from each other.
+   The pairwise comparison function rejects a shared reviewer identity.
 
 Do not copy one annotator's boxes into the second draft. The comparison is
 meaningful only when the drawings were made independently.
