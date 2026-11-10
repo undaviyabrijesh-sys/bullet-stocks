@@ -386,11 +386,11 @@ class AnnotationFixtureAssemblyTests(unittest.TestCase):
         capture_path.write_text(json.dumps(capture), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "fixture_id"):
             assemble_benchmark_fixture(
-            self.reviewed_path,
-            capture_path,
-            second_reviewed_draft_path=self.reviewed_b_path,
-            adjudication_path=self.adjudication_path,
-        )
+                self.reviewed_path,
+                capture_path,
+                second_reviewed_draft_path=self.reviewed_b_path,
+                adjudication_path=self.adjudication_path,
+            )
 
     def test_refuses_to_overwrite_existing_capture_or_manifest(self):
         capture_info = write_prediction_capture(self.reviewed_path, self.result)
@@ -410,17 +410,17 @@ class AnnotationFixtureAssemblyTests(unittest.TestCase):
         original_manifest = manifest_path.read_bytes()
         with self.assertRaises(FileExistsError):
             assemble_benchmark_fixture(
-            self.reviewed_path,
-            capture_path,
-            second_reviewed_draft_path=self.reviewed_b_path,
-            adjudication_path=self.adjudication_path,
-        )
+                self.reviewed_path,
+                capture_path,
+                second_reviewed_draft_path=self.reviewed_b_path,
+                adjudication_path=self.adjudication_path,
+            )
         self.assertEqual(manifest_path.read_bytes(), original_manifest)
 
     def test_manifest_must_be_next_to_reviewed_draft(self):
         capture_info = write_prediction_capture(self.reviewed_path, self.result)
         outside = self.root / "outside" / "fixture.jsonl"
-        with self.assertRaisesRegex(ValueError, "beside the reviewed annotation"):
+        with self.assertRaisesRegex(ValueError, "beside the adjudicated annotation"):
             assemble_benchmark_fixture(
                 self.reviewed_path,
                 capture_info["capture_file"],
@@ -443,11 +443,11 @@ class AnnotationFixtureAssemblyTests(unittest.TestCase):
         capture_path.write_text(raw, encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "duplicate JSON object key"):
             assemble_benchmark_fixture(
-            self.reviewed_path,
-            capture_path,
-            second_reviewed_draft_path=self.reviewed_b_path,
-            adjudication_path=self.adjudication_path,
-        )
+                self.reviewed_path,
+                capture_path,
+                second_reviewed_draft_path=self.reviewed_b_path,
+                adjudication_path=self.adjudication_path,
+            )
 
     def test_rejects_non_standard_constants_in_prediction_capture_json(self):
         capture = build_prediction_capture(self.reviewed_path, self.result)
@@ -456,11 +456,11 @@ class AnnotationFixtureAssemblyTests(unittest.TestCase):
         capture_path.write_text(raw, encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "non-standard JSON constant"):
             assemble_benchmark_fixture(
-            self.reviewed_path,
-            capture_path,
-            second_reviewed_draft_path=self.reviewed_b_path,
-            adjudication_path=self.adjudication_path,
-        )
+                self.reviewed_path,
+                capture_path,
+                second_reviewed_draft_path=self.reviewed_b_path,
+                adjudication_path=self.adjudication_path,
+            )
 
 if __name__ == "__main__":
     unittest.main()
