@@ -23,6 +23,7 @@ from stockmind_telegram_mvp.app.annotation_editor import (
 from stockmind_telegram_mvp.app.annotation_fixture import (
     assemble_benchmark_fixture,
     build_prediction_capture,
+    write_adjudication_record,
     write_prediction_capture,
 )
 from stockmind_telegram_mvp.app.annotation_intake import prepare_annotation_draft
@@ -150,6 +151,47 @@ class AnnotationHandoffRoundTripTests(unittest.TestCase):
             "rev-roundtrip-reviewer",
         )
 
+        intake_b = prepare_annotation_draft(
+            self.source,
+            self.root / "inbox-b",
+            "btc-1h-roundtrip",
+            market_context={
+                "asset_class": "crypto",
+                "symbol": "BTCUSDT",
+                "exchange": "binance",
+                "timeframe": "1h",
+            },
+        )
+        draft_b_path = self.root / "inbox-b" / intake_b["draft_file"]
+        draft_b = json.loads(draft_b_path.read_text(encoding="utf-8"))
+        annotated_b = apply_manual_annotations(
+            draft_b,
+            PLOT,
+            [ZONE],
+            "ann-roundtrip-b",
+            annotated_at="2026-11-09T10:01:30Z",
+        )
+        approved_b = review_annotation_draft(
+            annotated_b,
+            "rev-roundtrip-reviewer-b",
+            approve=True,
+            reviewed_at="2026-11-09T10:03:00Z",
+        )
+        reviewed_b_path = self.root / "inbox-b" / "btc-1h-roundtrip.reviewed.json"
+        _write_new_json(reviewed_b_path, approved_b)
+        adjudication_info = write_adjudication_record(
+            reviewed_path,
+            reviewed_b_path,
+            adjudicator_id="adj-roundtrip-adjudicator",
+            adjudicated_at="2026-11-09T10:04:00Z",
+            decision="accept_a",
+            rationale=(
+                "Annotation A follows the documented zone boundary rule after "
+                "reviewing the independent geometry comparison."
+            ),
+        )
+        adjudication_path = Path(adjudication_info["adjudication_file"])
+
         capture_info = write_prediction_capture(reviewed_path, self._prediction())
         capture_path = Path(capture_info["capture_file"])
         capture = build_prediction_capture(reviewed_path, self._prediction())
@@ -159,7 +201,12 @@ class AnnotationHandoffRoundTripTests(unittest.TestCase):
         for field in ("x_start", "x_end", "y_top", "y_bottom"):
             self.assertEqual(captured_zone[field], ZONE[field])
 
-        assembled = assemble_benchmark_fixture(reviewed_path, capture_path)
+        assembled = assemble_benchmark_fixture(
+            reviewed_path,
+            capture_path,
+            second_reviewed_draft_path=reviewed_b_path,
+            adjudication_path=adjudication_path,
+        )
         manifest_path = Path(assembled["manifest_file"])
         record = json.loads(manifest_path.read_text(encoding="utf-8"))
         self.assertEqual(record["reference_zones"], reloaded_review["reference_zones"])
@@ -191,6 +238,47 @@ class AnnotationHandoffRoundTripTests(unittest.TestCase):
         reviewed_path = self.inbox / "mutated.reviewed.json"
         _write_new_json(reviewed_path, approved)
 
+        intake_b = prepare_annotation_draft(
+            self.source,
+            self.root / "inbox-b",
+            "btc-1h-roundtrip",
+            market_context={
+                "asset_class": "crypto",
+                "symbol": "BTCUSDT",
+                "exchange": "binance",
+                "timeframe": "1h",
+            },
+        )
+        draft_b_path = self.root / "inbox-b" / intake_b["draft_file"]
+        draft_b = json.loads(draft_b_path.read_text(encoding="utf-8"))
+        annotated_b = apply_manual_annotations(
+            draft_b,
+            PLOT,
+            [ZONE],
+            "ann-mutated-image-b",
+            annotated_at="2026-11-09T10:01:30Z",
+        )
+        approved_b = review_annotation_draft(
+            annotated_b,
+            "rev-mutated-image-reviewer-b",
+            approve=True,
+            reviewed_at="2026-11-09T10:03:00Z",
+        )
+        reviewed_b_path = self.root / "inbox-b" / "mutated-b.reviewed.json"
+        _write_new_json(reviewed_b_path, approved_b)
+        adjudication_info = write_adjudication_record(
+            reviewed_path,
+            reviewed_b_path,
+            adjudicator_id="adj-mutated-image-adjudicator",
+            adjudicated_at="2026-11-09T10:04:00Z",
+            decision="accept_a",
+            rationale=(
+                "Annotation A follows the documented zone boundary rule after "
+                "reviewing the independent geometry comparison."
+            ),
+        )
+        adjudication_path = Path(adjudication_info["adjudication_file"])
+
         capture_info = write_prediction_capture(reviewed_path, self._prediction())
         capture_path = Path(capture_info["capture_file"])
 
@@ -201,7 +289,12 @@ class AnnotationHandoffRoundTripTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "SHA-256"):
             build_prediction_capture(reviewed_path, self._prediction())
         with self.assertRaisesRegex(ValueError, "SHA-256"):
-            assemble_benchmark_fixture(reviewed_path, capture_path)
+            assemble_benchmark_fixture(
+                reviewed_path,
+                capture_path,
+                second_reviewed_draft_path=reviewed_b_path,
+                adjudication_path=adjudication_path,
+            )
 
     def test_rejected_annotation_remains_ineligible_after_json_roundtrip(self):
         draft, _ = load_draft_and_image(self.draft_path)
