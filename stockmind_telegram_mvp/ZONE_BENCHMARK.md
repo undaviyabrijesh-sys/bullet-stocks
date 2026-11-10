@@ -480,3 +480,26 @@ saved annotation and prediction-capture JSON still agree with each other. Re-int
 the exact intended screenshot and repeat annotation and independent review; do not
 repair a mismatch by editing a stored hash. A regression test changes the source
 image after a valid capture and verifies that both capture and assembly fail closed.
+
+## Mandatory independent annotation adjudication
+
+A scoreable JSONL record must include adjudication_metadata in addition
+to the approved manual annotation metadata. The field contains two distinct
+reviewed annotation provenance records, a hash-bound pairwise agreement report,
+and an explicit decision (accept_a or accept_b) made by a separate adjudicator.
+The adjudicator must be distinct from both annotators and both reviewers,
+provide a timezone-aware timestamp after both reviews, and supply a
+20..1000-character rationale.
+
+Use python -m stockmind_telegram_mvp.app.annotation_fixture adjudicate to
+create the sidecar and assemble --annotation-b ... --adjudication ... to
+create the manifest. Assembly recomputes agreement from the current reviewed
+files, checks their exact file hashes, validates the report hash and selection,
+then runs the normal manifest preflight. The benchmark runner rejects records
+without valid adjudication metadata, including hand-authored JSONL records.
+
+The adjudicator must inspect the measured disagreements; the software does not
+select whichever annotation has the higher IoU. If neither annotation is
+acceptable, do not admit that screenshot as ground truth. Pseudonymous IDs and
+rationale are an audit trail, not cryptographic identity proof. Keep both
+reviewed files and the adjudication sidecar with the benchmark source manifest.
