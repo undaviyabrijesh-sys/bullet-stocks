@@ -3,6 +3,7 @@ import base64
 import hashlib
 import json
 import math
+import re
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone
 
@@ -911,11 +912,136 @@ def _crypto_confirmation_summary(serialized_result):
     return summary
 
 
-def _append_crypto_confirmation_note(answer, summaries):
-    """Append a deterministic closure caveat after the model's free-form answer."""
+def _crypto_confirmation_language(user_text):
+    """Choose a deterministic evidence-note locale from clear script/phrase signals."""
+    if not isinstance(user_text, str) or not user_text.strip():
+        return "en"
+
+    gujarati_chars = sum(1 for char in user_text if "\u0a80" <= char <= "\u0aff")
+    devanagari_chars = sum(1 for char in user_text if "\u0900" <= char <= "\u097f")
+    if gujarati_chars >= 2 and gujarati_chars > devanagari_chars:
+        return "gu"
+    if devanagari_chars >= 2 and devanagari_chars >= gujarati_chars:
+        return "hi"
+
+    tokens = set(re.findall(r"[a-z]+", user_text.casefold()))
+    gujarati_markers = {
+        "chhe", "che", "nathi", "shu", "su", "kem", "mane", "maru",
+        "mari", "tame", "tamne", "chho", "karjo", "hatu", "hati",
+        "thay", "thase", "bataavo",
+    }
+    hindi_markers = {
+        "hai", "hain", "nahi", "nahin", "karo", "karna", "batao", "bata",
+        "kya", "mujhe", "mera", "meri", "mein", "dikhao", "samjhao",
+        "chahiye", "raha", "rahi", "kyu", "kyon", "kitna", "kitne",
+        "kaise", "btao",
+    }
+    hindi_particles = {"ka", "ki", "ke", "se", "ko", "par", "mein"}
+    gujarati_particles = {"ma", "ne", "nu", "no", "ni", "thi", "mate"}
+    gujarati_score = len(tokens & gujarati_markers)
+    hindi_score = len(tokens & hindi_markers)
+    if gujarati_score and gujarati_score >= hindi_score:
+        return "gu_latin"
+    if hindi_score or len(tokens & hindi_particles) >= 2:
+        return "hinglish"
+    if len(tokens & gujarati_particles) >= 2:
+        return "gu_latin"
+    return "en"
+
+
+def _crypto_confirmation_detail(summary, status, language):
+    """Render the same deterministic candle-closure facts in the user's likely language."""
+    visible = summary.get("visible_rows", 0)
+    closed = summary.get("closed_rows", 0)
+    unconfirmed = summary.get("unconfirmed_rows", 0)
+
+    if language == "hi":
+        if status == "unavailable":
+            detail = "Binance का कैंडल डेटा उपलब्ध नहीं था या रोक दिया गया था; इस अनुरोध से किसी structural break की पुष्टि नहीं की जा सकती।"
+        elif status == "no_rows":
+            detail = "कोई कैंडल row उपलब्ध नहीं थी; इस अनुरोध से BOS/CHOCH की पुष्टि नहीं की जा सकती।"
+        elif status == "unverified":
+            detail = f"Server-time verification उपलब्ध नहीं था; मॉडल को दिखी सभी {visible} candle rows unverified हैं। इस sample पर आधारित कोई भी BOS/CHOCH दावा provisional है, confirmed नहीं।"
+        elif status == "no_closed":
+            detail = "मॉडल को दिखी कोई candle row closed-candle check में पास नहीं हुई; इस sample से BOS/CHOCH confirm नहीं किया जा सकता।"
+        elif status == "mixed":
+            detail = f"{closed} model-visible rows closed थीं और {unconfirmed} forming/unverified थीं। Structural break की पुष्टि के लिए केवल closed rows योग्य हैं; unconfirmed rows पर आधारित दावा provisional है।"
+        else:
+            detail = f"सभी {closed} model-visible candle rows ने closed-candle check पास किया। यह केवल candle closure verify करता है; अपने आप BOS/CHOCH साबित नहीं करता।"
+        truncated = " Model context में फिट करने के लिए provider result का sample लिया गया था।"
+        heading = "स्वचालित Binance कैंडल जाँच"
+    elif language == "gu":
+        if status == "unavailable":
+            detail = "Binance કૅન્ડલ ડેટા ઉપલબ્ધ નહોતો અથવા અટકાવવામાં આવ્યો હતો; આ વિનંતી પરથી કોઈ structural breakની પુષ્ટિ કરી શકાતી નથી."
+        elif status == "no_rows":
+            detail = "કોઈ કૅન્ડલ row ઉપલબ્ધ નહોતી; આ વિનંતી પરથી BOS/CHOCHની પુષ્ટિ કરી શકાતી નથી."
+        elif status == "unverified":
+            detail = f"Server-time ચકાસણી ઉપલબ્ધ નહોતી; મોડેલને દેખાતી બધી {visible} candle rows અચકાસેલી છે. આ sample પર આધારિત કોઈપણ BOS/CHOCH દાવો provisional છે, confirmed નથી."
+        elif status == "no_closed":
+            detail = "મોડેલને દેખાતી કોઈ candle row closed-candle checkમાં પાસ થઈ નથી; આ sample પરથી BOS/CHOCHની પુષ્ટિ થઈ શકતી નથી."
+        elif status == "mixed":
+            detail = f"{closed} model-visible rows closed હતી અને {unconfirmed} forming/unverified હતી. Structural breakની પુષ્ટિ માટે ફક્ત closed rows જ માન્ય છે; unconfirmed rows પર આધારિત દાવો provisional છે."
+        else:
+            detail = f"બધી {closed} model-visible candle rows closed-candle checkમાં પાસ થઈ. આ ફક્ત candle closure ચકાસે છે; તે પોતે BOS/CHOCH સાબિત કરતું નથી."
+        truncated = " Model contextમાં ફિટ કરવા provider resultમાંથી sample લેવામાં આવ્યો હતો."
+        heading = "Binance કૅન્ડલની સ્વચાલિત ચકાસણી"
+    elif language == "hinglish":
+        if status == "unavailable":
+            detail = "Binance candle data available nahi tha ya withhold hua; is request se koi structural break confirm nahi kiya ja sakta."
+        elif status == "no_rows":
+            detail = "Koi candle rows available nahi thi; is request se BOS/CHOCH confirm nahi ho sakta."
+        elif status == "unverified":
+            detail = f"Server-time verification available nahi thi; model ko dikhne wali sabhi {visible} candle rows unverified hain. Is sample par based koi bhi BOS/CHOCH claim provisional hai, confirmed nahi."
+        elif status == "no_closed":
+            detail = "Model ko dikhne wali koi candle row closed-candle check pass nahi kar saki; is sample se BOS/CHOCH confirm nahi ho sakta."
+        elif status == "mixed":
+            detail = f"{closed} model-visible rows closed thi aur {unconfirmed} forming/unverified thi. Structural break confirm karne ke liye sirf closed rows eligible hain; unconfirmed rows par based claim provisional hai."
+        else:
+            detail = f"Sabhi {closed} model-visible candle rows ne closed-candle check pass kiya. Yeh sirf candle closure verify karta hai; apne aap BOS/CHOCH establish nahi karta."
+        truncated = " Model context mein fit karne ke liye provider result ka sample liya gaya tha."
+        heading = "Binance candle check"
+    elif language == "gu_latin":
+        if status == "unavailable":
+            detail = "Binance candle data available nahoto athva withhold thayu; aa request parthi koi structural break confirm kari shakato nathi."
+        elif status == "no_rows":
+            detail = "Koi candle rows available nahoti; aa request parthi BOS/CHOCH confirm kari shakato nathi."
+        elif status == "unverified":
+            detail = f"Server-time verification available nahoti; model ne dekhati badhi {visible} candle rows unverified chhe. Aa sample par aadharit koi pan BOS/CHOCH claim provisional chhe, confirmed nathi."
+        elif status == "no_closed":
+            detail = "Model ne dekhati koi candle row closed-candle check pass kari shaki nathi; aa sample parthi BOS/CHOCH confirm thai shakatu nathi."
+        elif status == "mixed":
+            detail = f"{closed} model-visible rows closed hati ane {unconfirmed} forming/unverified hati. Structural break confirm karva mate fakt closed rows eligible chhe; unconfirmed rows par aadharit claim provisional chhe."
+        else:
+            detail = f"Badhi {closed} model-visible candle rows e closed-candle check pass karyo. Aa fakt candle closure verify kare chhe; potane BOS/CHOCH establish kartu nathi."
+        truncated = " Model context ma fit karva provider result mathi sample levayo hato."
+        heading = "Binance candle ni automatic chakasani"
+    else:
+        if status == "unavailable":
+            detail = "Binance candle data was unavailable or withheld; no structural break can be confirmed from this request."
+        elif status == "no_rows":
+            detail = "No candle rows were available; no BOS/CHOCH can be confirmed from this request."
+        elif status == "unverified":
+            detail = f"Server-time verification was unavailable; all {visible} model-visible candle row(s) are unverified. Any BOS/CHOCH claim based on this sample is provisional, not confirmed."
+        elif status == "no_closed":
+            detail = "No model-visible candle row passed the closed-candle check; a BOS/CHOCH cannot be confirmed from this sample."
+        elif status == "mixed":
+            detail = f"{closed} model-visible row(s) were closed and {unconfirmed} were forming/unverified. Only closed rows are eligible to confirm a structural break; any claim relying on unconfirmed rows is provisional."
+        else:
+            detail = f"All {closed} model-visible candle row(s) passed the closed-candle check. This verifies candle closure only; it does not by itself establish a BOS/CHOCH."
+        truncated = " The provider result was sampled to fit the model context."
+        heading = "Automated Binance candle check"
+
+    if summary.get("truncated"):
+        detail += truncated
+    return heading, detail
+
+
+def _append_crypto_confirmation_note(answer, summaries, user_text=None):
+    """Append a deterministic candle-closure caveat in the user's likely language."""
     if not summaries:
         return answer
 
+    language = _crypto_confirmation_language(user_text)
     notes = []
     for summary in summaries:
         if summary.get("status") is None:
@@ -928,51 +1054,14 @@ def _append_crypto_confirmation_note(answer, summaries):
             ) if value
         ]
         label = " ".join(label_parts) or "requested candle sample"
-        status = summary.get("status")
-
-        if status == "unavailable":
-            detail = (
-                "Binance candle data was unavailable or withheld; no structural break "
-                "can be confirmed from this request."
-            )
-        elif status == "no_rows":
-            detail = (
-                "No candle rows were available; no BOS/CHOCH can be confirmed from this request."
-            )
-        elif status == "unverified":
-            count = summary.get("visible_rows", 0)
-            detail = (
-                f"Server-time verification was unavailable; all {count} model-visible "
-                "candle row(s) are unverified. Any BOS/CHOCH claim based on this sample "
-                "is provisional, not confirmed."
-            )
-        elif status == "no_closed":
-            detail = (
-                "No model-visible candle row passed the closed-candle check; a BOS/CHOCH "
-                "cannot be confirmed from this sample."
-            )
-        elif status == "mixed":
-            detail = (
-                f"{summary.get('closed_rows', 0)} model-visible row(s) were closed and "
-                f"{summary.get('unconfirmed_rows', 0)} were forming/unverified. Only closed "
-                "rows are eligible to confirm a structural break; any claim relying on "
-                "unconfirmed rows is provisional."
-            )
-        else:
-            detail = (
-                f"All {summary.get('closed_rows', 0)} model-visible candle row(s) passed "
-                "the closed-candle check. This verifies candle closure only; it does not "
-                "by itself establish a BOS/CHOCH."
-            )
-
-        if summary.get("truncated"):
-            detail += " The provider result was sampled to fit the model context."
-        notes.append(f"Automated Binance candle check ({label}): {detail}")
+        heading, detail = _crypto_confirmation_detail(
+            summary, summary.get("status"), language
+        )
+        notes.append(f"{heading} ({label}): {detail}")
 
     if not notes:
         return answer
     return answer.rstrip() + "\n\n" + "\n".join(notes)
-
 
 class ResearchAI:
     def __init__(
@@ -1098,7 +1187,7 @@ class ResearchAI:
 
         def finalize_answer(content):
             return _append_crypto_confirmation_note(
-                content, crypto_confirmation_summaries
+                content, crypto_confirmation_summaries, user_text=user_text
             )
 
         for _ in range(4):
