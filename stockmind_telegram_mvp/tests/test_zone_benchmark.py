@@ -209,6 +209,16 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
             )
         return record
 
+    def _refresh_adjudication_image_hash(self, record):
+        report = record["adjudication_metadata"]["agreement_report"]
+        report["image_sha256"] = record["image_sha256"]
+        canonical = json.dumps(
+            report, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
+        record["adjudication_metadata"]["agreement_report_sha256"] = hashlib.sha256(
+            canonical
+        ).hexdigest()
+
     def _write(self, *records):
         self.manifest.write_text(
             "\n".join(json.dumps(record) for record in records) + "\n",
@@ -871,6 +881,7 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         image_file.write_bytes(image_bytes)
         record["image_file"] = image_file.name
         record["image_sha256"] = hashlib.sha256(image_bytes).hexdigest()
+        self._refresh_adjudication_image_hash(record)
         # The encoded dimensions remain 40x30, but the canonical visual frame
         # becomes 30x40 after EXIF orientation is applied.
         self._write(record)
@@ -891,6 +902,7 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         image_file.write_bytes(image_bytes)
         record["image_file"] = image_file.name
         record["image_sha256"] = hashlib.sha256(image_bytes).hexdigest()
+        self._refresh_adjudication_image_hash(record)
         self._write(record)
 
         result = evaluate_benchmark_manifest(self.manifest)
