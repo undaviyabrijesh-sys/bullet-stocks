@@ -122,7 +122,7 @@ both annotations and the adjudication sidecar:
 ~~~bash
 python -m stockmind_telegram_mvp.app.annotation_fixture assemble \
   path/to/annotator-a.reviewed.json \
-  path/to/actual-chart-result.prediction.json \
+  path/to/btc-1h-001.prediction.json \
   --annotation-b path/to/annotator-b.reviewed.json \
   --adjudication path/to/btc-1h-001.adjudication.json
 ~~~
@@ -139,7 +139,7 @@ contents, checks the adjudicator's role separation and timestamp, and runs the
 normal benchmark preflight before writing. The benchmark runner also requires
 adjudication_metadata in every JSONL record and validates its schema,
 identities, timestamp, selected annotation, fixture context and report hash.
-A hand-written record without this evidence is rejected.
+A hand-written record without this evidence is rejected. The full adjudication metadata is retained in the benchmark result, and paired model comparisons require identical adjudication evidence for each screenshot.
 
 This is an auditable pseudonymous attestation, not a digital signature or
 identity-verification service. It cannot prove that humans are who their IDs
