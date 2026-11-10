@@ -134,15 +134,17 @@ def prepare_chart_image(
 
 
 def _zone_overlay_label(zone: dict, zone_type: str) -> str:
-    fallback = "SUPPLY" if zone_type == "supply" else "DEMAND"
-    label = zone.get("label")
-    if not isinstance(label, str):
-        return fallback
-    # Pillow's default bitmap font is not Unicode-complete. Keep overlay labels
-    # short, printable and English-safe; the full multilingual explanation stays in chat.
-    label = " ".join(label.split()).encode("ascii", "ignore").decode("ascii")
-    label = "".join(character for character in label if character.isprintable())
-    return label[:32].strip().upper() or fallback
+    """Derive a fixed overlay label from validated provenance, never model text.
+
+    The structured chart response deliberately has no free-form label field.
+    Keep that invariant at the renderer boundary too: direct callers cannot
+    make an inferred zone look user-marked by supplying a forged label.
+    Missing or invalid provenance is conservatively treated as AI-inferred.
+    """
+    safe_zone_type = zone_type.upper() if zone_type in {"supply", "demand"} else "DEMAND"
+    origin = zone.get("origin") if isinstance(zone, dict) else None
+    prefix = "USER" if origin == "user_marked" else "AI"
+    return f"{prefix} {safe_zone_type}"
 
 
 def normalized_zone_to_pixel_box(
