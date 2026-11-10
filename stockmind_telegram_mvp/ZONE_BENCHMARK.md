@@ -496,7 +496,7 @@ create the sidecar and assemble --annotation-b ... --adjudication ... to
 create the manifest. Assembly recomputes agreement from the current reviewed
 files, checks their exact file hashes, validates the report hash and selection,
 then runs the normal manifest preflight. The benchmark runner rejects records
-without valid adjudication metadata, including hand-authored JSONL records.
+without valid adjudication metadata, including hand-authored JSONL records. The validated adjudication metadata is retained in each fixture result, and paired model comparisons require the same adjudication evidence on both sides.
 
 The adjudicator must inspect the measured disagreements; the software does not
 select whichever annotation has the higher IoU. If neither annotation is
