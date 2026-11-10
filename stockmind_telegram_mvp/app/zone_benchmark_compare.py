@@ -914,7 +914,7 @@ def compare_benchmark_reports(baseline_report, candidate_report):
             "image_sha256", "image_width", "image_height",
             "reference_zones_sha256", "reference_plot_bounds_sha256",
             "price_axis_calibration_sha256", "iou_threshold",
-            "annotation_metadata", "adjudication_metadata", "market_context"
+            "annotation_metadata", "market_context", "adjudication_metadata"
         ):
             if base.get(field) != cand.get(field):
                 raise ValueError(f"paired reports differ for fixture {fixture_id!r}: {field}")
