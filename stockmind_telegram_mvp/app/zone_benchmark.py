@@ -291,7 +291,7 @@ def _validate_adjudication_metadata(
         raise ValueError(f"{prefix} contains unsupported fields: {', '.join(extra)}")
     if metadata["schema"] != "stockmind.annotation-adjudication.v1":
         raise ValueError(f"{prefix}.schema is unsupported")
-    if metadata["decision"] not in {"accept_a", "accept_b"}:
+    if not isinstance(metadata["decision"], str) or metadata["decision"] not in {"accept_a", "accept_b"}:
         raise ValueError(f"{prefix}.decision must be accept_a or accept_b")
     expected_selection = "a" if metadata["decision"] == "accept_a" else "b"
     if metadata["selected_annotation"] != expected_selection:
