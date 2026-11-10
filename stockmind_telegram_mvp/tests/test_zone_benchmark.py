@@ -147,6 +147,27 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+
+    def test_report_aggregates_confidence_strata_without_scoring_suppressed_low_zones(self):
+        self._write(
+            self._record("drawable"),
+            self._record("empty", predicted_zones=[]),
+        )
+
+        result = evaluate_benchmark_manifest(self.manifest)
+        summary = result["confidence_stratified_results"]["not_reported_or_invalid"]
+
+        self.assertEqual(result["fixture_count"], 2)
+        self.assertEqual(summary["candidate_count"], 1)
+        self.assertEqual(summary["drawable_count"], 1)
+        self.assertEqual(summary["matched_count"], 1)
+        self.assertEqual(summary["precision"], 1.0)
+        self.assertEqual(result["confidence_stratified_results"]["low"]["candidate_count"], 0)
+        self.assertEqual(
+            result["fixtures"][0]["confidence_stratified_results"]["not_reported_or_invalid"]["matched_count"],
+            1,
+        )
+
     def test_scores_multiple_fixtures_and_aggregates_micro_metrics(self):
         self._write(
             self._record("exact"),
