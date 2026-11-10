@@ -59,9 +59,17 @@ def _price_axis_agreement(first, second, *, sample_count=11):
     """Compare two manual price-axis fits only across their shared anchor range.
 
     Prices are sampled from each annotator's independently validated
-    calibration. No extrapolation is performed. This is calibration agreement,
-    not proof that either set of manually read labels is correct.
+    calibration. No extrapolation is performed. The report also quantifies
+    how much of each calibration range is actually shared, so a close fit over
+    a narrow sliver is not mistaken for broad chart-wide agreement.
     """
+    if (
+        isinstance(sample_count, bool)
+        or not isinstance(sample_count, int)
+        or not 2 <= sample_count <= 101
+    ):
+        raise ValueError("sample_count must be an integer between 2 and 101")
+
     anchors_a = first["price_axis_anchors"]
     anchors_b = second["price_axis_anchors"]
     base = {
@@ -83,16 +91,29 @@ def _price_axis_agreement(first, second, *, sample_count=11):
     )
     overlap_start = max(calibration_a.min_y, calibration_b.min_y)
     overlap_end = min(calibration_a.max_y, calibration_b.max_y)
-    overlap_span = overlap_end - overlap_start
+    raw_overlap_span = overlap_end - overlap_start
+    # Treat sub-nanopixel normalized overlap as no overlap, consistently with
+    # the status and sampled-y contract below.
+    overlap_span = raw_overlap_span if raw_overlap_span > 1e-9 else 0.0
+    annotator_a_span = calibration_a.max_y - calibration_a.min_y
+    annotator_b_span = calibration_b.max_y - calibration_b.min_y
+    union_span = max(calibration_a.max_y, calibration_b.max_y) - min(
+        calibration_a.min_y, calibration_b.min_y
+    )
     result = {
         **base,
         "scale_match": calibration_a.scale == calibration_b.scale,
         "annotator_a_max_anchor_relative_error": calibration_a.max_anchor_relative_error,
         "annotator_b_max_anchor_relative_error": calibration_b.max_anchor_relative_error,
-        "overlap_y": [overlap_start, overlap_end] if overlap_span > 1e-9 else None,
-        "overlap_span": max(0.0, overlap_span),
+        "overlap_y": [overlap_start, overlap_end] if overlap_span else None,
+        "overlap_span": overlap_span,
+        "annotator_a_calibrated_span": annotator_a_span,
+        "annotator_b_calibrated_span": annotator_b_span,
+        "overlap_fraction_of_annotator_a_range": overlap_span / annotator_a_span,
+        "overlap_fraction_of_annotator_b_range": overlap_span / annotator_b_span,
+        "overlap_fraction_of_union_range": overlap_span / union_span,
     }
-    if overlap_span <= 1e-9:
+    if not overlap_span:
         return {"status": "no_overlap", **result}
 
     relative_errors = []
