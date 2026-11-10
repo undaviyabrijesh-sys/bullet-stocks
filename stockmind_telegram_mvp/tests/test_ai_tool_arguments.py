@@ -12,6 +12,7 @@ from stockmind_telegram_mvp.app.ai import (
     _parse_tool_arguments,
     _serialize_tool_result,
     _normalize_crypto_klines_for_model,
+    _crypto_confirmation_language,
 )
 from stockmind_telegram_mvp.app.strict_json import loads as strict_json_loads
 
@@ -958,7 +959,7 @@ class CryptoFinalAnswerConfirmationGuardTests(unittest.IsolatedAsyncioTestCase):
         row.update(overrides)
         return row
 
-    async def run_crypto_turn(self, provider_result, final_text):
+    async def run_crypto_turn(self, provider_result, final_text, user_text="Check BTC structure"):
         call = SimpleNamespace(
             id="call-klines",
             function=SimpleNamespace(
@@ -994,7 +995,7 @@ class CryptoFinalAnswerConfirmationGuardTests(unittest.IsolatedAsyncioTestCase):
         )
         research.market_data = None
         research.crypto_data = SimpleNamespace(klines=klines)
-        answer = await research.answer([], "Check BTC structure")
+        answer = await research.answer([], user_text)
         return answer, klines
 
     async def test_unverified_candles_add_final_caveat_even_if_model_says_confirmed(self):
@@ -1057,6 +1058,66 @@ class CryptoFinalAnswerConfirmationGuardTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("passed the closed-candle check", answer)
         self.assertIn("does not by itself establish a BOS/CHOCH", answer)
+
+
+    @staticmethod
+    def unverified_provider_result():
+        return {
+            "source": "Binance",
+            "symbol": "BTCUSDT",
+            "market": "spot",
+            "interval": "15m",
+            "clock_source": "unverified",
+            "as_of_ms": None,
+            "clock_uncertainty_ms": None,
+            "data": [CryptoFinalAnswerConfirmationGuardTests.candle(
+                900, 1000, is_closed=True, candle_status="closed"
+            )],
+        }
+
+    async def test_gujarati_script_receives_gujarati_confirmation_note(self):
+        answer, _ = await self.run_crypto_turn(
+            self.unverified_provider_result(),
+            "BTC has a confirmed bullish BOS.",
+            "BTC demand zone બતાવો અને BOS check કરો",
+        )
+        self.assertIn("Binance કૅન્ડલની સ્વચાલિત ચકાસણી", answer)
+        self.assertIn("બધી 1 candle rows અચકાસેલી છે", answer)
+        self.assertIn("provisional છે, confirmed નથી", answer)
+
+    async def test_hindi_script_receives_hindi_confirmation_note(self):
+        answer, _ = await self.run_crypto_turn(
+            self.unverified_provider_result(),
+            "BTC has a confirmed bullish BOS.",
+            "BTC का demand zone बताओ और BOS जाँचो",
+        )
+        self.assertIn("स्वचालित Binance कैंडल जाँच", answer)
+        self.assertIn("सभी 1 candle rows unverified हैं", answer)
+        self.assertIn("provisional है, confirmed नहीं", answer)
+
+    async def test_hinglish_prompt_receives_hinglish_confirmation_note(self):
+        answer, _ = await self.run_crypto_turn(
+            self.unverified_provider_result(),
+            "BTC has a confirmed bullish BOS.",
+            "BTC ka demand zone batao, candle closed hai kya?",
+        )
+        self.assertIn("Binance candle check", answer)
+        self.assertIn("sabhi 1 candle rows unverified hain", answer)
+        self.assertIn("provisional hai, confirmed nahi", answer)
+
+    async def test_romanized_gujarati_prompt_receives_romanized_note(self):
+        answer, _ = await self.run_crypto_turn(
+            self.unverified_provider_result(),
+            "BTC has a confirmed bullish BOS.",
+            "BTC ma demand zone chhe? candle check karo",
+        )
+        self.assertIn("Binance candle ni automatic chakasani", answer)
+        self.assertIn("badhi 1 candle rows unverified chhe", answer)
+        self.assertIn("provisional chhe, confirmed nathi", answer)
+
+    def test_ambiguous_or_english_prompt_keeps_english_evidence_note(self):
+        self.assertEqual(_crypto_confirmation_language("Check BTC structure"), "en")
+        self.assertEqual(_crypto_confirmation_language("BTC 1H chart"), "en")
 
 
 
