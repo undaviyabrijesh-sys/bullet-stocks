@@ -431,6 +431,20 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "distinct from both annotators"):
             evaluate_benchmark_manifest(self.manifest)
 
+    def test_rejects_same_reviewer_for_both_annotations(self):
+        record = self._record()
+        record["adjudication_metadata"]["annotation_b"]["reviewer_id"] = "rev-002"
+        self._write(record)
+        with self.assertRaisesRegex(ValueError, "two distinct reviewer identities"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_rejects_second_reviewer_reusing_own_annotator_identity(self):
+        record = self._record()
+        record["adjudication_metadata"]["annotation_b"]["reviewer_id"] = "rev-003"
+        self._write(record)
+        with self.assertRaisesRegex(ValueError, "each reviewer identity must differ from its own annotator"):
+            evaluate_benchmark_manifest(self.manifest)
+
 
     def test_rejects_malformed_adjudication_decision_without_type_error(self):
         for decision in ([], {}):
