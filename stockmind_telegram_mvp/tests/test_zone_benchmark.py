@@ -998,6 +998,57 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         self.assertEqual(result["overall"]["true_positive"], 1)
         self.assertEqual(result["ignored_prediction_count"], 1)
 
+    def _v7_metadata(self, include_origin_policy=True):
+        settings = {
+            "temperature": 0.1,
+            "image_detail": "high",
+            "response_format": "json_schema:chart_zone_map",
+            "conversation_context": "caption_only",
+            "plot_bounds_policy": "required_for_overlay",
+            "confidence_policy": "high_medium_only",
+        }
+        if include_origin_policy:
+            settings["zone_origin_policy"] = "user_marked_only_when_visibly_marked"
+        return _prediction_metadata(prompt_version="dns-chart-v7", settings=settings)
+
+    def test_v7_metadata_requires_explicit_origin_policy(self):
+        record = self._record(prediction_metadata=self._v7_metadata(include_origin_policy=False))
+        self._write(record)
+        with self.assertRaisesRegex(ValueError, "zone_origin_policy"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_v7_manifest_rejects_missing_zone_origin(self):
+        record = self._record(prediction_metadata=self._v7_metadata())
+        self._write(record)
+        with self.assertRaisesRegex(ValueError, r"predicted_zones\\[0\\].origin"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_v7_manifest_rejects_label_that_conflicts_with_origin(self):
+        zone = _prediction(confidence="high", origin="ai_inferred", label="USER DEMAND")
+        record = self._record(
+            prediction_metadata=self._v7_metadata(),
+            predicted_zones=[zone],
+        )
+        self._write(record)
+        with self.assertRaisesRegex(ValueError, "label must match its origin"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_v7_manifest_accepts_derived_user_and_ai_labels(self):
+        zones = [
+            _prediction(confidence="high", origin="ai_inferred", label="AI DEMAND"),
+            _prediction("supply", confidence="medium", origin="user_marked", label="USER SUPPLY"),
+        ]
+        record = self._record(
+            prediction_metadata=self._v7_metadata(),
+            predicted_zones=zones,
+        )
+        self._write(record)
+        result = evaluate_benchmark_manifest(self.manifest)
+        self.assertEqual(result["fixture_count"], 1)
+        self.assertEqual(result["overall"]["predicted"], 2)
+        self.assertEqual(result["overall"]["true_positive"], 1)
+        self.assertEqual(result["overall"]["false_positive"], 1)
+
     def test_rejects_malformed_jsonl(self):
         self.manifest.write_text('{"fixture_id":\n', encoding="utf-8")
 
