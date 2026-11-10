@@ -208,3 +208,8 @@ These notes report candle closure only. Even when every model-visible candle
 is closed, the note explicitly does not treat that fact as proof of a BOS or
 CHOCH. When the sample is truncated, the note also discloses that limitation.
 
+
+
+## Independent annotation agreement
+
+See [ANNOTATION_AGREEMENT.md](ANNOTATION_AGREEMENT.md) for the offline tool that compares two independently approved manual annotations of the exact same screenshot before benchmark ground-truth adjudication.

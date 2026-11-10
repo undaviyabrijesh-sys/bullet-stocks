@@ -574,3 +574,116 @@ def evaluate_zone_predictions(
             predicted_zones, valid_predictions, all_matches
         ),
     }
+
+
+
+def evaluate_manual_annotation_agreement(
+    annotation_a_zones,
+    annotation_b_zones,
+    *,
+    iou_threshold=0.5,
+    image_width,
+    image_height,
+):
+    """Measure pairwise agreement between two independent manual zone sets.
+
+    This is an inter-annotator agreement measure, not AI detection accuracy.
+    Both sides are pixel-quantized using the same geometry as the chart
+    evaluator. Supply zones are matched only to supply zones and demand only
+    to demand. Matching maximizes qualifying one-to-one matches before total
+    IoU, using the same deterministic assignment rule as model evaluation.
+    """
+    for dimension, value in (("image_width", image_width), ("image_height", image_height)):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{dimension} must be a positive integer")
+    if isinstance(iou_threshold, bool) or not isinstance(iou_threshold, (int, float)):
+        raise ValueError("iou_threshold must be a number greater than 0 and at most 1")
+    try:
+        iou_threshold = float(iou_threshold)
+    except (OverflowError, TypeError, ValueError) as exc:
+        raise ValueError("iou_threshold must be a number greater than 0 and at most 1") from exc
+    if not math.isfinite(iou_threshold) or not 0 < iou_threshold <= 1:
+        raise ValueError("iou_threshold must be a number greater than 0 and at most 1")
+
+    normalized_sets = []
+    for label, zones in (("annotation_a_zones", annotation_a_zones), ("annotation_b_zones", annotation_b_zones)):
+        if not isinstance(zones, (list, tuple)):
+            raise ValueError(f"{label} must be a list")
+        if len(zones) > MAX_EVALUATED_ZONES:
+            raise ValueError(f"{label} cannot exceed {MAX_EVALUATED_ZONES} entries")
+        records = []
+        for index, zone in enumerate(zones):
+            if not isinstance(zone, dict) or zone.get("zone_type") not in ZONE_TYPES:
+                raise ValueError(f"{label}[{index}] has an invalid zone_type")
+            try:
+                validated = _valid_box(
+                    zone, prediction=False, image_width=image_width, image_height=image_height
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(f"{label}[{index}] has invalid geometry: {exc}") from exc
+            if validated is None:
+                raise ValueError(f"{label}[{index}] has invalid geometry")
+            box, pixel_aligned_zone = validated
+            records.append({
+                "index": index,
+                "zone_type": zone["zone_type"],
+                "box": box,
+                "zone": pixel_aligned_zone,
+            })
+        normalized_sets.append(records)
+
+    records_a, records_b = normalized_sets
+
+    def summarize(first, second, matches):
+        metrics = _metrics(first, second, matches)
+        return {
+            "annotator_a_zone_count": metrics["predicted"],
+            "annotator_b_zone_count": metrics["reference"],
+            "matched_zone_count": metrics["true_positive"],
+            "unmatched_a_zone_count": metrics["false_positive"],
+            "unmatched_b_zone_count": metrics["false_negative"],
+            "annotator_a_coverage": metrics["precision"],
+            "annotator_b_coverage": metrics["recall"],
+            "agreement_f1": metrics["f1"],
+            "mean_matched_iou": metrics["mean_iou"],
+            "mean_center_error_normalized": metrics["mean_center_error_normalized"],
+        }
+
+    by_type = {}
+    all_matches = []
+    for zone_type in ("supply", "demand"):
+        first = [zone for zone in records_a if zone["zone_type"] == zone_type]
+        second = [zone for zone in records_b if zone["zone_type"] == zone_type]
+        local_matches = _match(first, second, iou_threshold)
+        matches = []
+        for first_index, second_index, score in local_matches:
+            first_zone = first[first_index]
+            second_zone = second[second_index]
+            first_center = (
+                (first_zone["box"][0] + first_zone["box"][2]) / 2,
+                (first_zone["box"][1] + first_zone["box"][3]) / 2,
+            )
+            second_center = (
+                (second_zone["box"][0] + second_zone["box"][2]) / 2,
+                (second_zone["box"][1] + second_zone["box"][3]) / 2,
+            )
+            matches.append({
+                "annotator_a_index": first_zone["index"],
+                "annotator_b_index": second_zone["index"],
+                "zone_type": zone_type,
+                "iou": score,
+                "center_error_normalized": math.hypot(
+                    first_center[0] - second_center[0],
+                    first_center[1] - second_center[1],
+                ),
+            })
+        by_type[zone_type] = summarize(first, second, matches)
+        all_matches.extend(matches)
+
+    overall = summarize(records_a, records_b, all_matches)
+    return {
+        "iou_threshold": iou_threshold,
+        **overall,
+        "by_zone_type": by_type,
+        "matches": sorted(all_matches, key=lambda item: item["annotator_a_index"]),
+    }
