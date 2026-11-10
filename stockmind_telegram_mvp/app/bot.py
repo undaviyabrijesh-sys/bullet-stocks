@@ -14,6 +14,7 @@ from .overlay_engine import prepare_chart_image, _render_overlay_prepared
 from .image_upload import BoundedBytesIO, UploadTooLargeError
 from .telegram_delivery import send_analysis_text, send_overlay_photo
 from .user_locks import UserLockRegistry
+from .localization import LANGUAGE_NAMES, normalize_language, resolve_language, translate
 from .config import (
     BETA_USER_LIMIT,
     DAILY_QUERY_LIMIT,
@@ -51,9 +52,11 @@ user_locks = UserLockRegistry()
 usage = defaultdict(int)
 usage_day = {}
 beta_users = set()
+# Explicit UI language choices are process-local, like the prototype beta state.
+user_languages = {}
 
 
-def _overlay_unavailable_note(chart_result: dict, drawn_count: int) -> str:
+def _overlay_unavailable_note(chart_result: dict, drawn_count: int, language: str = "en") -> str:
     """Explain why an otherwise successful chart analysis has no overlay."""
     if drawn_count:
         return ""
@@ -61,41 +64,22 @@ def _overlay_unavailable_note(chart_result: dict, drawn_count: int) -> str:
     plot_bounds = chart_result.get("plot_bounds")
     zones = chart_result.get("zones")
     if not isinstance(plot_bounds, dict):
-        return (
-            "\n\nI could not locate the main price-plot boundary confidently, "
-            "so I withheld all overlays. Keep the full candle panel and its edges "
-            "visible in the screenshot."
-        )
+        return translate(language, "overlay_plot_missing")
 
     if not isinstance(zones, (list, tuple)) or not zones:
-        return (
-            "\n\nNo distinct supply/demand zone was returned from the visible "
-            "chart. This does not prove that no zone exists; cropped history or "
-            "unclear candles may hide it."
-        )
+        return translate(language, "overlay_no_zone")
 
     zone_objects = [zone for zone in zones if isinstance(zone, dict)]
     if not zone_objects:
-        return (
-            "\n\nThe chart response contained no valid zone objects, so no "
-            "overlay was drawn. Verify the written analysis against the screenshot."
-        )
+        return translate(language, "overlay_invalid_zone_objects")
 
     drawable_candidates = [
         zone for zone in zone_objects if zone.get("draw_overlay") is True
     ]
     if not drawable_candidates:
-        return (
-            "\n\nThe analysis lists candidate areas, but none had geometry "
-            "approved for drawing. Verify the written descriptions against the "
-            "original screenshot; no overlay was guessed."
-        )
+        return translate(language, "overlay_not_drawable")
 
-    return (
-        "\n\nThe model supplied zone coordinates, but none passed the final "
-        "pixel-size and plot-boundary checks. No overlay was drawn; use a sharper, "
-        "uncropped screenshot and verify the written analysis."
-    )
+    return translate(language, "overlay_renderer_rejected")
 
 
 def _admit_beta_user(user_id: int) -> bool:
@@ -124,41 +108,39 @@ def _consume_daily_query(user_id: int, today: str) -> bool:
     return True
 
 
-def _research_admission_error(user_id: int) -> str | None:
+def _research_admission_error(user_id: int, language: str = "en") -> str | None:
     """Return a non-consuming beta/quota rejection before expensive image work.
 
     This is only an early preflight: _admit_beta_user and
     _consume_daily_query remain the authoritative checks after image validation.
     """
     if user_id not in beta_users and len(beta_users) >= BETA_USER_LIMIT:
-        return "The 10-person beta is currently full. Please try again later."
+        return translate(language, "beta_full")
 
     today = datetime.now(IST).date().isoformat()
     if usage_day.get(user_id) == today and usage.get(user_id, 0) >= DAILY_QUERY_LIMIT:
-        return "You've reached today's beta research limit. It resets at midnight IST."
+        return translate(language, "daily_limit")
     return None
 
 
 bot = Bot(TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
-WELCOME = (
-    "👋 Welcome to StockMind AI Beta!\n\n"
-    "Ask about Indian stocks and crypto in English, Hinglish, Hindi, Gujarati or mixed language.\n\n"
-    "You can also upload a chart screenshot for Demand & Supply (DNS), fresh/mitigated zones, "
-    "BOS/CHOCH and liquidity analysis. When a zone is clear, I return an annotated copy with "
-    "red supply and green demand bands.\n\n"
-    "Examples:\n"
-    "• Analyse Reliance fundamentals\n"
-    "• Bhai HDFC Bank ka kya scene hai?\n"
-    "• BTC 1H chart par demand supply draw karo\n"
-    "• Is this demand zone fresh or mitigated?\n"
-    "• Compare TCS and Infosys\n\n"
-    "For chart screenshots, keep the price scale and timeframe visible. Add symbol, exchange "
-    "and timeframe in your caption when they are not shown. Visual price levels may be estimates.\n\n"
-    "I provide research, not trade execution or guaranteed buy/sell calls.\n"
-    "Beta limit: 10 research questions per day."
-)
+WELCOME = translate("en", "welcome")
+
+
+def _language_for(message: Message) -> str:
+    user = getattr(message, "from_user", None)
+    if user is None:
+        return "en"
+    return resolve_language(
+        user_languages.get(user.id),
+        getattr(user, "language_code", None),
+    )
+
+
+def _ui(message: Message, key: str, **values) -> str:
+    return translate(_language_for(message), key, **values)
 
 
 async def run_research(
@@ -186,7 +168,8 @@ async def _run_research_locked(
         return
 
     user_id = user.id
-    admission_error = _research_admission_error(user_id)
+    language = _language_for(message)
+    admission_error = _research_admission_error(user_id, language)
     if admission_error:
         await message.answer(admission_error)
         return
@@ -203,18 +186,18 @@ async def _run_research_locked(
             return
 
     if not _admit_beta_user(user_id):
-        await message.answer("The 10-person beta is currently full. Please try again later.")
+        await message.answer(translate(language, "beta_full"))
         return
 
     today = datetime.now(IST).date().isoformat()
     if not _consume_daily_query(user_id, today):
-        await message.answer("You've reached today's beta research limit. It resets at midnight IST.")
+        await message.answer(translate(language, "daily_limit"))
         return
     try:
         status = await message.answer(
-            "🖼️ Reading the chart and mapping visible structure…"
+            translate(language, "progress_chart")
             if image_bytes is not None
-            else "🔎 Understanding your question and checking market data…"
+            else translate(language, "progress_research")
         )
     except Exception:
         # A progress-message failure should not prevent the research itself.
@@ -226,7 +209,7 @@ async def _run_research_locked(
             chart_result = await research.analyze_chart_image(
                 list(histories[user_id]), user_text, image_bytes, image_mime_type
             )
-            answer = chart_result.get("analysis") or "I could not read the chart reliably."
+            answer = chart_result.get("analysis") or translate(language, "chart_analysis_fallback")
             overlay_render_failed = False
             try:
                 overlay_image, drawn_count = _render_overlay_prepared(
@@ -242,11 +225,10 @@ async def _run_research_locked(
 
             if overlay_render_failed:
                 answer += (
-                    "\n\nThe chart analysis completed, but I couldn't render the overlay. "
-                    "Please verify the described zones against the original screenshot."
+                    translate(language, "overlay_render_failed")
                 )
             elif not drawn_count:
-                answer += _overlay_unavailable_note(chart_result, drawn_count)
+                answer += _overlay_unavailable_note(chart_result, drawn_count, language)
         else:
             answer = await research.answer(list(histories[user_id]), user_text)
 
@@ -258,29 +240,18 @@ async def _run_research_locked(
     except ResearchTurnDeadlineExceeded as exc:
         if image_bytes is not None:
             failure_message = (
-                "I stopped this chart analysis after its "
-                f"{exc.timeout_seconds:g}-second time budget expired. "
-                "No completed zone analysis or overlay was produced. "
-                "Please retry; this request was not treated as a successful analysis."
+                translate(language, "chart_timeout", seconds=exc.timeout_seconds)
             )
         else:
             failure_message = (
-                "I stopped this research turn after its "
-                f"{exc.timeout_seconds:g}-second time budget expired. "
-                "No completed research answer was produced. A provider request may already "
-                "have been received; no further model or market-data calls were started. "
-                "Please retry with a narrower question."
+                translate(language, "research_timeout", seconds=exc.timeout_seconds)
             )
         if not await send_analysis_text(message, status, failure_message):
             logger.warning("StockMind research deadline expired and Telegram could not deliver the timeout message")
         return
     except Exception:
         logger.exception("StockMind research request failed")
-        failure_message = (
-            "I couldn't complete this analysis right now. For screenshots, check that "
-            "OPENAI_VISION_MODEL is set to a vision-capable model and try again. "
-            "No missing price level or market figure has been guessed."
-        )
+        failure_message = translate(language, "research_failed")
         if not await send_analysis_text(message, status, failure_message):
             logger.warning("StockMind research failed and Telegram could not deliver the error message")
         return
@@ -296,8 +267,7 @@ async def _run_research_locked(
             message,
             overlay_image,
             caption=(
-                "StockMind AI visual zone overlay — estimated from this screenshot; "
-                "verify against the chart price scale."
+                translate(language, "overlay_caption")
             ),
         )
         if not delivered:
@@ -307,10 +277,44 @@ async def _run_research_locked(
 @dp.message(CommandStart())
 async def start(message: Message):
     user_id = message.from_user.id
+    language = _language_for(message)
     if not _admit_beta_user(user_id):
-        await message.answer("The 10-person beta is currently full. Please try again later.")
+        await message.answer(translate(language, "beta_full"))
         return
-    await message.answer(WELCOME)
+    await message.answer(translate(language, "welcome"))
+
+
+
+@dp.message(Command("language", "lang"))
+async def set_language(message: Message):
+    user = message.from_user
+    if user is None:
+        return
+    current = _language_for(message)
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) == 1:
+        await message.answer(
+            translate(
+                current,
+                "language_help",
+                language_name=LANGUAGE_NAMES[current],
+            )
+        )
+        return
+
+    requested = normalize_language(parts[1])
+    if requested is None:
+        await message.answer(translate(current, "language_invalid"))
+        return
+
+    user_languages[user.id] = requested
+    await message.answer(
+        translate(
+            requested,
+            "language_changed",
+            language_name=LANGUAGE_NAMES[requested],
+        )
+    )
 
 
 @dp.message(Command("reset"))
@@ -321,14 +325,14 @@ async def reset(message: Message):
         history = histories.get(user_id)
         if history is not None:
             history.clear()
-    await message.answer("Conversation context cleared. Ask a new research question.")
+    await message.answer(_ui(message, "reset_done"))
 
 
 @dp.message(F.photo)
 async def handle_chart_photo(message: Message):
     photo = message.photo[-1]
     if photo.file_size and photo.file_size > MAX_CHART_IMAGE_BYTES:
-        await message.answer("That screenshot is too large. Please send an image under 5 MB.")
+        await message.answer(_ui(message, "upload_too_large"))
         return
 
     if message.from_user is not None:
@@ -345,19 +349,16 @@ async def handle_chart_photo(message: Message):
         await bot.download_file(telegram_file.file_path, destination=buffer)
         image_bytes = buffer.getvalue()
         if len(image_bytes) > MAX_CHART_IMAGE_BYTES:
-            await message.answer("That screenshot is too large. Please send an image under 5 MB.")
+            await message.answer(_ui(message, "upload_too_large"))
             return
     except UploadTooLargeError:
         await message.answer("That screenshot is too large. Please send an image under 5 MB.")
         return
     except Exception:
-        await message.answer("I couldn't download that screenshot. Please send it again.")
+        await message.answer(_ui(message, "upload_download_failed"))
         return
 
-    caption = message.caption or (
-        "Please analyse this chart screenshot for Demand and Supply zones, structure and "
-        "conditional setups. Tell me if the symbol or timeframe is not visible."
-    )
+    caption = message.caption or _ui(message, "chart_caption_default")
     await run_research(message, caption, image_bytes, "image/jpeg")
 
 
@@ -366,10 +367,10 @@ async def handle_chart_document(message: Message):
     document = message.document
     mime_type = document.mime_type or ""
     if mime_type not in ALLOWED_IMAGE_TYPES:
-        await message.answer("Please attach a chart as a photo or as a JPEG, PNG or WEBP image file.")
+        await message.answer(_ui(message, "unsupported_document"))
         return
     if document.file_size and document.file_size > MAX_CHART_IMAGE_BYTES:
-        await message.answer("That image is too large. Please send an image under 5 MB.")
+        await message.answer(_ui(message, "upload_too_large"))
         return
 
     if message.from_user is not None:
@@ -386,19 +387,16 @@ async def handle_chart_document(message: Message):
         await bot.download_file(telegram_file.file_path, destination=buffer)
         image_bytes = buffer.getvalue()
         if len(image_bytes) > MAX_CHART_IMAGE_BYTES:
-            await message.answer("That image is too large. Please send an image under 5 MB.")
+            await message.answer(_ui(message, "upload_too_large"))
             return
     except UploadTooLargeError:
-        await message.answer("That image is too large. Please send an image under 5 MB.")
+        await message.answer(_ui(message, "upload_too_large"))
         return
     except Exception:
-        await message.answer("I couldn't download that image. Please send it again.")
+        await message.answer(_ui(message, "upload_download_failed"))
         return
 
-    caption = message.caption or (
-        "Please analyse this chart screenshot for Demand and Supply zones, structure and "
-        "conditional setups. Tell me if the symbol or timeframe is not visible."
-    )
+    caption = message.caption or _ui(message, "chart_caption_default")
     await run_research(message, caption, image_bytes, mime_type)
 
 
@@ -409,10 +407,7 @@ async def handle_text(message: Message):
 
 @dp.message()
 async def unsupported(message: Message):
-    await message.answer(
-        "Please send a text question or upload a chart screenshot as a photo/image. "
-        "Voice support can be added separately."
-    )
+    await message.answer(_ui(message, "unsupported_message"))
 
 
 async def main():
