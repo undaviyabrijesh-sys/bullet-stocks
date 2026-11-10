@@ -487,6 +487,7 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
         "overall": result["overall"],
         "by_zone_type": result["by_zone_type"],
         "ignored_prediction_count": result["ignored_prediction_count"],
+        "confidence_stratified_results": result["confidence_stratified_results"],
         "matches": result["matches"],
         "price_accuracy": result["price_accuracy"],
         "plot_boundary_accuracy": result["plot_boundary_accuracy"],
@@ -517,6 +518,42 @@ def _aggregate_metrics(rows, matches):
             if matches else None
         ),
     }
+
+
+_CONFIDENCE_GROUPS = ("high", "medium", "low", "not_reported_or_invalid")
+
+
+def _aggregate_confidence_stratified_results(fixtures):
+    """Aggregate confidence evidence from per-fixture drawable predictions."""
+    if not fixtures or any("confidence_stratified_results" not in fixture for fixture in fixtures):
+        return None
+
+    result = {}
+    for level in _CONFIDENCE_GROUPS:
+        rows = [fixture["confidence_stratified_results"][level] for fixture in fixtures]
+        matches = [
+            match
+            for fixture in fixtures
+            for match in fixture["matches"]
+            if match.get("confidence_group") == level
+        ]
+        candidate_count = sum(row["candidate_count"] for row in rows)
+        drawable_count = sum(row["drawable_count"] for row in rows)
+        matched_count = sum(row["matched_count"] for row in rows)
+        result[level] = {
+            "candidate_count": candidate_count,
+            "drawable_count": drawable_count,
+            "matched_count": matched_count,
+            "false_positive_count": drawable_count - matched_count,
+            "suppressed_or_invalid_count": candidate_count - drawable_count,
+            "precision": matched_count / drawable_count if drawable_count else None,
+            "mean_iou": _finite_mean([match["iou"] for match in matches]),
+            "mean_center_error_normalized": _finite_mean(
+                [match["center_error_normalized"] for match in matches]
+            ),
+            "geometry_scored": level != "low" and drawable_count > 0,
+        }
+    return result
 
 
 def _aggregate_macro_metrics(rows):
@@ -725,6 +762,7 @@ def evaluate_benchmark_manifest(manifest_path, *, max_image_bytes=DEFAULT_MAX_IM
         "ignored_prediction_count": sum(
             fixture["ignored_prediction_count"] for fixture in fixtures
         ),
+        "confidence_stratified_results": _aggregate_confidence_stratified_results(fixtures),
         "overall": _aggregate_metrics(overall_rows, all_matches),
         "macro_overall": _aggregate_macro_metrics(overall_rows),
         "by_zone_type": by_zone_type,
