@@ -115,7 +115,7 @@ def _price_axis_agreement(first, second, *, sample_count=11):
         "status": "compared",
         **result,
         "sample_count": sample_count,
-        "mean_absolute_price_disagreement": math.fsum(absolute_errors) / sample_count,
+        "mean_absolute_price_disagreement": math.fsum(value / sample_count for value in absolute_errors),
         "max_absolute_price_disagreement": max(absolute_errors),
         "mean_relative_price_disagreement": math.fsum(relative_errors) / sample_count,
         "max_relative_price_disagreement": max(relative_errors),
