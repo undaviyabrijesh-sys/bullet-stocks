@@ -64,6 +64,47 @@ def _annotation_metadata(**overrides):
     return value
 
 
+def _adjudication_metadata(fixture_id, image_hash, width, height, context, annotation):
+    annotation_a = {
+        "file_sha256": "c" * 64,
+        "annotator_id": annotation["annotator_id"],
+        "reviewer_id": annotation["reviewer_id"],
+        "reviewed_at": annotation["reviewed_at"],
+    }
+    annotation_b = {
+        "file_sha256": "d" * 64,
+        "annotator_id": "ann-003",
+        "reviewer_id": "rev-004",
+        "reviewed_at": "2026-11-05T19:20:00Z",
+    }
+    report = {
+        "report_schema": "stockmind.annotation-agreement.v1",
+        "fixture_id": fixture_id,
+        "image_sha256": image_hash,
+        "image_width": width,
+        "image_height": height,
+        "market_context": context,
+        "guideline_version": annotation["guideline_version"],
+        "annotator_ids": [annotation_a["annotator_id"], annotation_b["annotator_id"]],
+        "reviewer_ids": [annotation_a["reviewer_id"], annotation_b["reviewer_id"]],
+    }
+    report_hash = hashlib.sha256(
+        json.dumps(report, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    ).hexdigest()
+    return {
+        "schema": "stockmind.annotation-adjudication.v1",
+        "decision": "accept_a",
+        "selected_annotation": "a",
+        "adjudicator_id": "adj-999",
+        "adjudicated_at": "2026-11-05T19:30:00Z",
+        "rationale": "The selected annotation follows the agreed zone-boundary guideline after review.",
+        "annotation_a": annotation_a,
+        "annotation_b": annotation_b,
+        "agreement_report": report,
+        "agreement_report_sha256": report_hash,
+    }
+
+
 def _market_context(**overrides):
     value = {
         "asset_class": "crypto",
@@ -122,6 +163,7 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
             "annotation_metadata": _annotation_metadata(),
         }
         record.update(overrides)
+        record.setdefault("market_context", _market_context())
         # Only ordinary fixtures get a convenient full-image plot. Preserve
         # one-sided explicit bounds so tests can exercise missing-model and
         # missing-manual-reference validation paths.
@@ -139,6 +181,15 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
             and "price_axis_plot_bounds" in record
         ):
             record["reference_plot_bounds"] = record["price_axis_plot_bounds"]
+        if "adjudication_metadata" not in overrides:
+            record["adjudication_metadata"] = _adjudication_metadata(
+                fixture_id,
+                record["image_sha256"],
+                record["image_width"],
+                record["image_height"],
+                record["market_context"],
+                record["annotation_metadata"],
+            )
         return record
 
     def _write(self, *records):
@@ -333,6 +384,34 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         self._write(record)
 
         with self.assertRaisesRegex(ValueError, "prediction_metadata"):
+            evaluate_benchmark_manifest(self.manifest)
+
+
+    def test_rejects_missing_independent_adjudication_metadata(self):
+        record = self._record()
+        del record["adjudication_metadata"]
+        self._write(record)
+        with self.assertRaisesRegex(ValueError, "adjudication_metadata"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_rejects_tampered_pairwise_agreement_report(self):
+        record = self._record()
+        record["adjudication_metadata"]["agreement_report"]["fixture_id"] = "other-chart"
+        record["adjudication_metadata"]["agreement_report_sha256"] = hashlib.sha256(
+            json.dumps(
+                record["adjudication_metadata"]["agreement_report"],
+                sort_keys=True, separators=(",", ":"), allow_nan=False
+            ).encode("utf-8")
+        ).hexdigest()
+        self._write(record)
+        with self.assertRaisesRegex(ValueError, "agreement_report.fixture_id"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_rejects_adjudicator_reusing_an_annotation_identity(self):
+        record = self._record()
+        record["adjudication_metadata"]["adjudicator_id"] = "adj-001"
+        self._write(record)
+        with self.assertRaisesRegex(ValueError, "distinct from both annotators"):
             evaluate_benchmark_manifest(self.manifest)
 
     def test_rejects_non_manual_annotation_source(self):
