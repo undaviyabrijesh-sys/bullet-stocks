@@ -160,7 +160,7 @@ class AnnotationAgreementTests(unittest.TestCase):
         path_b = self._make_reviewed(
             "shared-reviewer", _png_bytes(), "ann-017", "rev-101", [ZONE], PLOT
         )
-        with self.assertRaisesRegex(ValueError, "different reviewer_id"):
+        with self.assertRaisesRegex(ValueError, "two distinct reviewer identities"):
             compare_reviewed_annotations(self.path_a, path_b)
 
     def test_empty_annotation_sets_are_not_reported_as_perfect_agreement(self):
