@@ -38,6 +38,24 @@ def _bottom_panel_area(box, reference):
     return max(0, right - left) * max(0, bottom - top)
 
 
+def _left_margin_area(box, reference):
+    """Area extending left of the reference plot, within its vertical span."""
+    left = box[0]
+    right = min(box[2], reference[0])
+    top = max(box[1], reference[1])
+    bottom = min(box[3], reference[3])
+    return max(0, right - left) * max(0, bottom - top)
+
+
+def _top_controls_area(box, reference):
+    """Area extending above the reference plot, within its horizontal span."""
+    left = max(box[0], reference[0])
+    right = min(box[2], reference[2])
+    top = box[1]
+    bottom = min(box[3], reference[1])
+    return max(0, right - left) * max(0, bottom - top)
+
+
 def _percent(numerator, denominator):
     return 100.0 * numerator / denominator if denominator else None
 
@@ -125,6 +143,8 @@ def build_plot_boundary_accuracy(
     plot_outside_pct = None
     right_plot_pct = None
     bottom_plot_pct = None
+    left_plot_pct = None
+    top_plot_pct = None
     if predicted_box is not None:
         predicted_area = _area(predicted_box)
         intersection = _intersection_area(predicted_box, reference_box)
@@ -137,6 +157,12 @@ def build_plot_boundary_accuracy(
         )
         bottom_plot_pct = _percent(
             _bottom_panel_area(predicted_box, reference_box), predicted_area
+        )
+        left_plot_pct = _percent(
+            _left_margin_area(predicted_box, reference_box), predicted_area
+        )
+        top_plot_pct = _percent(
+            _top_controls_area(predicted_box, reference_box), predicted_area
         )
         edge_px = {
             "left": abs(predicted_box[0] - reference_box[0]),
@@ -156,6 +182,8 @@ def build_plot_boundary_accuracy(
     outside_area = 0
     right_zone_area = 0
     bottom_zone_area = 0
+    left_zone_area = 0
+    top_zone_area = 0
     for item in normalized_zone_boxes:
         box = item["box_px"]
         area = _area(box)
@@ -167,6 +195,8 @@ def build_plot_boundary_accuracy(
         outside_area += outside
         right_zone_area += _right_margin_area(box, reference_box)
         bottom_zone_area += _bottom_panel_area(box, reference_box)
+        left_zone_area += _left_margin_area(box, reference_box)
+        top_zone_area += _top_controls_area(box, reference_box)
 
     total_zone_area = sum(zone_areas)
     zone_count = len(normalized_zone_boxes)
@@ -182,12 +212,16 @@ def build_plot_boundary_accuracy(
         "predicted_plot_outside_reference_pct": plot_outside_pct,
         "right_margin_overlap_pct": right_plot_pct,
         "bottom_panel_overlap_pct": bottom_plot_pct,
+        "left_toolbar_overlap_pct": left_plot_pct,
+        "top_controls_overlap_pct": top_plot_pct,
         "predicted_zone_count": zone_count,
         "zones_outside_reference_plot_count": zone_outside_count,
         "zones_outside_reference_plot_pct": _percent(zone_outside_count, zone_count),
         "predicted_zone_area_outside_reference_pct": _percent(outside_area, total_zone_area),
         "right_margin_zone_area_pct": _percent(right_zone_area, total_zone_area),
         "bottom_panel_zone_area_pct": _percent(bottom_zone_area, total_zone_area),
+        "left_toolbar_zone_area_pct": _percent(left_zone_area, total_zone_area),
+        "top_controls_zone_area_pct": _percent(top_zone_area, total_zone_area),
         "zone_boxes_px": normalized_zone_boxes,
     }
 
@@ -276,6 +310,12 @@ def aggregate_plot_boundary_accuracy(fixtures):
         "mean_bottom_panel_overlap_pct": _mean([
             row["bottom_panel_overlap_pct"] for row in scored
         ]),
+        "mean_left_toolbar_overlap_pct": _mean([
+            row["left_toolbar_overlap_pct"] for row in scored
+        ]),
+        "mean_top_controls_overlap_pct": _mean([
+            row["top_controls_overlap_pct"] for row in scored
+        ]),
         "predicted_zone_count": predicted_count,
         "zones_outside_reference_plot_count": outside_count,
         "zones_outside_reference_plot_pct": _percent(outside_count, predicted_count),
@@ -287,6 +327,12 @@ def aggregate_plot_boundary_accuracy(fixtures):
         ]),
         "mean_bottom_panel_zone_area_pct": _mean([
             row["bottom_panel_zone_area_pct"] for row in zone_rows
+        ]),
+        "mean_left_toolbar_zone_area_pct": _mean([
+            row["left_toolbar_zone_area_pct"] for row in zone_rows
+        ]),
+        "mean_top_controls_zone_area_pct": _mean([
+            row["top_controls_zone_area_pct"] for row in zone_rows
         ]),
     }
 
@@ -303,10 +349,12 @@ def compare_plot_boundary_accuracy(baseline, candidate):
         scalar_fields = (
             "plot_iou", "predicted_plot_outside_reference_pct",
             "right_margin_overlap_pct", "bottom_panel_overlap_pct",
+            "left_toolbar_overlap_pct", "top_controls_overlap_pct",
             "predicted_zone_count", "zones_outside_reference_plot_count",
             "zones_outside_reference_plot_pct",
             "predicted_zone_area_outside_reference_pct",
             "right_margin_zone_area_pct", "bottom_panel_zone_area_pct",
+            "left_toolbar_zone_area_pct", "top_controls_zone_area_pct",
         )
         edge_field = "edge_displacement_normalized"
     else:
@@ -314,10 +362,12 @@ def compare_plot_boundary_accuracy(baseline, candidate):
             "fixture_count", "scored_fixture_count", "missing_prediction_count",
             "invalid_prediction_count", "mean_plot_iou",
             "mean_predicted_plot_outside_reference_pct", "mean_right_margin_overlap_pct",
-            "mean_bottom_panel_overlap_pct", "predicted_zone_count",
+            "mean_bottom_panel_overlap_pct", "mean_left_toolbar_overlap_pct",
+            "mean_top_controls_overlap_pct", "predicted_zone_count",
             "zones_outside_reference_plot_count", "zones_outside_reference_plot_pct",
             "mean_predicted_zone_area_outside_reference_pct",
             "mean_right_margin_zone_area_pct", "mean_bottom_panel_zone_area_pct",
+            "mean_left_toolbar_zone_area_pct", "mean_top_controls_zone_area_pct",
         )
         edge_field = "mean_edge_displacement_normalized"
 
