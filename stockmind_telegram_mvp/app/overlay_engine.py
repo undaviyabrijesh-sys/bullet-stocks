@@ -167,6 +167,15 @@ def normalized_zone_to_pixel_box(
         return None
     if require_draw_overlay and zone.get("draw_overlay") is not True:
         return None
+    if require_draw_overlay:
+        # New chart responses carry qualitative confidence. Low or malformed
+        # confidence must never reach the renderer; missing confidence remains
+        # accepted here only for legacy/offline geometry callers.
+        confidence = zone.get("confidence")
+        if confidence is not None and (
+            not isinstance(confidence, str) or confidence not in {"high", "medium"}
+        ):
+            return None
     if (
         isinstance(width, bool) or not isinstance(width, int) or width <= 0
         or isinstance(height, bool) or not isinstance(height, int) or height <= 0

@@ -123,7 +123,7 @@ Use this response structure:
 The user may ask in English, Hinglish, Hindi, Gujarati or mixed language. Reply in their style.
 """
 
-CHART_PROMPT_VERSION = "dns-chart-v5"
+CHART_PROMPT_VERSION = "dns-chart-v6"
 CHART_IMAGE_INSTRUCTIONS = """
 Return structured JSON. First identify plot_bounds: the visible main price-candle plotting
 rectangle, excluding the price scale, toolbars, legends and separate indicator/volume panels.
@@ -143,6 +143,11 @@ zone range in the prose when its structured price pair is null. Never infer pric
 coordinates without a readable scale.
 Return at most 8 distinct zones. The text analysis must explain that the overlay is an estimate
 and needs visual verification.
+
+Each zone must include qualitative confidence: high, medium or low. Confidence is a visual-evidence
+category, not a probability or calibrated accuracy score. Set draw_overlay=true only for high or
+medium confidence. A low-confidence candidate may be described in prose, but it must have
+draw_overlay=false and all four coordinates set to zero.
 """
 def build_chart_prediction_metadata(response, requested_model, settings):
     """Capture provider-returned model/time metadata without guessing missing values."""
@@ -206,9 +211,10 @@ CHART_RESPONSE_FORMAT = {
                     "items": {
                         "type": "object",
                         "additionalProperties": False,
-                        "required": ["zone_type", "label", "price_low", "price_high", "x_start", "x_end", "y_top", "y_bottom", "draw_overlay"],
+                        "required": ["zone_type", "confidence", "label", "price_low", "price_high", "x_start", "x_end", "y_top", "y_bottom", "draw_overlay"],
                         "properties": {
                             "zone_type": {"type": "string", "enum": ["supply", "demand"]},
+                            "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
                             "label": {"type": "string"},
                             "price_low": {"type": ["string", "null"]},
                             "price_high": {"type": ["string", "null"]},
@@ -497,6 +503,10 @@ def sanitize_chart_analysis(data: dict) -> dict:
         if not isinstance(zone_type, str) or zone_type not in {"supply", "demand"}:
             continue
 
+        confidence = zone.get("confidence")
+        if not isinstance(confidence, str) or confidence not in {"high", "medium", "low"}:
+            confidence = "low"
+
         label = zone.get("label")
         if not isinstance(label, str) or not label.strip():
             label = zone_type.upper()
@@ -518,7 +528,11 @@ def sanitize_chart_analysis(data: dict) -> dict:
             zone.get("y_top"), zone.get("y_bottom"),
         ]
         coordinates_valid = all(_is_normalized_coordinate(value) for value in raw_coordinates)
-        draw_overlay = zone.get("draw_overlay") is True and coordinates_valid
+        draw_overlay = (
+            zone.get("draw_overlay") is True
+            and coordinates_valid
+            and confidence in {"high", "medium"}
+        )
         if draw_overlay:
             x_start, x_end, y_top, y_bottom = map(float, raw_coordinates)
             draw_overlay = (
@@ -539,6 +553,7 @@ def sanitize_chart_analysis(data: dict) -> dict:
 
         safe_zones.append({
             "zone_type": zone_type,
+            "confidence": confidence,
             "label": label.strip()[:64],
             "price_low": price_low[:32] if price_low is not None else None,
             "price_high": price_high[:32] if price_high is not None else None,
@@ -1138,6 +1153,7 @@ class ResearchAI:
             "response_format": "json_schema:chart_zone_map",
             "conversation_context": CHART_CONTEXT_POLICY,
             "plot_bounds_policy": "required_for_overlay",
+            "confidence_policy": "high_medium_only",
         }
         request_options = {
             "model": self.vision_model,

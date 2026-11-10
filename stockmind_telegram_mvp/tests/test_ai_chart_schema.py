@@ -26,6 +26,7 @@ def payload(zones, **overrides):
 def zone(**overrides):
     value = {
         "zone_type": "demand",
+        "confidence": "high",
         "label": "Demand base",
         "price_low": "100",
         "price_high": "105",
@@ -51,6 +52,30 @@ class ChartResponseValidationTests(unittest.TestCase):
         self.assertTrue(result["zones"][0]["draw_overlay"])
         self.assertEqual(result["zones"][0]["x_start"], 0.2)
         self.assertEqual(result["plot_bounds"], PLOT_BOUNDS)
+
+    def test_low_confidence_candidate_is_kept_but_never_drawn(self):
+        result = sanitize_chart_analysis(payload([zone(confidence="low")]))
+        item = result["zones"][0]
+        self.assertEqual(item["confidence"], "low")
+        self.assertFalse(item["draw_overlay"])
+        self.assertEqual(
+            [item["x_start"], item["x_end"], item["y_top"], item["y_bottom"]],
+            [0.0, 0.0, 0.0, 0.0],
+        )
+
+    def test_missing_or_invalid_confidence_fails_closed(self):
+        missing = zone()
+        missing.pop("confidence")
+        for candidate in (missing, zone(confidence="certain"), zone(confidence=[])):
+            with self.subTest(candidate=candidate):
+                item = sanitize_chart_analysis(payload([candidate]))["zones"][0]
+                self.assertEqual(item["confidence"], "low")
+                self.assertFalse(item["draw_overlay"])
+
+    def test_medium_confidence_candidate_remains_drawable(self):
+        item = sanitize_chart_analysis(payload([zone(confidence="medium")]))["zones"][0]
+        self.assertEqual(item["confidence"], "medium")
+        self.assertTrue(item["draw_overlay"])
 
     def test_disables_overlay_for_out_of_range_or_non_finite_coordinates(self):
         invalid_zones = [
@@ -194,11 +219,13 @@ class ChartResponseValidationTests(unittest.TestCase):
         self.assertNotIn("Numeric price bounds were withheld", result["analysis"])
 
     def test_chart_prompt_requires_ordered_price_bounds_and_bumps_version(self):
-        self.assertEqual(CHART_PROMPT_VERSION, "dns-chart-v5")
+        self.assertEqual(CHART_PROMPT_VERSION, "dns-chart-v6")
         combined = CHART_IMAGE_PROMPT + CHART_IMAGE_INSTRUCTIONS
         self.assertIn("price_high", combined)
         self.assertIn("price_low < price_high", combined)
         self.assertIn("both null", combined)
+        self.assertIn("qualitative", combined)
+        self.assertIn("low-confidence candidate", combined)
     def test_rejects_missing_or_wrongly_typed_response_fields(self):
         for payload in (
             None,
@@ -214,11 +241,13 @@ class ChartResponseValidationTests(unittest.TestCase):
         schema = CHART_RESPONSE_FORMAT["json_schema"]["schema"]
         zone_schema = schema["properties"]["zones"]
         self.assertEqual(zone_schema["maxItems"], 8)
+        properties = zone_schema["items"]["properties"]
+        self.assertIn("confidence", zone_schema["items"]["required"])
+        self.assertEqual(properties["confidence"]["enum"], ["high", "medium", "low"])
         self.assertIn("plot_bounds", schema["required"])
         plot_schema = schema["properties"]["plot_bounds"]
         self.assertEqual(plot_schema["type"], ["object", "null"])
         self.assertEqual(set(plot_schema["required"]), {"x_start", "x_end", "y_top", "y_bottom"})
-        properties = zone_schema["items"]["properties"]
         for coordinate in ("x_start", "x_end", "y_top", "y_bottom"):
             with self.subTest(coordinate=coordinate):
                 self.assertEqual(properties[coordinate]["minimum"], 0)

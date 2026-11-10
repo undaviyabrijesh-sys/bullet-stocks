@@ -361,6 +361,26 @@ class OverlayRendererTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertEqual(count, 0)
 
+    def test_low_confidence_zone_is_rejected_by_pixel_geometry_and_renderer(self):
+        zone = {
+            "zone_type": "demand", "draw_overlay": True, "confidence": "low",
+            "x_start": 0.2, "x_end": 0.8, "y_top": 0.3, "y_bottom": 0.5,
+        }
+        self.assertIsNone(normalized_zone_to_pixel_box(zone, 640, 360))
+        result, count = render_overlay(sample_image(), [zone])
+        self.assertIsNone(result)
+        self.assertEqual(count, 0)
+
+    def test_medium_confidence_zone_is_drawable(self):
+        zone = {
+            "zone_type": "demand", "draw_overlay": True, "confidence": "medium",
+            "x_start": 0.2, "x_end": 0.8, "y_top": 0.3, "y_bottom": 0.5,
+        }
+        self.assertIsNotNone(normalized_zone_to_pixel_box(zone, 640, 360))
+        result, count = render_overlay(sample_image(), [zone])
+        self.assertIsNotNone(result)
+        self.assertEqual(count, 1)
+
     def test_non_list_zones_are_ignored(self):
         result, count = render_overlay(sample_image(), None)
         self.assertIsNone(result)

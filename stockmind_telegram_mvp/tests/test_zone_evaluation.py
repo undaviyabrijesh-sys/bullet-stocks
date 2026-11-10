@@ -69,6 +69,13 @@ class ZoneEvaluationTests(unittest.TestCase):
         self.assertEqual(result["overall"]["mean_iou"], 1.0)
         self.assertIsNone(result["price_accuracy"])
 
+    def test_low_confidence_prediction_is_ignored_and_reference_remains_false_negative(self):
+        result = evaluate([prediction(confidence="low")], [zone()])
+        self.assertEqual(result["ignored_prediction_count"], 1)
+        self.assertEqual(result["overall"]["predicted"], 0)
+        self.assertEqual(result["overall"]["true_positive"], 0)
+        self.assertEqual(result["overall"]["false_negative"], 1)
+
     def test_prediction_too_small_for_renderer_is_ignored_not_scored_as_match(self):
         tiny = prediction(
             x_start=0.0, x_end=0.2,

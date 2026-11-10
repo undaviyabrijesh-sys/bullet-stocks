@@ -59,6 +59,7 @@ class ChartPredictionProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(metadata["settings"]["image_detail"], "high")
         self.assertEqual(metadata["settings"]["conversation_context"], "caption_only")
         self.assertEqual(metadata["settings"]["plot_bounds_policy"], "required_for_overlay")
+        self.assertEqual(metadata["settings"]["confidence_policy"], "high_medium_only")
         self.assertEqual(metadata["settings"]["reasoning_effort"], "none")
         self.assertEqual(create.await_args.kwargs["reasoning_effort"], "none")
         messages = create.await_args.kwargs["messages"]
@@ -160,7 +161,7 @@ class ChartPredictionProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result["prediction_metadata"]["generated_at"])
 
     def test_prompt_version_and_static_prompt_hash_are_present(self):
-        self.assertEqual(CHART_PROMPT_VERSION, "dns-chart-v5")
+        self.assertEqual(CHART_PROMPT_VERSION, "dns-chart-v6")
         self.assertRegex(CHART_PROMPT_SHA256, re.compile(r"^[0-9a-f]{64}$"))
 
 
