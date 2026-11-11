@@ -130,7 +130,7 @@ class ConversationHistoryStoreTests(unittest.TestCase):
                 ],
             )
 
-        history = self.second.get(101, 12, max_bytes=100)
+        history = self.second.get(101, 12, max_bytes=160)
         total_bytes = sum(len(message["content"].encode("utf-8")) for message in history)
 
         self.assertLessEqual(total_bytes, 100)
