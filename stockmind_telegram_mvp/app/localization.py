@@ -2,7 +2,8 @@
 
 Model-generated research remains in the language of the user's prompt. These
 strings cover bot-owned UX only; language preferences, beta admission, daily
-quotas and bounded conversation history are persisted locally.
+quotas, bounded conversation history and same-host request leases are persisted
+locally.
 """
 
 SUPPORTED_LANGUAGES = ("en", "hi", "gu")
