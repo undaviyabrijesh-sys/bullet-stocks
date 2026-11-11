@@ -1,6 +1,7 @@
 """Cross-instance tests for SQLite-backed per-user request leases."""
 
 import asyncio
+import multiprocessing
 import sqlite3
 import tempfile
 import unittest
@@ -12,6 +13,25 @@ from stockmind_telegram_mvp.app.user_locks import (
     UserLockRegistry,
     create_user_lock_registry,
 )
+
+
+def _hold_lock_in_process(database_path, user_id, entered_event, release_event=None, ready_event=None):
+    async def run():
+        registry = SQLiteUserLockRegistry(
+            database_path,
+            lease_seconds=2.0,
+            heartbeat_interval=0.3,
+            poll_interval=0.01,
+        )
+        if ready_event is not None:
+            ready_event.set()
+        async with registry.hold(user_id):
+            entered_event.set()
+            if release_event is not None:
+                await asyncio.to_thread(release_event.wait, 5)
+        registry.close()
+
+    asyncio.run(run())
 
 
 class SQLiteUserLockRegistryTests(unittest.IsolatedAsyncioTestCase):
@@ -67,6 +87,45 @@ class SQLiteUserLockRegistryTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(asyncio.gather(first_task, second_task), timeout=2)
         self.assertEqual(order, ["first-enter", "first-exit", "second-enter"])
         self.assertEqual(len(self.first), 0)
+
+    async def test_same_user_is_serialized_across_separate_processes(self):
+        context = multiprocessing.get_context("spawn")
+        first_entered = context.Event()
+        second_ready = context.Event()
+        second_entered = context.Event()
+        release_first = context.Event()
+
+        first_process = context.Process(
+            target=_hold_lock_in_process,
+            args=(str(self.database_path), 2001, first_entered, release_first),
+        )
+        second_process = context.Process(
+            target=_hold_lock_in_process,
+            args=(str(self.database_path), 2001, second_entered, None, second_ready),
+        )
+
+        first_process.start()
+        try:
+            self.assertTrue(await asyncio.to_thread(first_entered.wait, 4))
+            second_process.start()
+            self.assertTrue(await asyncio.to_thread(second_ready.wait, 4))
+            await asyncio.sleep(0.2)
+            self.assertFalse(second_entered.is_set())
+
+            release_first.set()
+            self.assertTrue(await asyncio.to_thread(second_entered.wait, 4))
+            await asyncio.to_thread(first_process.join, 4)
+            await asyncio.to_thread(second_process.join, 4)
+            self.assertEqual(first_process.exitcode, 0)
+            self.assertEqual(second_process.exitcode, 0)
+        finally:
+            release_first.set()
+            for process in (first_process, second_process):
+                if process.pid is not None:
+                    await asyncio.to_thread(process.join, 1)
+                    if process.is_alive():
+                        process.terminate()
+                        await asyncio.to_thread(process.join, 1)
 
     async def test_different_users_can_run_concurrently_across_instances(self):
         both_entered = asyncio.Event()
