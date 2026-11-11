@@ -481,7 +481,7 @@ async def reset(message: Message):
     language = _language_for(message)
     # Wait for an active turn to finish before clearing its conversation context.
     if user_locks is None:
-        await message.answer(translate(language, "reset_storage_failed"))
+        await message.answer(translate(language, "reset_lock_unavailable"))
         return
     try:
         async with user_locks.hold(user_id):
@@ -501,13 +501,13 @@ async def reset(message: Message):
                 history_storage_unavailable_users.add(user_id)
     except UserLockUnavailable:
         logger.exception("StockMind could not acquire the per-user lock for /reset")
-        await message.answer(translate(language, "reset_storage_failed"))
+        await message.answer(translate(language, "reset_lock_unavailable"))
         return
     except asyncio.CancelledError as exc:
         if not is_lease_lost_cancellation(exc):
             raise
         logger.error("StockMind stopped /reset after its per-user lock lease was lost")
-        await message.answer(translate(language, "reset_storage_failed"))
+        await message.answer(translate(language, "reset_lock_unavailable"))
         return
     await message.answer(
         translate(language, "reset_done" if persisted else "reset_storage_failed")
