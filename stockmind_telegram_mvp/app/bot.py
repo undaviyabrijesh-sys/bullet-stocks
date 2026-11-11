@@ -17,6 +17,7 @@ from .user_locks import UserLockRegistry
 from .localization import LANGUAGE_NAMES, normalize_language, resolve_language, translate
 from .user_preferences import LanguagePreferenceStore
 from .usage_store import AdmissionStore
+from .conversation_history import ConversationHistoryStore
 from .config import (
     BETA_USER_LIMIT,
     DAILY_QUERY_LIMIT,
@@ -48,7 +49,7 @@ research = ResearchAI(
     turn_timeout_seconds=RESEARCH_TURN_TIMEOUT_SECONDS,
 )
 
-# Prototype-only in-memory state. Persist this before external beta testing.
+# The deque is a process-local cache; SQLite is authoritative when available.
 histories = defaultdict(lambda: deque(maxlen=MAX_HISTORY_MESSAGES))
 # Serialize requests per user so concurrent turns cannot race on shared history.
 user_locks = UserLockRegistry()
@@ -68,6 +69,16 @@ try:
 except Exception:
     logger.exception("Persistent StockMind beta admission and quota storage is unavailable")
     admission_store = None
+
+try:
+    conversation_history_store = ConversationHistoryStore(USER_PREFERENCES_DB)
+except Exception:
+    logger.exception("Persistent StockMind conversation history is unavailable")
+    conversation_history_store = None
+
+# A failed per-user history operation falls back to the in-memory cache for the
+# rest of this process, rather than silently reloading stale persisted context.
+history_storage_unavailable_users = set()
 
 
 def _overlay_unavailable_note(chart_result: dict, drawn_count: int, language: str = "en") -> str:
@@ -174,6 +185,46 @@ def _reserve_research_request(user_id: int, today: str) -> str:
     return status
 
 
+def _load_conversation_history(user_id: int) -> list[dict]:
+    """Load the latest bounded conversation context, preferring durable storage."""
+    history = histories[user_id]
+    if (
+        conversation_history_store is None
+        or user_id in history_storage_unavailable_users
+    ):
+        return list(history)
+    try:
+        saved = conversation_history_store.get(user_id, MAX_HISTORY_MESSAGES)
+    except Exception:
+        logger.exception("Could not load StockMind conversation history")
+        history_storage_unavailable_users.add(user_id)
+        return list(history)
+    history.clear()
+    history.extend(saved)
+    return list(history)
+
+
+def _record_conversation_turn(user_id: int, user_text: str, answer: str) -> None:
+    """Persist a completed text-only turn and refresh the bounded local cache."""
+    messages = [
+        {"role": "user", "content": user_text},
+        {"role": "assistant", "content": answer},
+    ]
+    history = histories[user_id]
+    if (
+        conversation_history_store is not None
+        and user_id not in history_storage_unavailable_users
+    ):
+        try:
+            conversation_history_store.append(
+                user_id, messages, MAX_HISTORY_MESSAGES
+            )
+        except Exception:
+            logger.exception("Could not persist StockMind conversation history")
+            history_storage_unavailable_users.add(user_id)
+    history.extend(messages)
+
+
 bot = Bot(TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
@@ -261,11 +312,12 @@ async def _run_research_locked(
         # A progress-message failure should not prevent the research itself.
         logger.exception("Could not send StockMind progress status")
         status = None
+    history = _load_conversation_history(user_id)
     try:
         overlay_image = None
         if image_bytes is not None:
             chart_result = await research.analyze_chart_image(
-                list(histories[user_id]), user_text, image_bytes, image_mime_type
+                history, user_text, image_bytes, image_mime_type
             )
             answer = chart_result.get("analysis") or translate(language, "chart_analysis_fallback")
             overlay_render_failed = False
@@ -288,13 +340,12 @@ async def _run_research_locked(
             elif not drawn_count:
                 answer += _overlay_unavailable_note(chart_result, drawn_count, language)
         else:
-            answer = await research.answer(list(histories[user_id]), user_text)
+            answer = await research.answer(history, user_text)
 
         history_text = user_text or "Please analyse the attached chart screenshot for DNS zones."
         if image_bytes is not None:
             history_text += "\n[Chart screenshot attached; visual analysis was performed.]"
-        histories[user_id].append({"role": "user", "content": history_text})
-        histories[user_id].append({"role": "assistant", "content": answer})
+        _record_conversation_turn(user_id, history_text, answer)
     except ResearchTurnDeadlineExceeded as exc:
         if image_bytes is not None:
             failure_message = (
@@ -393,12 +444,26 @@ async def set_language(message: Message):
 @dp.message(Command("reset"))
 async def reset(message: Message):
     user_id = message.from_user.id
+    language = _language_for(message)
     # Wait for an active turn to finish before clearing its conversation context.
     async with user_locks.hold(user_id):
         history = histories.get(user_id)
         if history is not None:
             history.clear()
-    await message.answer(_ui(message, "reset_done"))
+        persisted = False
+        if conversation_history_store is not None:
+            try:
+                conversation_history_store.reset(user_id)
+                history_storage_unavailable_users.discard(user_id)
+                persisted = True
+            except Exception:
+                logger.exception("Could not delete saved StockMind conversation history")
+                history_storage_unavailable_users.add(user_id)
+        else:
+            history_storage_unavailable_users.add(user_id)
+    await message.answer(
+        translate(language, "reset_done" if persisted else "reset_storage_failed")
+    )
 
 
 @dp.message(F.photo)
@@ -491,6 +556,8 @@ async def main():
             language_preferences.close()
         if admission_store is not None:
             admission_store.close()
+        if conversation_history_store is not None:
+            conversation_history_store.close()
         await market.close()
         await crypto_market.close()
         await bot.session.close()

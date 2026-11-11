@@ -101,6 +101,9 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
             bot_module.language_preferences.clear()
         if bot_module.admission_store is not None:
             bot_module.admission_store.clear()
+        if bot_module.conversation_history_store is not None:
+            bot_module.conversation_history_store.clear()
+        bot_module.history_storage_unavailable_users.clear()
 
         self.user_id = 987654321
         self.status = SimpleNamespace(edit_text=AsyncMock())
@@ -211,6 +214,57 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
                 {"role": "assistant", "content": "BTC structure is unclear."},
             ],
         )
+
+    async def test_conversation_history_survives_process_cache_reset(self):
+        first_research = SimpleNamespace(
+            answer=AsyncMock(return_value="First answer with the BTC context.")
+        )
+        with patch.object(bot_module, "research", first_research):
+            await bot_module.run_research(self.message, "Analyse BTC")
+
+        bot_module.histories.clear()
+        second_research = SimpleNamespace(
+            answer=AsyncMock(return_value="Second answer.")
+        )
+        with patch.object(bot_module, "research", second_research):
+            await bot_module.run_research(self.message, "What changed?")
+
+        self.assertEqual(
+            second_research.answer.await_args.args[0],
+            [
+                {"role": "user", "content": "Analyse BTC"},
+                {"role": "assistant", "content": "First answer with the BTC context."},
+            ],
+        )
+
+    async def test_reset_deletes_persisted_conversation_history(self):
+        research = SimpleNamespace(answer=AsyncMock(return_value="Saved answer."))
+        with patch.object(bot_module, "research", research):
+            await bot_module.run_research(self.message, "Remember this context")
+
+        reset_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=self.user_id),
+            answer=AsyncMock(),
+        )
+        await bot_module.reset(reset_message)
+        bot_module.histories.clear()
+
+        self.assertEqual(bot_module._load_conversation_history(self.user_id), [])
+        self.assertIn("cleared", reset_message.answer.await_args.args[0].lower())
+
+    async def test_reset_warns_when_persisted_history_cannot_be_deleted(self):
+        bot_module.histories[self.user_id].append(
+            {"role": "assistant", "content": "local context"}
+        )
+        reset_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=self.user_id),
+            answer=AsyncMock(),
+        )
+        with patch.object(bot_module, "conversation_history_store", None):
+            await bot_module.reset(reset_message)
+
+        self.assertEqual(list(bot_module.histories[self.user_id]), [])
+        self.assertIn("could not be deleted", reset_message.answer.await_args.args[0])
 
     async def test_long_research_answer_is_not_truncated_before_telegram_delivery(self):
         answer = ("BTC setup: confirmation, invalidation and risk notes.\n\n" * 180)
