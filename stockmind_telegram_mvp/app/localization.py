@@ -1,8 +1,8 @@
 """Small, explicit translations for StockMind's fixed Telegram interface.
 
 Model-generated research remains in the language of the user's prompt. These
-strings cover bot-owned UX only; explicit language preferences are persisted
-locally, while conversation and beta state remain process-local.
+strings cover bot-owned UX only; language preferences, beta admission, daily
+quotas and bounded conversation history are persisted locally.
 """
 
 SUPPORTED_LANGUAGES = ("en", "hi", "gu")
@@ -128,6 +128,7 @@ _MESSAGES = {
         ),
         "reset_done": "Conversation context cleared. Ask a new research question.",
         "reset_storage_failed": "The conversation was cleared for this session, but saved history could not be deleted. Please retry /reset shortly.",
+        "reset_lock_unavailable": "I couldn't safely reset the conversation because request coordination is unavailable. Please retry /reset shortly.",
         "upload_too_large": "That image is too large. Please send an image under 5 MB.",
         "upload_download_failed": "I couldn't download that image. Please send it again.",
         "unsupported_document": (
@@ -217,6 +218,7 @@ _MESSAGES = {
         "overlay_caption": "StockMind AI का visual zone overlay — इस स्क्रीनशॉट से अनुमानित; chart price scale से जाँचें।",
         "reset_done": "बातचीत का context साफ़ कर दिया गया है। नया रिसर्च सवाल पूछें।",
         "reset_storage_failed": "इस session की बातचीत साफ़ कर दी गई है, लेकिन saved history delete नहीं हो पाई। कृपया थोड़ी देर बाद /reset फिर चलाएँ।",
+        "reset_lock_unavailable": "Request coordination उपलब्ध नहीं होने के कारण बातचीत को सुरक्षित रूप से reset नहीं किया जा सका। कृपया थोड़ी देर बाद /reset फिर चलाएँ।",
         "upload_too_large": "यह image बहुत बड़ी है। कृपया 5 MB से छोटी image भेजें।",
         "upload_download_failed": "यह image डाउनलोड नहीं हो पाई। कृपया फिर से भेजें।",
         "unsupported_document": "कृपया chart को photo या JPEG, PNG अथवा WEBP image file के रूप में भेजें।",
@@ -297,6 +299,7 @@ _MESSAGES = {
         "overlay_caption": "StockMind AI visual zone overlay — આ screenshot પરથી અંદાજિત; chart price scale સામે તપાસો.",
         "reset_done": "વાતચીતનો context સાફ કર્યો છે. નવો research પ્રશ્ન પૂછો.",
         "reset_storage_failed": "આ session ની વાતચીત સાફ કરી છે, પરંતુ saved history delete થઈ શકી નથી. કૃપા કરીને થોડી વાર પછી /reset ફરી ચલાવો.",
+        "reset_lock_unavailable": "Request coordination ઉપલબ્ધ ન હોવાથી વાતચીત સુરક્ષિત રીતે reset કરી શકાઈ નથી. કૃપા કરીને થોડી વાર પછી /reset ફરી ચલાવો.",
         "upload_too_large": "આ image ખૂબ મોટી છે. કૃપા કરીને 5 MB કરતાં નાની image મોકલો.",
         "upload_download_failed": "આ image download થઈ શકી નથી. કૃપા કરીને ફરી મોકલો.",
         "unsupported_document": "કૃપા કરીને chart ને photo અથવા JPEG, PNG કે WEBP image file તરીકે મોકલો.",
