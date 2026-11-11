@@ -195,6 +195,28 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
             error = bot_module._research_admission_error(self.user_id, "hi")
         self.assertIn("बीटा सीमा", error)
 
+    async def test_research_fails_closed_when_shared_lock_store_is_unavailable(self):
+        research = self.use_research(answer=AsyncMock(return_value="must not run"))
+
+        with patch.object(bot_module, "user_locks", None):
+            await bot_module.run_research(self.message, "Analyse BTC")
+
+        research.answer.assert_not_awaited()
+        self.message.answer.assert_awaited_once()
+        self.assertIn("storage", self.message.answer.await_args.args[0].lower())
+
+    async def test_reset_fails_closed_when_shared_lock_store_is_unavailable(self):
+        reset_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=self.user_id),
+            answer=AsyncMock(),
+        )
+
+        with patch.object(bot_module, "user_locks", None):
+            await bot_module.reset(reset_message)
+
+        reset_message.answer.assert_awaited_once()
+        self.assertIn("storage", reset_message.answer.await_args.args[0].lower())
+
     def use_research(self, **methods):
         research = SimpleNamespace(**methods)
         self.enterContext(patch.object(bot_module, "research", research))
