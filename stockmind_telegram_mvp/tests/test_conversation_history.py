@@ -2,7 +2,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from stockmind_telegram_mvp.app.conversation_history import ConversationHistoryStore
+from stockmind_telegram_mvp.app.conversation_history import (
+    ConversationHistoryStore,
+    bound_history,
+)
 
 
 class ConversationHistoryStoreTests(unittest.TestCase):
@@ -75,6 +78,87 @@ class ConversationHistoryStoreTests(unittest.TestCase):
             self.first.append(101, [{"role": "user", "content": 123}], 12)
         with self.assertRaises(ValueError):
             self.first.append(101, [{"role": [], "content": "bad"}], 12)
+
+
+    def test_append_enforces_total_utf8_byte_budget_and_keeps_newest_context(self):
+        messages = [
+            {"role": "user", "content": "first " * 80},
+            {"role": "assistant", "content": "second " * 80},
+            {"role": "user", "content": "third " * 80},
+            {"role": "assistant", "content": "fourth " * 80},
+        ]
+        self.first.append(101, messages, 12, max_bytes=256)
+
+        history = self.second.get(101, 12, max_bytes=256)
+        total_bytes = sum(len(message["content"].encode("utf-8")) for message in history)
+
+        self.assertLessEqual(total_bytes, 256)
+        self.assertEqual([message["role"] for message in history], ["user", "assistant"])
+        self.assertTrue(all("[message shortened" in item["content"] for item in history))
+
+    def test_unicode_truncation_preserves_valid_utf8_and_byte_budget(self):
+        messages = [
+            {"role": "user", "content": "ગુજરાતી ભાષા " * 80},
+            {"role": "assistant", "content": "हिंदी उत्तर " * 80},
+            {"role": "user", "content": "છેલ્લો પ્રશ્ન " * 80},
+            {"role": "assistant", "content": "अंतिम उत्तर " * 80},
+        ]
+        self.first.append(101, messages, 12, max_bytes=240)
+
+        history = self.second.get(101, 12, max_bytes=240)
+        total_bytes = sum(len(message["content"].encode("utf-8")) for message in history)
+
+        self.assertLessEqual(total_bytes, 240)
+        self.assertEqual([message["role"] for message in history], ["user", "assistant"])
+        for message in history:
+            encoded = message["content"].encode("utf-8")
+            self.assertEqual(encoded.decode("utf-8"), message["content"])
+            self.assertLessEqual(len(encoded), 120)
+
+    def test_get_bounds_legacy_oversized_rows_before_model_context(self):
+        with self.first._lock:
+            self.first._connection.executemany(
+                """
+                INSERT INTO conversation_messages (user_id, role, content)
+                VALUES (?, ?, ?)
+                """,
+                [
+                    (101, "user", "old " * 500),
+                    (101, "assistant", "older answer " * 500),
+                    (101, "user", "latest " * 500),
+                    (101, "assistant", "latest answer " * 500),
+                ],
+            )
+
+        history = self.second.get(101, 12, max_bytes=100)
+        total_bytes = sum(len(message["content"].encode("utf-8")) for message in history)
+
+        self.assertLessEqual(total_bytes, 100)
+        self.assertEqual([message["role"] for message in history], ["user", "assistant"])
+        self.assertTrue(all("[message shortened" in item["content"] for item in history))
+
+    def test_bound_history_applies_same_limit_to_process_local_cache(self):
+        messages = [
+            {"role": "user", "content": "earlier " * 100},
+            {"role": "assistant", "content": "answer " * 100},
+            {"role": "user", "content": "latest " * 100},
+            {"role": "assistant", "content": "final " * 100},
+        ]
+        history = bound_history(messages, 12, 200)
+
+        self.assertLessEqual(
+            sum(len(message["content"].encode("utf-8")) for message in history),
+            200,
+        )
+        self.assertEqual([message["role"] for message in history], ["user", "assistant"])
+
+    def test_rejects_non_positive_byte_budgets(self):
+        with self.assertRaises(ValueError):
+            self.first.get(101, 12, max_bytes=0)
+        with self.assertRaises(ValueError):
+            self.first.append(
+                101, [{"role": "user", "content": "question"}], 12, max_bytes=-1
+            )
 
 
 if __name__ == "__main__":
