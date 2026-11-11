@@ -13,7 +13,11 @@ from .crypto import BinanceMarketData
 from .overlay_engine import prepare_chart_image, _render_overlay_prepared
 from .image_upload import BoundedBytesIO, UploadTooLargeError
 from .telegram_delivery import send_analysis_text, send_overlay_photo
-from .user_locks import UserLockRegistry
+from .user_locks import (
+    UserLockUnavailable,
+    create_user_lock_registry,
+    is_lease_lost_cancellation,
+)
 from .localization import LANGUAGE_NAMES, normalize_language, resolve_language, translate
 from .user_preferences import LanguagePreferenceStore
 from .usage_store import AdmissionStore
@@ -52,8 +56,16 @@ research = ResearchAI(
 
 # The deque is a process-local cache; SQLite is authoritative when available.
 histories = defaultdict(lambda: deque(maxlen=MAX_HISTORY_MESSAGES))
-# Serialize requests per user so concurrent turns cannot race on shared history.
-user_locks = UserLockRegistry()
+# Serialize same-user requests across processes sharing the persistent local DB.
+# The lease exceeds the model-turn deadline and is renewed while a request runs.
+try:
+    user_locks = create_user_lock_registry(
+        USER_PREFERENCES_DB,
+        lease_seconds=max(180.0, RESEARCH_TURN_TIMEOUT_SECONDS + 60.0),
+    )
+except Exception:
+    logger.exception("Persistent StockMind per-user request locking is unavailable")
+    user_locks = None
 usage = defaultdict(int)
 usage_day = {}
 beta_users = set()
@@ -274,8 +286,21 @@ async def run_research(
     if user is None:
         return
 
-    async with user_locks.hold(user.id):
-        await _run_research_locked(message, user_text, image_bytes, image_mime_type)
+    if user_locks is None:
+        await message.answer(translate(_language_for(message), "quota_storage_unavailable"))
+        return
+
+    try:
+        async with user_locks.hold(user.id):
+            await _run_research_locked(message, user_text, image_bytes, image_mime_type)
+    except UserLockUnavailable:
+        logger.exception("StockMind could not acquire the shared per-user request lock")
+        await message.answer(translate(_language_for(message), "quota_storage_unavailable"))
+    except asyncio.CancelledError as exc:
+        if not is_lease_lost_cancellation(exc):
+            raise
+        logger.error("StockMind stopped a request after its shared per-user lock lease was lost")
+        await message.answer(translate(_language_for(message), "quota_storage_unavailable"))
 
 
 async def _run_research_locked(
@@ -455,21 +480,35 @@ async def reset(message: Message):
     user_id = message.from_user.id
     language = _language_for(message)
     # Wait for an active turn to finish before clearing its conversation context.
-    async with user_locks.hold(user_id):
-        history = histories.get(user_id)
-        if history is not None:
-            history.clear()
-        persisted = False
-        if conversation_history_store is not None:
-            try:
-                conversation_history_store.reset(user_id)
-                history_storage_unavailable_users.discard(user_id)
-                persisted = True
-            except Exception:
-                logger.exception("Could not delete saved StockMind conversation history")
+    if user_locks is None:
+        await message.answer(translate(language, "reset_storage_failed"))
+        return
+    try:
+        async with user_locks.hold(user_id):
+            history = histories.get(user_id)
+            if history is not None:
+                history.clear()
+            persisted = False
+            if conversation_history_store is not None:
+                try:
+                    conversation_history_store.reset(user_id)
+                    history_storage_unavailable_users.discard(user_id)
+                    persisted = True
+                except Exception:
+                    logger.exception("Could not delete saved StockMind conversation history")
+                    history_storage_unavailable_users.add(user_id)
+            else:
                 history_storage_unavailable_users.add(user_id)
-        else:
-            history_storage_unavailable_users.add(user_id)
+    except UserLockUnavailable:
+        logger.exception("StockMind could not acquire the per-user lock for /reset")
+        await message.answer(translate(language, "reset_storage_failed"))
+        return
+    except asyncio.CancelledError as exc:
+        if not is_lease_lost_cancellation(exc):
+            raise
+        logger.error("StockMind stopped /reset after its per-user lock lease was lost")
+        await message.answer(translate(language, "reset_storage_failed"))
+        return
     await message.answer(
         translate(language, "reset_done" if persisted else "reset_storage_failed")
     )
@@ -567,6 +606,8 @@ async def main():
             admission_store.close()
         if conversation_history_store is not None:
             conversation_history_store.close()
+        if user_locks is not None:
+            user_locks.close()
         await market.close()
         await crypto_market.close()
         await bot.session.close()
