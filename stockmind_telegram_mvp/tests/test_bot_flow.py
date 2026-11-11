@@ -99,6 +99,8 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
         bot_module.user_languages.clear()
         if bot_module.language_preferences is not None:
             bot_module.language_preferences.clear()
+        if bot_module.admission_store is not None:
+            bot_module.admission_store.clear()
 
         self.user_id = 987654321
         self.status = SimpleNamespace(edit_text=AsyncMock())
@@ -508,6 +510,45 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
             "The 10-person beta is currently full. Please try again later."
         )
         self.assertNotIn(self.user_id + 1, bot_module.usage)
+
+    async def test_beta_membership_and_daily_quota_survive_process_cache_reset(self):
+        first = SimpleNamespace(
+            from_user=SimpleNamespace(id=self.user_id),
+            answer=AsyncMock(),
+        )
+        await bot_module.start(first)
+        self.assertIn(bot_module.WELCOME, first.answer.await_args.args)
+
+        today = datetime.now(bot_module.IST).date().isoformat()
+        with patch.object(bot_module, "DAILY_QUERY_LIMIT", 1):
+            self.assertTrue(bot_module._consume_daily_query(self.user_id, today))
+            # Simulate a fresh process by discarding all process-local mirrors.
+            bot_module.beta_users.clear()
+            bot_module.usage.clear()
+            bot_module.usage_day.clear()
+            self.assertEqual(
+                bot_module._research_admission_error(self.user_id, "en"),
+                "You've reached today's beta research limit. It resets at midnight IST.",
+            )
+
+        second = SimpleNamespace(
+            from_user=SimpleNamespace(id=self.user_id + 1),
+            answer=AsyncMock(),
+        )
+        with patch.object(bot_module, "BETA_USER_LIMIT", 1):
+            await bot_module.start(second)
+        self.assertIn("beta is currently full", second.answer.await_args.args[0])
+
+    async def test_quota_storage_failure_fails_closed_before_image_processing(self):
+        with patch.object(bot_module, "admission_store", None), patch.object(
+            bot_module, "prepare_chart_image"
+        ) as prepare:
+            await bot_module.run_research(
+                self.message, "Analyse this chart", b"untrusted-image", "image/png"
+            )
+        prepare.assert_not_called()
+        self.message.answer.assert_awaited_once()
+        self.assertIn("quota storage is unavailable", self.message.answer.await_args.args[0])
 
     async def test_concurrent_same_user_requests_cannot_exceed_daily_limit(self):
         research = self.use_research(answer=AsyncMock(return_value="Research completed."))

@@ -39,7 +39,8 @@ class LocalizationTests(unittest.TestCase):
         required = (
             "language_help", "language_invalid", "language_changed",
             "language_changed_not_saved",
-            "welcome", "beta_full", "daily_limit", "progress_chart",
+            "welcome", "beta_full", "daily_limit", "quota_storage_unavailable",
+            "progress_chart",
             "progress_research", "reset_done", "unsupported_message",
         )
         for language in ("en", "hi", "gu"):

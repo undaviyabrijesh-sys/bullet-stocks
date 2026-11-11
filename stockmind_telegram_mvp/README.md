@@ -48,19 +48,26 @@ chart-overlay explanations, common upload errors and reset/help responses.
 
 The model-generated research answer continues to follow the language of the
 latest user question; the interface-language command does not force research
-answers into another language. Explicit interface preferences are stored in a
-small SQLite database (default: `data/user_preferences.sqlite3` inside this
-project). Override the location with `STOCKMIND_PREFERENCES_DB`. The database
-stores only Telegram numeric user IDs and selected language codes. Keep it on
-persistent, writable local storage if choices must survive restarts; ephemeral
-hosting storage will reset it. If persistence is unavailable, the bot applies
-the choice for the current process and tells the user it could not save it.
+answers into another language. The SQLite database (default:
+`data/user_preferences.sqlite3` inside this project) stores the selected
+interface language, beta membership and per-day research usage. Override the
+location with `STOCKMIND_PREFERENCES_DB` (the historical variable name is
+retained for compatibility). It stores Telegram numeric user IDs, supported
+language codes and date-based request counts. Keep it on persistent, writable
+local storage; ephemeral hosting storage resets all of these records. If
+language-preference persistence is unavailable, a language choice applies only
+to the current process and the bot says it could not save it. If admission or
+quota storage is unavailable, the bot fails closed and does not start research.
 
-Conversation history, beta membership and daily quotas remain process-local
-and still reset on restart. This MVP store is intended for one bot instance;
-a multi-replica deployment should use a shared database service rather than
-placing SQLite on a network filesystem. Low-level image-decoder validation
-messages may still be returned in English.
+Beta membership and daily quota usage now survive process restarts. The final
+beta-admission plus daily-slot reservation is one SQLite `BEGIN IMMEDIATE`
+transaction, preventing separate processes on the same host and database from
+overbooking the cap or a user's daily limit. SQLite must remain on persistent
+local storage, not a network filesystem. Conversation history and per-user
+async locks are still process-local and reset on restart; multiple bot replicas
+therefore still need shared database infrastructure and distributed per-user
+locking. Low-level image-decoder validation messages may still be returned in
+English.
 
 ## Configuration
 - TELEGRAM_BOT_TOKEN
@@ -73,7 +80,7 @@ messages may still be returned in English.
 - OPENAI_VISION_MODEL (defaults to OPENAI_MODEL; must support image input and structured outputs; default GPT-6 Luna)
 - MAX_CHART_IMAGE_BYTES (default: 5 MB)
 - RESEARCH_TURN_TIMEOUT_SECONDS (default: 120 seconds; finite positive number)
-- STOCKMIND_PREFERENCES_DB (SQLite file path for persistent UI-language preferences)
+- STOCKMIND_PREFERENCES_DB (SQLite file path for persistent UI-language preferences, beta membership and daily quotas)
 
 ## Provider request bounds
 
@@ -114,7 +121,7 @@ The bot now returns a second image with translucent supply (red) and demand (gre
 - Indian cash-market session reference: 09:15–15:30 IST. Crypto markets trade 24/7.
 
 ## Important prototype limitations
-- User membership, daily usage and chat history are in memory. They reset on restart and are not suitable for a public beta until moved to persistent storage. Beta admission and daily-slot consumption are synchronous check-and-update operations on the bot's single asyncio event loop; research turns from the same user are serialized with a per-user lock. Photo/document handlers perform a non-consuming beta-cap and daily-quota preflight before downloading chart bytes, and the research handler repeats that preflight before image decoding. The checks are advisory only: final beta admission and daily-slot consumption are rechecked after image validation, so concurrent requests cannot bypass the process-local cap. Invalid images do not consume a daily slot; a request consumes one once it passes validation and admission, before provider work begins, so provider failures also count against the cap and repeated retries cannot bypass the spend guard. The lock registry counts active holders and queued waiters, then removes an entry after the last request exits; `/reset` uses the same lock and does not create history for an unknown user. These protections are process-local only—multiple bot workers require shared persistence, atomic quota/admission updates and a distributed per-user lock.
+- Beta membership and daily usage are stored in SQLite. Photo/document handlers perform a non-consuming beta-cap and daily-quota preflight before downloading chart bytes, and the research handler repeats that preflight before image decoding. After image validation, beta admission and daily-slot consumption are committed together in one `BEGIN IMMEDIATE` transaction. Invalid images do not consume a daily slot; a request consumes one once it passes validation and admission, before provider work begins, so provider failures also count against the cap and repeated retries cannot bypass the spend guard. These records survive restarts only when the configured SQLite file is on persistent local storage. Conversation history and per-user locks remain process-local; same-user turns are serialized within one bot process, but multiple replicas still require a shared database and distributed per-user lock. The lock registry counts active holders and queued waiters, then removes an entry after the last request exits; `/reset` uses the same lock and does not create history for an unknown user.
 - Tapetide's free quota is limited and shared across REST and MCP. Each research turn is now bounded to at most 6 model-requested market-data tool calls, 12 KiB per serialized tool result and 36 KiB of serialized tool results total. Oversized time-series arrays are sampled from the end of the provider's returned order (stock search keeps the first matches) and carry explicit truncation metadata; oversized non-list payloads are withheld rather than passed as partial data. Within one research turn, duplicate requests are deduplicated by tool name and effective arguments after dispatcher defaults are applied. Symbol values are trimmed and uppercased where the provider does the same, and stock-search text is trimmed without case folding. Later duplicate calls receive a compact reference to the first tool result. Duplicate model calls still count against the six-call ceiling, and this cache is not shared across turns or users. These are per-turn context/call guards, not a provider-wide daily quota, request cache or guarantee that the upstream free plan will not be exhausted.
 - Do not assume a free API plan permits redistribution. Obtain written provider permission for any external beta or paid service.
 - Paid stock research/recommendations can raise Indian regulatory obligations. Get qualified compliance advice before monetisation.

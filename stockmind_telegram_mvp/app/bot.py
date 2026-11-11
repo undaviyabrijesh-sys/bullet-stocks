@@ -16,6 +16,7 @@ from .telegram_delivery import send_analysis_text, send_overlay_photo
 from .user_locks import UserLockRegistry
 from .localization import LANGUAGE_NAMES, normalize_language, resolve_language, translate
 from .user_preferences import LanguagePreferenceStore
+from .usage_store import AdmissionStore
 from .config import (
     BETA_USER_LIMIT,
     DAILY_QUERY_LIMIT,
@@ -62,6 +63,12 @@ except Exception:
     logger.exception("Persistent StockMind language preferences are unavailable")
     language_preferences = None
 
+try:
+    admission_store = AdmissionStore(USER_PREFERENCES_DB)
+except Exception:
+    logger.exception("Persistent StockMind beta admission and quota storage is unavailable")
+    admission_store = None
+
 
 def _overlay_unavailable_note(chart_result: dict, drawn_count: int, language: str = "en") -> str:
     """Explain why an otherwise successful chart analysis has no overlay."""
@@ -89,45 +96,82 @@ def _overlay_unavailable_note(chart_result: dict, drawn_count: int, language: st
     return translate(language, "overlay_renderer_rejected")
 
 
-def _admit_beta_user(user_id: int) -> bool:
-    """Admit a user once without exceeding the process-local beta cap.
-
-    Keep the check and set mutation synchronous: with one asyncio event loop,
-    there is no task switch between these operations. Multi-worker deployments
-    need shared atomic storage instead of this in-memory guard.
-    """
+def _admit_beta_user(user_id: int) -> bool | None:
+    """Persist beta membership; return None when durable storage is unavailable."""
+    if admission_store is None:
+        return None
     if user_id in beta_users:
         return True
-    if len(beta_users) >= BETA_USER_LIMIT:
-        return False
-    beta_users.add(user_id)
-    return True
+    try:
+        admitted = admission_store.admit(user_id, BETA_USER_LIMIT)
+    except Exception:
+        logger.exception("Could not persist StockMind beta admission")
+        return None
+    if admitted:
+        beta_users.add(user_id)
+    return admitted
 
 
 def _consume_daily_query(user_id: int, today: str) -> bool:
-    """Consume one admitted request slot for the supplied Asia/Kolkata date."""
-    if usage_day.get(user_id) != today:
-        usage_day[user_id] = today
-        usage[user_id] = 0
-    if usage[user_id] >= DAILY_QUERY_LIMIT:
+    """Atomically consume one daily slot and refresh the process-local mirror."""
+    if admission_store is None:
         return False
-    usage[user_id] += 1
-    return True
+    try:
+        consumed = admission_store.consume_daily_query(
+            user_id, today, DAILY_QUERY_LIMIT
+        )
+    except Exception:
+        logger.exception("Could not persist StockMind daily quota usage")
+        return False
+    if consumed:
+        if usage_day.get(user_id) != today:
+            usage_day[user_id] = today
+            usage[user_id] = 0
+        usage[user_id] += 1
+    return consumed
 
 
 def _research_admission_error(user_id: int, language: str = "en") -> str | None:
-    """Return a non-consuming beta/quota rejection before expensive image work.
+    """Return a non-consuming beta/quota/storage rejection before image work."""
+    if admission_store is None:
+        return translate(language, "quota_storage_unavailable")
 
-    This is only an early preflight: _admit_beta_user and
-    _consume_daily_query remain the authoritative checks after image validation.
-    """
+    # Local mirrors avoid a database read for users already known to be blocked.
     if user_id not in beta_users and len(beta_users) >= BETA_USER_LIMIT:
         return translate(language, "beta_full")
 
     today = datetime.now(IST).date().isoformat()
     if usage_day.get(user_id) == today and usage.get(user_id, 0) >= DAILY_QUERY_LIMIT:
         return translate(language, "daily_limit")
-    return None
+
+    try:
+        status = admission_store.check_status(
+            user_id, today, BETA_USER_LIMIT, DAILY_QUERY_LIMIT
+        )
+    except Exception:
+        logger.exception("Could not check StockMind beta admission or daily quota")
+        return translate(language, "quota_storage_unavailable")
+    return translate(language, status) if status else None
+
+
+def _reserve_research_request(user_id: int, today: str) -> str:
+    """Atomically admit the user and consume one slot after image validation."""
+    if admission_store is None:
+        return "quota_storage_unavailable"
+    try:
+        status = admission_store.admit_and_consume(
+            user_id, today, BETA_USER_LIMIT, DAILY_QUERY_LIMIT
+        )
+    except Exception:
+        logger.exception("Could not reserve a StockMind research request")
+        return "quota_storage_unavailable"
+    if status == "ok":
+        beta_users.add(user_id)
+        if usage_day.get(user_id) != today:
+            usage_day[user_id] = today
+            usage[user_id] = 0
+        usage[user_id] += 1
+    return status
 
 
 bot = Bot(TELEGRAM_BOT_TOKEN)
@@ -202,13 +246,10 @@ async def _run_research_locked(
             await message.answer(str(exc))
             return
 
-    if not _admit_beta_user(user_id):
-        await message.answer(translate(language, "beta_full"))
-        return
-
     today = datetime.now(IST).date().isoformat()
-    if not _consume_daily_query(user_id, today):
-        await message.answer(translate(language, "daily_limit"))
+    reservation = _reserve_research_request(user_id, today)
+    if reservation != "ok":
+        await message.answer(translate(language, reservation))
         return
     try:
         status = await message.answer(
@@ -295,7 +336,11 @@ async def _run_research_locked(
 async def start(message: Message):
     user_id = message.from_user.id
     language = _language_for(message)
-    if not _admit_beta_user(user_id):
+    admission = _admit_beta_user(user_id)
+    if admission is None:
+        await message.answer(translate(language, "quota_storage_unavailable"))
+        return
+    if not admission:
         await message.answer(translate(language, "beta_full"))
         return
     await message.answer(translate(language, "welcome"))
@@ -444,6 +489,8 @@ async def main():
     finally:
         if language_preferences is not None:
             language_preferences.close()
+        if admission_store is not None:
+            admission_store.close()
         await market.close()
         await crypto_market.close()
         await bot.session.close()
