@@ -380,7 +380,7 @@ async def handle_chart_photo(message: Message):
             await message.answer(_ui(message, "upload_too_large"))
             return
     except UploadTooLargeError:
-        await message.answer("That screenshot is too large. Please send an image under 5 MB.")
+        await message.answer(_ui(message, "upload_too_large"))
         return
     except Exception:
         await message.answer(_ui(message, "upload_download_failed"))
