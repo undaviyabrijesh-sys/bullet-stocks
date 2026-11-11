@@ -65,6 +65,9 @@ class UserLockRegistry:
     def __len__(self) -> int:
         return len(self._entries)
 
+    def close(self) -> None:
+        """Compatibility with the SQLite-backed registry; no resources are held."""
+
 
 class SQLiteUserLockRegistry:
     """Serialize same-user requests across processes sharing one local SQLite DB.
