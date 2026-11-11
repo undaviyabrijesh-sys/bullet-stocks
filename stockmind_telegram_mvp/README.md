@@ -73,10 +73,13 @@ store a short attachment placeholder). `/reset` deletes the user's saved
 history and local cache. Same-user requests are serialized across processes
 that share this same persistent local SQLite file using expiring leases and
 periodic heartbeats. A crashed process releases its user lock automatically
-after the lease expires, and an expired former owner cannot delete a newer
-owner's lock because release is scoped to a random owner token. If lock storage
-is unavailable or a lease is lost, research fails closed rather than continuing
-without request coordination. This is same-host/local-file coordination only:
+after the lease expires. The lease is at least 180 seconds and at least
+60 seconds longer than `RESEARCH_TURN_TIMEOUT_SECONDS`; a heartbeat renews it
+at intervals no longer than 30 seconds. An expired former owner cannot delete
+a newer owner's lock because release is scoped to a random owner token. If lock
+storage is unavailable or a lease is lost, the active request is stopped and
+research fails closed rather than continuing without request coordination.
+This is same-host/local-file coordination only:
 do not put SQLite on a network filesystem or point different hosts at one
 database file. Multi-host replicas require a dedicated shared lock service or
 database. Low-level image-decoder validation messages may still be returned in
@@ -94,7 +97,7 @@ English.
 - OPENAI_VISION_MODEL (defaults to OPENAI_MODEL; must support image input and structured outputs; default GPT-6 Luna)
 - MAX_CHART_IMAGE_BYTES (default: 5 MB)
 - RESEARCH_TURN_TIMEOUT_SECONDS (default: 120 seconds; finite positive number)
-- STOCKMIND_PREFERENCES_DB (SQLite file path for persistent UI-language preferences, beta membership and daily quotas)
+- STOCKMIND_PREFERENCES_DB (SQLite file path for persistent UI-language preferences, beta membership, daily quotas, conversation history and same-host per-user request leases)
 
 ## Provider request bounds
 
