@@ -155,8 +155,8 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(bot_module.user_languages[self.user_id], "hi")
         reply = language_message.answer.await_args.args[0]
-        self.assertIn("for this session", reply)
-        self.assertIn("could not be saved", reply)
+        self.assertIn("इस सत्र", reply)
+        self.assertIn("सहेजा नहीं जा सका", reply)
 
     async def test_language_command_help_uses_telegram_locale(self):
         language_message = SimpleNamespace(
