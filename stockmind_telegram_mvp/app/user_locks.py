@@ -125,7 +125,8 @@ class SQLiteUserLockRegistry:
         return connection
 
     def _initialize(self) -> None:
-        with self._connect() as connection:
+        connection = self._connect()
+        try:
             connection.execute("PRAGMA journal_mode = WAL")
             connection.execute(
                 """
@@ -136,6 +137,8 @@ class SQLiteUserLockRegistry:
                 )
                 """
             )
+        finally:
+            connection.close()
 
     @staticmethod
     def _validate_user_id(user_id: int) -> int:
