@@ -22,6 +22,9 @@ MAX_CHART_IMAGE_BYTES = int(os.getenv("MAX_CHART_IMAGE_BYTES", str(5 * 1024 * 10
 DAILY_QUERY_LIMIT = int(os.getenv("DAILY_QUERY_LIMIT", "10"))
 BETA_USER_LIMIT = int(os.getenv("BETA_USER_LIMIT", "10"))
 MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "12"))
+MAX_HISTORY_BYTES = int(os.getenv("MAX_HISTORY_BYTES", str(24 * 1024)))
+if MAX_HISTORY_BYTES <= 0:
+    raise RuntimeError("MAX_HISTORY_BYTES must be a positive integer.")
 RESEARCH_TURN_TIMEOUT_SECONDS = float(os.getenv("RESEARCH_TURN_TIMEOUT_SECONDS", "120"))
 _DEFAULT_PREFERENCES_DB = Path(__file__).resolve().parents[1] / "data" / "user_preferences.sqlite3"
 USER_PREFERENCES_DB = os.getenv(
