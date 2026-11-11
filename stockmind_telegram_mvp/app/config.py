@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -22,3 +23,8 @@ DAILY_QUERY_LIMIT = int(os.getenv("DAILY_QUERY_LIMIT", "10"))
 BETA_USER_LIMIT = int(os.getenv("BETA_USER_LIMIT", "10"))
 MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "12"))
 RESEARCH_TURN_TIMEOUT_SECONDS = float(os.getenv("RESEARCH_TURN_TIMEOUT_SECONDS", "120"))
+_DEFAULT_PREFERENCES_DB = Path(__file__).resolve().parents[1] / "data" / "user_preferences.sqlite3"
+USER_PREFERENCES_DB = os.getenv(
+    "STOCKMIND_PREFERENCES_DB",
+    str(_DEFAULT_PREFERENCES_DB),
+).strip() or str(_DEFAULT_PREFERENCES_DB)

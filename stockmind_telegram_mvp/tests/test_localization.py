@@ -38,6 +38,7 @@ class LocalizationTests(unittest.TestCase):
     def test_all_supported_languages_have_core_beta_messages(self):
         required = (
             "language_help", "language_invalid", "language_changed",
+            "language_changed_not_saved",
             "welcome", "beta_full", "daily_limit", "progress_chart",
             "progress_research", "reset_done", "unsupported_message",
         )

@@ -48,10 +48,19 @@ chart-overlay explanations, common upload errors and reset/help responses.
 
 The model-generated research answer continues to follow the language of the
 latest user question; the interface-language command does not force research
-answers into another language. Explicit preferences are currently kept in
-process memory and reset when the bot process restarts, consistent with the
-prototype's other beta state. Low-level image-decoder validation messages may
-still be returned in English.
+answers into another language. Explicit interface preferences are stored in a
+small SQLite database (default: `data/user_preferences.sqlite3` inside this
+project). Override the location with `STOCKMIND_PREFERENCES_DB`. The database
+stores only Telegram numeric user IDs and selected language codes. Keep it on
+persistent, writable local storage if choices must survive restarts; ephemeral
+hosting storage will reset it. If persistence is unavailable, the bot applies
+the choice for the current process and tells the user it could not save it.
+
+Conversation history, beta membership and daily quotas remain process-local
+and still reset on restart. This MVP store is intended for one bot instance;
+a multi-replica deployment should use a shared database service rather than
+placing SQLite on a network filesystem. Low-level image-decoder validation
+messages may still be returned in English.
 
 ## Configuration
 - TELEGRAM_BOT_TOKEN
@@ -64,6 +73,7 @@ still be returned in English.
 - OPENAI_VISION_MODEL (defaults to OPENAI_MODEL; must support image input and structured outputs; default GPT-6 Luna)
 - MAX_CHART_IMAGE_BYTES (default: 5 MB)
 - RESEARCH_TURN_TIMEOUT_SECONDS (default: 120 seconds; finite positive number)
+- STOCKMIND_PREFERENCES_DB (SQLite file path for persistent UI-language preferences)
 
 ## Provider request bounds
 

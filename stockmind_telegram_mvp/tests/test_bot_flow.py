@@ -24,6 +24,7 @@ _TEST_ENV = {
     "TAPETIDE_TOKEN": "stockmind-test-tapetide-token",
     "OPENAI_MODEL": "gpt-6-luna-test",
     "OPENAI_VISION_MODEL": "gpt-6-luna-test",
+    "STOCKMIND_PREFERENCES_DB": ":memory:",
 }
 with environment_patch.dict(os.environ, _TEST_ENV):
     bot_module = importlib.import_module("stockmind_telegram_mvp.app.bot")
@@ -96,6 +97,8 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
         bot_module.beta_users.clear()
         bot_module.user_locks.clear()
         bot_module.user_languages.clear()
+        if bot_module.language_preferences is not None:
+            bot_module.language_preferences.clear()
 
         self.user_id = 987654321
         self.status = SimpleNamespace(edit_text=AsyncMock())
@@ -118,6 +121,42 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
         reply = language_message.answer.await_args.args[0]
         self.assertIn("Interface ભાષા", reply)
         self.assertIn("ગુજરાતી", reply)
+
+    async def test_saved_language_is_loaded_after_process_cache_is_cleared(self):
+        language_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=self.user_id, language_code="en"),
+            text="/language gu",
+            answer=AsyncMock(),
+        )
+        await bot_module.set_language(language_message)
+        bot_module.user_languages.clear()
+
+        resolved = bot_module._language_for(
+            SimpleNamespace(from_user=SimpleNamespace(id=self.user_id, language_code="en"))
+        )
+
+        self.assertEqual(resolved, "gu")
+
+    async def test_language_command_warns_when_persistence_is_unavailable(self):
+        class BrokenPreferenceStore:
+            def get(self, user_id):
+                return None
+
+            def set(self, user_id, language):
+                raise OSError("read-only test database")
+
+        language_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=self.user_id, language_code="en"),
+            text="/language hi",
+            answer=AsyncMock(),
+        )
+        with patch.object(bot_module, "language_preferences", BrokenPreferenceStore()):
+            await bot_module.set_language(language_message)
+
+        self.assertEqual(bot_module.user_languages[self.user_id], "hi")
+        reply = language_message.answer.await_args.args[0]
+        self.assertIn("for this session", reply)
+        self.assertIn("could not be saved", reply)
 
     async def test_language_command_help_uses_telegram_locale(self):
         language_message = SimpleNamespace(
@@ -610,6 +649,8 @@ class BotModuleResourceCleanup(unittest.TestCase):
 
         asyncio.run(close_async_clients())
         bot_module.research.client.close()
+        if bot_module.language_preferences is not None:
+            bot_module.language_preferences.close()
 
 
 if __name__ == "__main__":

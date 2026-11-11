@@ -1,8 +1,8 @@
 """Small, explicit translations for StockMind's fixed Telegram interface.
 
 Model-generated research remains in the language of the user's prompt. These
-strings cover bot-owned UX only; user preferences are process-local like the
-prototype's other beta state.
+strings cover bot-owned UX only; explicit language preferences are persisted
+locally, while conversation and beta state remain process-local.
 """
 
 SUPPORTED_LANGUAGES = ("en", "hi", "gu")
@@ -55,6 +55,10 @@ _MESSAGES = {
         "language_changed": (
             "Interface language set to {language_name}. Research answers will still "
             "follow the language of your question."
+        ),
+        "language_changed_not_saved": (
+            "Interface language set to {language_name} for this session, but could not be saved. "
+            "It may reset when the bot restarts."
         ),
         "welcome": (
             "👋 Welcome to StockMind AI Beta!\n\n"
@@ -145,6 +149,10 @@ _MESSAGES = {
         "language_changed": (
             "इंटरफ़ेस की भाषा {language_name} कर दी गई है। रिसर्च का जवाब आपके सवाल की भाषा में ही रहेगा।"
         ),
+        "language_changed_not_saved": (
+            "इंटरफ़ेस भाषा {language_name} इस सत्र के लिए सेट की गई है, लेकिन इसे सहेजा नहीं जा सका। "
+            "बॉट रीस्टार्ट होने पर यह बदल सकती है।"
+        ),
         "welcome": (
             "👋 StockMind AI बीटा में आपका स्वागत है!\n\n"
             "भारतीय शेयरों और क्रिप्टो के बारे में English, Hinglish, हिन्दी, ગુજરાતી या मिली-जुली भाषा में पूछें।\n\n"
@@ -219,6 +227,10 @@ _MESSAGES = {
         "language_invalid": "ઉપલબ્ધ ભાષાઓ: en (English), hi (Hindi), gu (ગુજરાતી).",
         "language_changed": (
             "Interface ભાષા {language_name} રાખી છે. Research નો જવાબ તમારા પ્રશ્નની ભાષામાં જ રહેશે."
+        ),
+        "language_changed_not_saved": (
+            "Interface ભાષા {language_name} આ સત્ર માટે રાખી છે, પરંતુ સાચવી શકાઈ નથી. "
+            "Bot ફરી શરૂ થાય ત્યારે ભાષા બદલાઈ શકે છે."
         ),
         "welcome": (
             "👋 StockMind AI બીટામાં આપનું સ્વાગત છે!\n\n"

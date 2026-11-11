@@ -15,6 +15,7 @@ from .image_upload import BoundedBytesIO, UploadTooLargeError
 from .telegram_delivery import send_analysis_text, send_overlay_photo
 from .user_locks import UserLockRegistry
 from .localization import LANGUAGE_NAMES, normalize_language, resolve_language, translate
+from .user_preferences import LanguagePreferenceStore
 from .config import (
     BETA_USER_LIMIT,
     DAILY_QUERY_LIMIT,
@@ -26,6 +27,7 @@ from .config import (
     RESEARCH_TURN_TIMEOUT_SECONDS,
     TAPETIDE_TOKEN,
     TELEGRAM_BOT_TOKEN,
+    USER_PREFERENCES_DB,
 )
 from .tapetide import TapetideClient
 
@@ -52,8 +54,13 @@ user_locks = UserLockRegistry()
 usage = defaultdict(int)
 usage_day = {}
 beta_users = set()
-# Explicit UI language choices are process-local, like the prototype beta state.
+# Cache preferences used during this process; SQLite is authoritative across restarts.
 user_languages = {}
+try:
+    language_preferences = LanguagePreferenceStore(USER_PREFERENCES_DB)
+except Exception:
+    logger.exception("Persistent StockMind language preferences are unavailable")
+    language_preferences = None
 
 
 def _overlay_unavailable_note(chart_result: dict, drawn_count: int, language: str = "en") -> str:
@@ -133,8 +140,18 @@ def _language_for(message: Message) -> str:
     user = getattr(message, "from_user", None)
     if user is None:
         return "en"
+
+    explicit = user_languages.get(user.id)
+    if explicit is None and language_preferences is not None:
+        try:
+            explicit = language_preferences.get(user.id)
+        except Exception:
+            logger.exception("Could not load a saved StockMind language preference")
+        if explicit is not None:
+            user_languages[user.id] = explicit
+
     return resolve_language(
-        user_languages.get(user.id),
+        explicit,
         getattr(user, "language_code", None),
     )
 
@@ -307,11 +324,22 @@ async def set_language(message: Message):
         await message.answer(translate(current, "language_invalid"))
         return
 
+    # Apply the choice immediately, even if the local preference database is
+    # temporarily unavailable. Never claim persistence unless SQLite confirms it.
     user_languages[user.id] = requested
+    persisted = False
+    if language_preferences is not None:
+        try:
+            language_preferences.set(user.id, requested)
+            persisted = True
+        except Exception:
+            logger.exception("Could not save a StockMind language preference")
+
+    response_key = "language_changed" if persisted else "language_changed_not_saved"
     await message.answer(
         translate(
             requested,
-            "language_changed",
+            response_key,
             language_name=LANGUAGE_NAMES[requested],
         )
     )
@@ -414,6 +442,8 @@ async def main():
     try:
         await dp.start_polling(bot)
     finally:
+        if language_preferences is not None:
+            language_preferences.close()
         await market.close()
         await crypto_market.close()
         await bot.session.close()
