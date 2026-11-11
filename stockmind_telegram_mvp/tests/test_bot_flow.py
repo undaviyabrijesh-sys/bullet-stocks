@@ -215,7 +215,7 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
             await bot_module.reset(reset_message)
 
         reset_message.answer.assert_awaited_once()
-        self.assertIn("storage", reset_message.answer.await_args.args[0].lower())
+        self.assertIn("safely reset", reset_message.answer.await_args.args[0].lower())
 
     def use_research(self, **methods):
         research = SimpleNamespace(**methods)
