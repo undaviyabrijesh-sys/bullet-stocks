@@ -69,11 +69,18 @@ in SQLite, limited to the latest `MAX_HISTORY_MESSAGES` entries and
 messages are shortened with an explicit marker and older context is discarded
 first; the same byte cap is applied to the process-local cache and model input.
 Only message text is stored; chart image bytes are not retained (chart turns
-store a short attachment placeholder). `/reset` deletes
-the user's saved history and local cache. Same-user async locks remain
-process-local, so multiple bot replicas still need shared infrastructure and
-distributed per-user locking. Low-level image-decoder validation messages may
-still be returned in English.
+store a short attachment placeholder). `/reset` deletes the user's saved
+history and local cache. Same-user requests are serialized across processes
+that share this same persistent local SQLite file using expiring leases and
+periodic heartbeats. A crashed process releases its user lock automatically
+after the lease expires, and an expired former owner cannot delete a newer
+owner's lock because release is scoped to a random owner token. If lock storage
+is unavailable or a lease is lost, research fails closed rather than continuing
+without request coordination. This is same-host/local-file coordination only:
+do not put SQLite on a network filesystem or point different hosts at one
+database file. Multi-host replicas require a dedicated shared lock service or
+database. Low-level image-decoder validation messages may still be returned in
+English.
 
 ## Configuration
 - TELEGRAM_BOT_TOKEN
