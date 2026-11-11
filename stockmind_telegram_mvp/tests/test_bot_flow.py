@@ -215,6 +215,30 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    def test_completed_turn_bounds_persisted_and_process_local_context(self):
+        answer = "BTC setup with confirmation and invalidation. " * 1200
+
+        bot_module._record_conversation_turn(self.user_id, "Analyse BTC", answer)
+
+        local_history = list(bot_module.histories[self.user_id])
+        persisted_history = bot_module.conversation_history_store.get(
+            self.user_id,
+            bot_module.MAX_HISTORY_MESSAGES,
+            bot_module.MAX_HISTORY_BYTES,
+        )
+        local_bytes = sum(
+            len(item["content"].encode("utf-8")) for item in local_history
+        )
+        persisted_bytes = sum(
+            len(item["content"].encode("utf-8")) for item in persisted_history
+        )
+
+        self.assertLessEqual(local_bytes, bot_module.MAX_HISTORY_BYTES)
+        self.assertLessEqual(persisted_bytes, bot_module.MAX_HISTORY_BYTES)
+        self.assertEqual(local_history, persisted_history)
+        self.assertEqual(local_history[-1]["role"], "assistant")
+        self.assertIn("[message shortened", local_history[-1]["content"])
+
     async def test_conversation_history_survives_process_cache_reset(self):
         first_research = SimpleNamespace(
             answer=AsyncMock(return_value="First answer with the BTC context.")
