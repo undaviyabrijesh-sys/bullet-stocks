@@ -17,12 +17,13 @@ from .user_locks import UserLockRegistry
 from .localization import LANGUAGE_NAMES, normalize_language, resolve_language, translate
 from .user_preferences import LanguagePreferenceStore
 from .usage_store import AdmissionStore
-from .conversation_history import ConversationHistoryStore
+from .conversation_history import ConversationHistoryStore, bound_history
 from .config import (
     BETA_USER_LIMIT,
     DAILY_QUERY_LIMIT,
     MAX_CHART_IMAGE_BYTES,
     MAX_HISTORY_MESSAGES,
+    MAX_HISTORY_BYTES,
     OPENAI_API_KEY,
     OPENAI_MODEL,
     OPENAI_VISION_MODEL,
@@ -194,7 +195,9 @@ def _load_conversation_history(user_id: int) -> list[dict]:
     ):
         return list(history)
     try:
-        saved = conversation_history_store.get(user_id, MAX_HISTORY_MESSAGES)
+        saved = conversation_history_store.get(
+            user_id, MAX_HISTORY_MESSAGES, MAX_HISTORY_BYTES
+        )
     except Exception:
         logger.exception("Could not load StockMind conversation history")
         history_storage_unavailable_users.add(user_id)
@@ -211,18 +214,24 @@ def _record_conversation_turn(user_id: int, user_text: str, answer: str) -> None
         {"role": "assistant", "content": answer},
     ]
     history = histories[user_id]
+    bounded = bound_history(
+        list(history) + messages,
+        MAX_HISTORY_MESSAGES,
+        MAX_HISTORY_BYTES,
+    )
     if (
         conversation_history_store is not None
         and user_id not in history_storage_unavailable_users
     ):
         try:
             conversation_history_store.append(
-                user_id, messages, MAX_HISTORY_MESSAGES
+                user_id, messages, MAX_HISTORY_MESSAGES, MAX_HISTORY_BYTES
             )
         except Exception:
             logger.exception("Could not persist StockMind conversation history")
             history_storage_unavailable_users.add(user_id)
-    history.extend(messages)
+    history.clear()
+    history.extend(bounded)
 
 
 bot = Bot(TELEGRAM_BOT_TOKEN)
