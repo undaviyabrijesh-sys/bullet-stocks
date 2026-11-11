@@ -16,6 +16,7 @@ from unittest.mock import patch as environment_patch
 
 from stockmind_telegram_mvp.app.ai import ResearchTurnDeadlineExceeded
 from stockmind_telegram_mvp.app.telegram_delivery import split_telegram_text
+from stockmind_telegram_mvp.app.user_locks import LEASE_LOST_CANCEL_MESSAGE
 
 
 _TEST_ENV = {
@@ -216,6 +217,26 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
 
         reset_message.answer.assert_awaited_once()
         self.assertIn("safely reset", reset_message.answer.await_args.args[0].lower())
+
+    async def test_research_reports_lost_shared_lock_and_does_not_start_model(self):
+        class LostLeaseContext:
+            async def __aenter__(self):
+                raise asyncio.CancelledError(LEASE_LOST_CANCEL_MESSAGE)
+
+            async def __aexit__(self, exc_type, exc, traceback):
+                return False
+
+        class LostLeaseRegistry:
+            def hold(self, user_id):
+                return LostLeaseContext()
+
+        research = self.use_research(answer=AsyncMock(return_value="must not run"))
+        with patch.object(bot_module, "user_locks", LostLeaseRegistry()):
+            await bot_module.run_research(self.message, "Analyse BTC")
+
+        research.answer.assert_not_awaited()
+        self.message.answer.assert_awaited_once()
+        self.assertIn("storage", self.message.answer.await_args.args[0].lower())
 
     def use_research(self, **methods):
         research = SimpleNamespace(**methods)
