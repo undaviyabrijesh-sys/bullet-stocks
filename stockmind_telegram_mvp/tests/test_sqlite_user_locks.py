@@ -142,16 +142,31 @@ class SQLiteUserLockRegistryTests(unittest.IsolatedAsyncioTestCase):
         second_entered = asyncio.Event()
         release_second = asyncio.Event()
 
+        # Use a slower heartbeat here so the forced expiry and takeover are
+        # deterministic before the former owner's next renewal attempt.
+        first_registry = SQLiteUserLockRegistry(
+            self.database_path,
+            lease_seconds=1.0,
+            heartbeat_interval=0.5,
+            poll_interval=0.005,
+        )
+        second_registry = SQLiteUserLockRegistry(
+            self.database_path,
+            lease_seconds=1.0,
+            heartbeat_interval=0.5,
+            poll_interval=0.005,
+        )
+
         async def first_request():
             try:
-                async with self.first.hold(1001):
+                async with first_registry.hold(1001):
                     first_entered.set()
                     await asyncio.sleep(5)
             finally:
                 first_finished.set()
 
         async def second_request():
-            async with self.second.hold(1001):
+            async with second_registry.hold(1001):
                 second_entered.set()
                 await release_second.wait()
 
@@ -176,10 +191,10 @@ class SQLiteUserLockRegistryTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(first_finished.is_set())
 
         # The former owner's conditional release must not delete the new lease.
-        self.assertEqual(len(self.second), 1)
+        self.assertEqual(len(second_registry), 1)
         release_second.set()
         await asyncio.wait_for(second_task, timeout=1)
-        self.assertEqual(len(self.second), 0)
+        self.assertEqual(len(second_registry), 0)
 
     async def test_cancelled_waiter_does_not_release_active_owner(self):
         first_entered = asyncio.Event()
