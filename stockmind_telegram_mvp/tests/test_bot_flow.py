@@ -638,6 +638,34 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
             "You've reached today's beta research limit. It resets at midnight IST."
         )
 
+    async def test_photo_download_overflow_uses_telegram_interface_language(self):
+        photo_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=self.user_id, language_code="hi-IN"),
+            photo=[SimpleNamespace(file_id="telegram-file-id", file_size=None)],
+            caption="BTC 1H",
+            answer=AsyncMock(),
+        )
+
+        async def overflow_download(file_path, destination):
+            destination.write(b"12345")
+
+        with patch.object(bot_module, "MAX_CHART_IMAGE_BYTES", 4), patch.object(
+            bot_module.bot,
+            "get_file",
+            new=AsyncMock(return_value=SimpleNamespace(file_path="photos/test.jpg")),
+        ) as get_file, patch.object(
+            bot_module.bot,
+            "download_file",
+            new=AsyncMock(side_effect=overflow_download),
+        ) as download_file:
+            await bot_module.handle_chart_photo(photo_message)
+
+        get_file.assert_awaited_once_with("telegram-file-id")
+        download_file.assert_awaited_once()
+        reply = photo_message.answer.await_args.args[0]
+        self.assertIn("यह image बहुत बड़ी है", reply)
+        self.assertNotIn("That screenshot is too large", reply)
+
 
 class BotModuleResourceCleanup(unittest.TestCase):
     @classmethod
