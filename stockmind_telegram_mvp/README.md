@@ -64,9 +64,12 @@ beta-admission plus daily-slot reservation is one SQLite `BEGIN IMMEDIATE`
 transaction, preventing separate processes on the same host and database from
 overbooking the cap or a user's daily limit. SQLite must remain on persistent
 local storage, not a network filesystem. Conversation history is also stored
-in SQLite, limited to the latest `MAX_HISTORY_MESSAGES` entries per user, and
-restored after restart. Only message text is stored; chart image bytes are not
-retained (chart turns store a short attachment placeholder). `/reset` deletes
+in SQLite, limited to the latest `MAX_HISTORY_MESSAGES` entries and
+`MAX_HISTORY_BYTES` UTF-8 bytes per user, and restored after restart. Oversized
+messages are shortened with an explicit marker and older context is discarded
+first; the same byte cap is applied to the process-local cache and model input.
+Only message text is stored; chart image bytes are not retained (chart turns
+store a short attachment placeholder). `/reset` deletes
 the user's saved history and local cache. Same-user async locks remain
 process-local, so multiple bot replicas still need shared infrastructure and
 distributed per-user locking. Low-level image-decoder validation messages may
@@ -80,6 +83,7 @@ still be returned in English.
 - DAILY_QUERY_LIMIT (default: 10)
 - BETA_USER_LIMIT (default: 10)
 - MAX_HISTORY_MESSAGES (default: 12)
+- MAX_HISTORY_BYTES (default: 24 KiB of UTF-8 text across the retained conversation)
 - OPENAI_VISION_MODEL (defaults to OPENAI_MODEL; must support image input and structured outputs; default GPT-6 Luna)
 - MAX_CHART_IMAGE_BYTES (default: 5 MB)
 - RESEARCH_TURN_TIMEOUT_SECONDS (default: 120 seconds; finite positive number)
@@ -124,7 +128,7 @@ The bot now returns a second image with translucent supply (red) and demand (gre
 - Indian cash-market session reference: 09:15–15:30 IST. Crypto markets trade 24/7.
 
 ## Important prototype limitations
-- Beta membership and daily usage are stored in SQLite. Photo/document handlers perform a non-consuming beta-cap and daily-quota preflight before downloading chart bytes, and the research handler repeats that preflight before image decoding. After image validation, beta admission and daily-slot consumption are committed together in one `BEGIN IMMEDIATE` transaction. Invalid images do not consume a daily slot; a request consumes one once it passes validation and admission, before provider work begins, so provider failures also count against the cap and repeated retries cannot bypass the spend guard. These records survive restarts only when the configured SQLite file is on persistent local storage. Conversation history is persisted as the latest `MAX_HISTORY_MESSAGES` text entries per user; chart image bytes are not stored, and `/reset` deletes the saved rows. Per-user locks remain process-local, so multiple replicas still require shared database infrastructure and distributed per-user locking. The lock registry counts active holders and queued waiters, then removes an entry after the last request exits; `/reset` uses the same lock and does not create history for an unknown user.
+- Beta membership and daily usage are stored in SQLite. Photo/document handlers perform a non-consuming beta-cap and daily-quota preflight before downloading chart bytes, and the research handler repeats that preflight before image decoding. After image validation, beta admission and daily-slot consumption are committed together in one `BEGIN IMMEDIATE` transaction. Invalid images do not consume a daily slot; a request consumes one once it passes validation and admission, before provider work begins, so provider failures also count against the cap and repeated retries cannot bypass the spend guard. These records survive restarts only when the configured SQLite file is on persistent local storage. Conversation history is persisted as the latest `MAX_HISTORY_MESSAGES` text entries per user within `MAX_HISTORY_BYTES` UTF-8 bytes. Oversized messages are shortened with an explicit marker and older context is discarded first; the same budget is applied before model input. Chart image bytes are not stored, and `/reset` deletes the saved rows. Per-user locks remain process-local, so multiple replicas still require shared database infrastructure and distributed per-user locking. The lock registry counts active holders and queued waiters, then removes an entry after the last request exits; `/reset` uses the same lock and does not create history for an unknown user.
 - Tapetide's free quota is limited and shared across REST and MCP. Each research turn is now bounded to at most 6 model-requested market-data tool calls, 12 KiB per serialized tool result and 36 KiB of serialized tool results total. Oversized time-series arrays are sampled from the end of the provider's returned order (stock search keeps the first matches) and carry explicit truncation metadata; oversized non-list payloads are withheld rather than passed as partial data. Within one research turn, duplicate requests are deduplicated by tool name and effective arguments after dispatcher defaults are applied. Symbol values are trimmed and uppercased where the provider does the same, and stock-search text is trimmed without case folding. Later duplicate calls receive a compact reference to the first tool result. Duplicate model calls still count against the six-call ceiling, and this cache is not shared across turns or users. These are per-turn context/call guards, not a provider-wide daily quota, request cache or guarantee that the upstream free plan will not be exhausted.
 - Do not assume a free API plan permits redistribution. Obtain written provider permission for any external beta or paid service.
 - Paid stock research/recommendations can raise Indian regulatory obligations. Get qualified compliance advice before monetisation.
@@ -231,7 +235,7 @@ model accuracy; real screenshots still require independent manual review.
 
 ## Telegram response delivery
 
-Research answers are retained in full in the conversation history. Before
+Research answers are delivered in full, but the persisted and model-supplied conversation context is bounded by `MAX_HISTORY_BYTES`; oversized history messages are shortened with an explicit marker. Before
 delivery, long answers are split into Telegram-safe messages (4,000 UTF-16
 code units per chunk, below Telegram's 4,096-character limit). The first chunk edits the
 progress message when possible; remaining chunks are sent as replies. Splitting
