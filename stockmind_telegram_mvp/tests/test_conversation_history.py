@@ -91,8 +91,14 @@ class ConversationHistoryStoreTests(unittest.TestCase):
 
         history = self.second.get(101, 12, max_bytes=256)
         total_bytes = sum(len(message["content"].encode("utf-8")) for message in history)
+        stored_bytes = self.first._connection.execute(
+            "SELECT COALESCE(SUM(LENGTH(CAST(content AS BLOB))), 0) "
+            "FROM conversation_messages WHERE user_id = ?",
+            (101,),
+        ).fetchone()[0]
 
         self.assertLessEqual(total_bytes, 256)
+        self.assertLessEqual(stored_bytes, 256)
         self.assertEqual([message["role"] for message in history], ["user", "assistant"])
         self.assertTrue(all("[message shortened" in item["content"] for item in history))
 
