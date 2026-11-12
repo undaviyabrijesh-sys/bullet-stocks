@@ -79,6 +79,12 @@ at intervals no longer than 30 seconds. An expired former owner cannot delete
 a newer owner's lock because release is scoped to a random owner token. If lock
 storage is unavailable or a lease is lost, the active request is stopped and
 research fails closed rather than continuing without request coordination.
+A same-user research request or `/reset` that cannot acquire the lock within
+`USER_LOCK_WAIT_TIMEOUT_SECONDS` (default 30 seconds) receives a localized
+busy response instead of waiting indefinitely. A busy research request is
+rejected before daily-slot reservation, so it does not consume a research
+quota. The timeout bounds lock polling; a single in-flight SQLite operation
+can additionally take up to the SQLite busy timeout to finish.
 This is same-host/local-file coordination only:
 do not put SQLite on a network filesystem or point different hosts at one
 database file. Multi-host replicas require a dedicated shared lock service or
@@ -97,6 +103,7 @@ English.
 - OPENAI_VISION_MODEL (defaults to OPENAI_MODEL; must support image input and structured outputs; default GPT-6 Luna)
 - MAX_CHART_IMAGE_BYTES (default: 5 MB)
 - RESEARCH_TURN_TIMEOUT_SECONDS (default: 120 seconds; finite positive number)
+- USER_LOCK_WAIT_TIMEOUT_SECONDS (default: 30 seconds; finite positive number)
 - STOCKMIND_PREFERENCES_DB (SQLite file path for persistent UI-language preferences, beta membership, daily quotas, conversation history and same-host per-user request leases)
 
 ## Provider request bounds
