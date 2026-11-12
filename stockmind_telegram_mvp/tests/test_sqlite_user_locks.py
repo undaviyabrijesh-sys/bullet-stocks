@@ -12,6 +12,7 @@ from unittest.mock import patch
 from stockmind_telegram_mvp.app.user_locks import (
     LEASE_LOST_CANCEL_MESSAGE,
     SQLiteUserLockRegistry,
+    UserLockBusy,
     UserLockRegistry,
     create_user_lock_registry,
 )
@@ -363,6 +364,60 @@ class SQLiteUserLockRegistryTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(self.first), 0)
 
+    async def test_wait_timeout_returns_busy_without_disturbing_active_owner(self):
+        holder = SQLiteUserLockRegistry(
+            self.database_path,
+            lease_seconds=0.3,
+            heartbeat_interval=0.05,
+            poll_interval=0.005,
+        )
+        impatient = SQLiteUserLockRegistry(
+            self.database_path,
+            lease_seconds=0.3,
+            heartbeat_interval=0.05,
+            poll_interval=0.005,
+            wait_timeout_seconds=0.03,
+        )
+        entered = asyncio.Event()
+
+        async def active_request():
+            async with holder.hold(4001):
+                entered.set()
+                await asyncio.sleep(0.12)
+
+        task = asyncio.create_task(active_request())
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        try:
+            with self.assertRaises(UserLockBusy):
+                async with impatient.hold(4001):
+                    self.fail("a timed-out waiter must not enter the protected section")
+            self.assertEqual(len(holder), 1)
+        finally:
+            await asyncio.wait_for(task, timeout=1)
+        self.assertEqual(len(holder), 0)
+
+    async def test_in_memory_wait_timeout_returns_busy(self):
+        registry = UserLockRegistry(wait_timeout_seconds=0.02)
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def active_request():
+            async with registry.hold(4002):
+                entered.set()
+                await release.wait()
+
+        task = asyncio.create_task(active_request())
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        try:
+            with self.assertRaises(UserLockBusy):
+                async with registry.hold(4002):
+                    self.fail("a timed-out in-memory waiter must not enter")
+            self.assertEqual(len(registry), 1)
+        finally:
+            release.set()
+            await asyncio.wait_for(task, timeout=1)
+        self.assertEqual(len(registry), 0)
+
     def test_rejects_invalid_user_ids_and_lease_configuration(self):
         for invalid_user_id in (True, 0, -1, "1001"):
             with self.subTest(user_id=invalid_user_id):
@@ -375,6 +430,15 @@ class SQLiteUserLockRegistryTests(unittest.IsolatedAsyncioTestCase):
                 lease_seconds=1,
                 heartbeat_interval=1,
             )
+        for invalid_timeout in (True, 0, -1, float("nan"), float("inf")):
+            with self.subTest(wait_timeout_seconds=invalid_timeout):
+                with self.assertRaisesRegex(ValueError, "wait_timeout_seconds"):
+                    SQLiteUserLockRegistry(
+                        self.database_path,
+                        wait_timeout_seconds=invalid_timeout,
+                    )
+        with self.assertRaisesRegex(ValueError, "wait_timeout_seconds"):
+            UserLockRegistry(wait_timeout_seconds=0)
 
     def test_factory_keeps_in_memory_test_mode_process_local(self):
         self.assertIsInstance(create_user_lock_registry(":memory:"), UserLockRegistry)
