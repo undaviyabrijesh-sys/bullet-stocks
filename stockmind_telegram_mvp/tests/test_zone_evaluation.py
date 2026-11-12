@@ -50,6 +50,7 @@ def zone(zone_type="demand", **overrides):
 def prediction(zone_type="demand", **overrides):
     value = zone(zone_type, **overrides)
     value.setdefault("draw_overlay", True)
+    value.setdefault("confidence", "high")
     return value
 
 
@@ -107,15 +108,22 @@ class ZoneEvaluationTests(unittest.TestCase):
         self.assertEqual(result["overall"]["predicted"], 2)
         self.assertEqual(result["ignored_prediction_count"], 1)
 
-    def test_missing_legacy_confidence_is_reported_separately(self):
-        result = evaluate([prediction()], [zone()])
+    def test_missing_legacy_confidence_is_reported_but_not_scored_as_drawable(self):
+        legacy = zone()
+        legacy["draw_overlay"] = True
+        result = evaluate([legacy], [zone()])
         row = result["confidence_stratified_results"]["not_reported_or_invalid"]
 
         self.assertEqual(row["candidate_count"], 1)
-        self.assertEqual(row["drawable_count"], 1)
-        self.assertEqual(row["matched_count"], 1)
-        self.assertEqual(row["precision"], 1.0)
-        self.assertTrue(row["geometry_scored"])
+        self.assertEqual(row["drawable_count"], 0)
+        self.assertEqual(row["matched_count"], 0)
+        self.assertEqual(row["false_positive_count"], 0)
+        self.assertEqual(row["suppressed_or_invalid_count"], 1)
+        self.assertIsNone(row["precision"])
+        self.assertFalse(row["geometry_scored"])
+        self.assertEqual(result["overall"]["predicted"], 0)
+        self.assertEqual(result["overall"]["false_negative"], 1)
+        self.assertEqual(result["ignored_prediction_count"], 1)
 
     def test_exact_match_has_perfect_scores(self):
         result = evaluate([prediction()], [zone()])
