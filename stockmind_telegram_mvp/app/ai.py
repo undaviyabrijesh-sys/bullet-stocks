@@ -291,7 +291,7 @@ def _completion_message(response, operation: str):
     choices = getattr(response, "choices", None)
     if not isinstance(choices, (list, tuple)) or not choices:
         raise ResearchResponseIncomplete(
-            f"{operation} response did not contain a completion choice."
+            f"{operation} response returned no completion choice."
         )
 
     choice = choices[0]
