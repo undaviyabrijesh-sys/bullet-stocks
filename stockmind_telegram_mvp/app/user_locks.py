@@ -22,6 +22,28 @@ logger = logging.getLogger(__name__)
 LEASE_LOST_CANCEL_MESSAGE = "stockmind-user-lock-lease-lost"
 
 
+async def _await_shielded_to_completion(task):
+    """Finish a worker/cleanup future even if the caller is cancelled repeatedly.
+
+    asyncio.to_thread cannot stop its worker thread. If cancellation abandons a
+    shielded acquisition or release, that thread may still mutate the lock row.
+    Consume additional cancellation requests while waiting, then let the caller
+    re-raise cancellation after the critical cleanup has completed.
+    """
+    cancellation = None
+    while True:
+        try:
+            return await asyncio.shield(task), cancellation
+        except asyncio.CancelledError as exc:
+            if cancellation is None:
+                cancellation = exc
+            current_task = asyncio.current_task()
+            if current_task is not None:
+                current_task.uncancel()
+            if task.done():
+                return task.result(), cancellation
+
+
 class UserLockUnavailable(RuntimeError):
     """Raised when the shared lock store cannot safely grant or maintain a lock."""
 
@@ -208,15 +230,15 @@ class SQLiteUserLockRegistry:
                 acquired = await asyncio.shield(attempt)
             except asyncio.CancelledError:
                 # to_thread cannot be force-stopped. Wait for its result and
-                # release a lock if the SQLite operation won the race.
+                # release a lock if the SQLite operation won the race. Repeated
+                # cancellation must not abandon that worker before cleanup ends.
                 try:
-                    acquired = await asyncio.shield(attempt)
+                    acquired, _ = await _await_shielded_to_completion(attempt)
                     if acquired:
-                        await asyncio.shield(
-                            asyncio.create_task(
-                                asyncio.to_thread(self._release, user_id, owner_token)
-                            )
+                        release_task = asyncio.create_task(
+                            asyncio.to_thread(self._release, user_id, owner_token)
                         )
+                        await _await_shielded_to_completion(release_task)
                 except Exception:
                     logger.exception("Could not clean up a cancelled StockMind lock acquisition")
                 raise
@@ -259,22 +281,28 @@ class SQLiteUserLockRegistry:
             yield
         finally:
             heartbeat.cancel()
-            await asyncio.gather(heartbeat, return_exceptions=True)
+            cleanup_cancellation = None
+            try:
+                _, heartbeat_cancellation = await _await_shielded_to_completion(
+                    asyncio.gather(heartbeat, return_exceptions=True)
+                )
+                cleanup_cancellation = heartbeat_cancellation
+            except Exception:
+                logger.exception("Could not finish StockMind per-user lock heartbeat cleanup")
+
             release_task = asyncio.create_task(
                 asyncio.to_thread(self._release, user_id, owner_token)
             )
             try:
-                await asyncio.shield(release_task)
-            except asyncio.CancelledError:
-                # Complete the conditional release even while propagating
-                # cancellation from shutdown or a lost lease.
-                try:
-                    await asyncio.shield(release_task)
-                except Exception:
-                    logger.exception("Could not release a StockMind per-user lock")
-                raise
+                _, release_cancellation = await _await_shielded_to_completion(release_task)
+                cleanup_cancellation = cleanup_cancellation or release_cancellation
             except Exception:
                 logger.exception("Could not release a StockMind per-user lock")
+
+            # If cancellation arrived while cleanup was running, propagate it
+            # only after the worker has completed its conditional release.
+            if cleanup_cancellation is not None:
+                raise cleanup_cancellation
 
     def clear(self) -> None:
         """Remove expired rows only; active leases cannot be cleared."""

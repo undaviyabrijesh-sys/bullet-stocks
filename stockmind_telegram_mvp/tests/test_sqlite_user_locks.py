@@ -4,8 +4,10 @@ import asyncio
 import multiprocessing
 import sqlite3
 import tempfile
+import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from stockmind_telegram_mvp.app.user_locks import (
     LEASE_LOST_CANCEL_MESSAGE,
@@ -279,6 +281,86 @@ class SQLiteUserLockRegistryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.first), 1)
         release_first.set()
         await asyncio.wait_for(first_task, timeout=1)
+        self.assertEqual(len(self.first), 0)
+
+    async def test_repeated_cancellation_during_acquire_waits_for_worker_and_releases_won_lock(self):
+        worker_started = threading.Event()
+        finish_worker = threading.Event()
+        original_try_acquire = self.first._try_acquire
+
+        def delayed_try_acquire(user_id, owner_token):
+            worker_started.set()
+            if not finish_worker.wait(2):
+                raise TimeoutError("test acquisition worker was not released")
+            return original_try_acquire(user_id, owner_token)
+
+        async def request():
+            async with self.first.hold(3001):
+                self.fail("cancelled acquisition must not enter the protected section")
+
+        with patch.object(self.first, "_try_acquire", side_effect=delayed_try_acquire):
+            task = asyncio.create_task(request())
+            try:
+                self.assertTrue(await asyncio.to_thread(worker_started.wait, 1))
+                task.cancel()
+                await asyncio.sleep(0.02)
+                task.cancel()
+                await asyncio.sleep(0.02)
+
+                # The worker is still running; cleanup must keep the coroutine
+                # alive rather than abandoning a possible successful acquisition.
+                self.assertFalse(task.done())
+                finish_worker.set()
+                with self.assertRaises(asyncio.CancelledError):
+                    await asyncio.wait_for(task, timeout=1)
+            finally:
+                finish_worker.set()
+                if not task.done():
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+
+        self.assertEqual(len(self.first), 0)
+
+    async def test_repeated_cancellation_during_release_waits_for_worker_to_finish(self):
+        worker_started = threading.Event()
+        finish_worker = threading.Event()
+        entered = asyncio.Event()
+        leave_section = asyncio.Event()
+        original_release = self.first._release
+
+        def delayed_release(user_id, owner_token):
+            worker_started.set()
+            if not finish_worker.wait(2):
+                raise TimeoutError("test release worker was not released")
+            return original_release(user_id, owner_token)
+
+        async def request():
+            async with self.first.hold(3002):
+                entered.set()
+                await leave_section.wait()
+
+        with patch.object(self.first, "_release", side_effect=delayed_release):
+            task = asyncio.create_task(request())
+            try:
+                await asyncio.wait_for(entered.wait(), timeout=1)
+                leave_section.set()
+                self.assertTrue(await asyncio.to_thread(worker_started.wait, 1))
+                task.cancel()
+                await asyncio.sleep(0.02)
+                task.cancel()
+                await asyncio.sleep(0.02)
+
+                # The SQLite worker must finish before cancellation escapes.
+                self.assertFalse(task.done())
+                finish_worker.set()
+                with self.assertRaises(asyncio.CancelledError):
+                    await asyncio.wait_for(task, timeout=1)
+            finally:
+                finish_worker.set()
+                if not task.done():
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+
         self.assertEqual(len(self.first), 0)
 
     def test_rejects_invalid_user_ids_and_lease_configuration(self):
