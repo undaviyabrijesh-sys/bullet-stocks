@@ -1,3 +1,4 @@
+import math
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -26,6 +27,9 @@ MAX_HISTORY_BYTES = int(os.getenv("MAX_HISTORY_BYTES", str(24 * 1024)))
 if MAX_HISTORY_BYTES <= 0:
     raise RuntimeError("MAX_HISTORY_BYTES must be a positive integer.")
 RESEARCH_TURN_TIMEOUT_SECONDS = float(os.getenv("RESEARCH_TURN_TIMEOUT_SECONDS", "120"))
+USER_LOCK_WAIT_TIMEOUT_SECONDS = float(os.getenv("USER_LOCK_WAIT_TIMEOUT_SECONDS", "30"))
+if not math.isfinite(USER_LOCK_WAIT_TIMEOUT_SECONDS) or USER_LOCK_WAIT_TIMEOUT_SECONDS <= 0:
+    raise RuntimeError("USER_LOCK_WAIT_TIMEOUT_SECONDS must be a positive finite number.")
 _DEFAULT_PREFERENCES_DB = Path(__file__).resolve().parents[1] / "data" / "user_preferences.sqlite3"
 USER_PREFERENCES_DB = os.getenv(
     "STOCKMIND_PREFERENCES_DB",
