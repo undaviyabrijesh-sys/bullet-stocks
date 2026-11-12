@@ -82,11 +82,21 @@ def prepare_chart_image(
     ):
         raise ValueError("max_output_bytes must be a positive integer or None")
 
-    mime_type = validate_chart_image(image_bytes)
-    if max_output_bytes is not None and len(image_bytes) > max_output_bytes:
+    # Enforce the raw byte budget before Pillow fully decodes the image.
+    # This keeps oversized direct callers from spending CPU/memory on a file
+    # that will be rejected anyway. Invalid/empty inputs still flow through
+    # validate_chart_image so they retain its specific user-facing error.
+    if (
+        max_output_bytes is not None
+        and isinstance(image_bytes, bytes)
+        and image_bytes
+        and len(image_bytes) > max_output_bytes
+    ):
         raise ValueError(
             f"Chart image exceeds the {max_output_bytes}-byte processing limit."
         )
+
+    mime_type = validate_chart_image(image_bytes)
 
     with Image.open(BytesIO(image_bytes)) as image:
         orientation = image.getexif().get(274, 1)

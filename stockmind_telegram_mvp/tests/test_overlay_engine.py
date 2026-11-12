@@ -111,6 +111,24 @@ class OverlayRendererTests(unittest.TestCase):
             ):
                 prepare_chart_image(original, max_output_bytes=limit)
 
+    def test_rejects_oversized_input_before_full_image_validation(self):
+        with patch.object(overlay_engine, "validate_chart_image") as validate:
+            with self.assertRaisesRegex(ValueError, "exceeds the 9-byte processing limit"):
+                prepare_chart_image(b"x" * 10, max_output_bytes=9)
+        validate.assert_not_called()
+
+    def test_input_exactly_at_byte_limit_is_still_validated(self):
+        original = sample_image()
+        with patch.object(
+            overlay_engine, "validate_chart_image", wraps=validate_chart_image
+        ) as validate:
+            normalized, mime_type = prepare_chart_image(
+                original, max_output_bytes=len(original)
+            )
+        self.assertEqual(normalized, original)
+        self.assertEqual(mime_type, "image/png")
+        validate.assert_called_once_with(original)
+
     def test_rejects_truncated_pixel_data_or_container_before_vision_request(self):
         # Pillow's verify() alone accepts this truncated JPEG; full pixel decoding
         # detects the missing image data before the bot sends it to the vision API.
