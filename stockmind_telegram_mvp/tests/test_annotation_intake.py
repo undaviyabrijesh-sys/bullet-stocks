@@ -145,7 +145,7 @@ class AnnotationIntakeTests(unittest.TestCase):
         )
         original = output.getvalue()
         with Image.open(BytesIO(original)) as image:
-            original_pixels = list(image.convert("RGB").getdata())
+            original_pixels = image.convert("RGB").tobytes()
         self.source.write_bytes(original)
 
         result = prepare_annotation_draft(
@@ -155,7 +155,7 @@ class AnnotationIntakeTests(unittest.TestCase):
         with Image.open(BytesIO(stored)) as image:
             self.assertEqual(image.size, (32, 24))
             self.assertFalse(image.getexif())
-            self.assertEqual(list(image.convert("RGB").getdata()), original_pixels)
+            self.assertEqual(image.convert("RGB").tobytes(), original_pixels)
         self.assertEqual(
             result["image_sha256"], hashlib.sha256(stored).hexdigest()
         )
