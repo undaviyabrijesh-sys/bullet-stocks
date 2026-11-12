@@ -1,8 +1,9 @@
 """Create privacy-conscious, non-benchmark-ready drafts for manual chart annotation.
 
-The intake utility validates screenshots and normalizes EXIF orientation before
-storing them. It records a SHA-256 and dimensions for those exact canonical bytes
-and never invents zones, predictions, prices, identities or approval timestamps.
+The intake utility validates screenshots, normalizes EXIF orientation and removes
+embedded descriptive metadata before storing them when such metadata is present.
+It records a SHA-256 and dimensions for those exact canonical bytes and never
+invents zones, predictions, prices, identities or approval timestamps.
 """
 
 import argparse
@@ -22,6 +23,92 @@ _GUIDELINE_VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _CONTEXT_FIELDS = ("asset_class", "symbol", "exchange", "timeframe")
 _CONTEXT_LIMITS = {"asset_class": 32, "symbol": 64, "exchange": 64, "timeframe": 16}
 _IMAGE_EXTENSIONS = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
+
+
+# Keep color/format information needed to render the screenshot, but do not carry
+# descriptive metadata (EXIF, XMP, IPTC/Photoshop blocks, comments or PNG text)
+# into a manually curated research dataset.
+_SAFE_IMAGE_INFO_KEYS = {
+    "icc_profile", "dpi", "gamma", "chromaticity", "srgb", "transparency",
+    "jfif", "jfif_version", "jfif_unit", "jfif_density", "progressive",
+    "progression", "adobe", "adobe_transform", "loop", "background",
+    "timestamp", "duration",
+}
+
+
+def _has_embedded_descriptive_metadata(image):
+    """Return whether Pillow exposes metadata that should not enter the fixture set."""
+    try:
+        if image.getexif():
+            return True
+    except (OSError, SyntaxError, TypeError, ValueError) as exc:
+        raise ValueError("could not safely inspect screenshot metadata") from exc
+    return any(
+        str(key).strip().casefold() not in _SAFE_IMAGE_INFO_KEYS
+        for key in image.info
+    )
+
+
+def _strip_annotation_metadata(image_bytes, max_image_bytes):
+    """Remove descriptive metadata while preserving the canonical visible image.
+
+    Images without descriptive metadata remain byte-for-byte unchanged. Metadata-
+    bearing JPEGs are re-encoded at maximum quality with 4:4:4 chroma; WEBP is
+    re-encoded losslessly; PNG remains lossless. The resulting bytes—not the
+    original upload—are the hash-bound image that must be used for prediction.
+    """
+    with Image.open(BytesIO(image_bytes)) as image:
+        if not _has_embedded_descriptive_metadata(image):
+            return image_bytes
+
+        image.load()
+        image_format = image.format
+        save_options = {}
+        icc_profile = image.info.get("icc_profile")
+        if icc_profile:
+            save_options["icc_profile"] = icc_profile
+
+        if image_format == "JPEG":
+            if image.mode not in {"L", "RGB", "CMYK"}:
+                image = image.convert("RGB")
+            save_options.update({
+                "quality": 100,
+                "subsampling": 0,
+                "optimize": True,
+            })
+        elif image_format == "WEBP":
+            if image.mode not in {"L", "RGB", "RGBA"}:
+                image = image.convert("RGB")
+            save_options.update({"lossless": True, "method": 6})
+        elif image_format == "PNG":
+            if image.mode == "P" and "transparency" in image.info:
+                save_options["transparency"] = image.info["transparency"]
+            save_options["optimize"] = True
+        else:
+            raise ValueError("Please use a JPEG, PNG or WEBP chart screenshot.")
+
+        # Some Pillow format plugins copy metadata directly from image.info
+        # even when it is not passed as a save option (notably WEBP EXIF/XMP).
+        for key in tuple(image.info):
+            if str(key).strip().casefold() not in _SAFE_IMAGE_INFO_KEYS:
+                image.info.pop(key, None)
+
+        output = BytesIO()
+        image.save(output, format=image_format, **save_options)
+        sanitized_bytes = output.getvalue()
+
+    if len(sanitized_bytes) > max_image_bytes:
+        raise ValueError(
+            "Metadata-cleaned chart image exceeds max_image_bytes "
+            f"({max_image_bytes}); resize or re-export the screenshot."
+        )
+
+    with Image.open(BytesIO(sanitized_bytes)) as sanitized:
+        sanitized.load()
+        if _has_embedded_descriptive_metadata(sanitized):
+            raise ValueError("could not remove embedded screenshot metadata safely")
+
+    return sanitized_bytes
 
 
 def _positive_integer(value, field):
@@ -92,6 +179,7 @@ def prepare_annotation_draft(
     image_bytes, mime_type = prepare_chart_image(
         image_bytes, max_output_bytes=max_image_bytes
     )
+    image_bytes = _strip_annotation_metadata(image_bytes, max_image_bytes)
 
     with Image.open(BytesIO(image_bytes)) as image:
         width, height = image.size

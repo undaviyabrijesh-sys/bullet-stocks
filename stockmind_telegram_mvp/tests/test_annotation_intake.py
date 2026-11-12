@@ -8,7 +8,10 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from stockmind_telegram_mvp.app.annotation_intake import prepare_annotation_draft
+from stockmind_telegram_mvp.app.annotation_intake import (
+    _strip_annotation_metadata,
+    prepare_annotation_draft,
+)
 
 
 def _png_bytes(size=(64, 48)):
@@ -78,6 +81,97 @@ class AnnotationIntakeTests(unittest.TestCase):
         self.assertEqual(draft["image_height"], 64)
         self.assertEqual(result["image_sha256"], hashlib.sha256(stored).hexdigest())
         self.assertNotEqual(stored, original)
+
+
+    def test_strips_png_exif_and_descriptive_text_metadata(self):
+        from PIL.PngImagePlugin import PngInfo
+
+        exif = Image.Exif()
+        exif[315] = "Private annotator name"
+        exif[270] = "Private screenshot description"
+        pnginfo = PngInfo()
+        pnginfo.add_text("Author", "Private annotator name")
+        pnginfo.add_text("Comment", "Internal note")
+        output = BytesIO()
+        original_image = Image.new("RGB", (64, 48), (24, 80, 140))
+        original_image.save(
+            output, format="PNG", exif=exif, pnginfo=pnginfo
+        )
+        original = output.getvalue()
+        self.source.write_bytes(original)
+
+        result = prepare_annotation_draft(
+            self.source, self.output, "metadata-btc-1h"
+        )
+        stored = (self.output / result["image_file"]).read_bytes()
+        with Image.open(BytesIO(stored)) as image:
+            self.assertEqual(image.size, (64, 48))
+            self.assertEqual(image.getpixel((10, 10)), (24, 80, 140))
+            self.assertFalse(image.getexif())
+            self.assertNotIn("Author", image.info)
+            self.assertNotIn("Comment", image.info)
+        self.assertNotEqual(stored, original)
+        self.assertEqual(
+            result["image_sha256"], hashlib.sha256(stored).hexdigest()
+        )
+
+    def test_strips_jpeg_exif_without_changing_dimensions(self):
+        exif = Image.Exif()
+        exif[315] = "Private annotator name"
+        output = BytesIO()
+        Image.new("RGB", (80, 60), (90, 120, 150)).save(
+            output, format="JPEG", quality=90, exif=exif
+        )
+        self.source.write_bytes(output.getvalue())
+
+        result = prepare_annotation_draft(
+            self.source, self.output, "metadata-jpeg-1h"
+        )
+        stored = (self.output / result["image_file"]).read_bytes()
+        with Image.open(BytesIO(stored)) as image:
+            self.assertEqual(image.size, (80, 60))
+            self.assertFalse(image.getexif())
+        self.assertEqual(
+            result["image_sha256"], hashlib.sha256(stored).hexdigest()
+        )
+
+    def test_strips_webp_exif_with_lossless_pixel_preservation(self):
+        exif = Image.Exif()
+        exif[315] = "Private annotator name"
+        output = BytesIO()
+        original_image = Image.new("RGB", (32, 24), (12, 34, 56))
+        original_image.save(
+            output, format="WEBP", quality=80, exif=exif
+        )
+        original = output.getvalue()
+        with Image.open(BytesIO(original)) as image:
+            original_pixels = list(image.convert("RGB").getdata())
+        self.source.write_bytes(original)
+
+        result = prepare_annotation_draft(
+            self.source, self.output, "metadata-webp-1h"
+        )
+        stored = (self.output / result["image_file"]).read_bytes()
+        with Image.open(BytesIO(stored)) as image:
+            self.assertEqual(image.size, (32, 24))
+            self.assertFalse(image.getexif())
+            self.assertEqual(list(image.convert("RGB").getdata()), original_pixels)
+        self.assertEqual(
+            result["image_sha256"], hashlib.sha256(stored).hexdigest()
+        )
+
+    def test_metadata_cleaning_respects_output_byte_limit(self):
+        from PIL.PngImagePlugin import PngInfo
+
+        pnginfo = PngInfo()
+        pnginfo.add_text("Author", "Private annotator name")
+        output = BytesIO()
+        Image.new("RGB", (64, 48), "white").save(
+            output, format="PNG", pnginfo=pnginfo
+        )
+        with self.assertRaisesRegex(ValueError, "Metadata-cleaned chart image exceeds"):
+            _strip_annotation_metadata(output.getvalue(), max_image_bytes=1)
+        self.assertFalse(self.output.exists())
 
     def test_rejects_oversized_image_before_creating_outputs(self):
         with self.assertRaisesRegex(ValueError, "exceeds max_image_bytes"):
