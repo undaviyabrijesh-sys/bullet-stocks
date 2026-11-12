@@ -425,6 +425,22 @@ class OverlayRendererTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(count, 1)
 
+    def test_drawable_pixel_geometry_requires_explicit_confidence(self):
+        zone = {
+            "zone_type": "demand", "draw_overlay": True,
+            "x_start": 0.2, "x_end": 0.8, "y_top": 0.3, "y_bottom": 0.5,
+        }
+
+        # The production/evaluation path must match the renderer's explicit
+        # high/medium confidence gate. Manual reference geometry opts out.
+        self.assertIsNone(normalized_zone_to_pixel_box(zone, 640, 360))
+        self.assertEqual(
+            normalized_zone_to_pixel_box(
+                zone, 640, 360, require_draw_overlay=False
+            ),
+            (128, 108, 512, 180),
+        )
+
     def test_low_confidence_zone_is_rejected_by_pixel_geometry_and_renderer(self):
         zone = {
             "zone_type": "demand", "draw_overlay": True, "confidence": "low",
