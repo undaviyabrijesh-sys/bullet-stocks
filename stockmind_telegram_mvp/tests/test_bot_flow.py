@@ -16,7 +16,10 @@ from unittest.mock import patch as environment_patch
 
 from stockmind_telegram_mvp.app.ai import ResearchTurnDeadlineExceeded
 from stockmind_telegram_mvp.app.telegram_delivery import split_telegram_text
-from stockmind_telegram_mvp.app.user_locks import LEASE_LOST_CANCEL_MESSAGE
+from stockmind_telegram_mvp.app.user_locks import (
+    LEASE_LOST_CANCEL_MESSAGE,
+    UserLockRegistry,
+)
 
 
 _TEST_ENV = {
@@ -206,6 +209,38 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
         self.message.answer.assert_awaited_once()
         self.assertIn("storage", self.message.answer.await_args.args[0].lower())
 
+    async def test_busy_same_user_request_is_rejected_before_quota_reservation(self):
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+
+        async def answer(history, user_text):
+            first_started.set()
+            await release_first.wait()
+            return f"answer: {user_text}"
+
+        research = self.use_research(answer=AsyncMock(side_effect=answer))
+        registry = UserLockRegistry(wait_timeout_seconds=0.02)
+        with patch.object(bot_module, "user_locks", registry), patch.object(
+            bot_module,
+            "_reserve_research_request",
+            wraps=bot_module._reserve_research_request,
+        ) as reserve:
+            first_task = asyncio.create_task(
+                bot_module.run_research(self.message, "first request")
+            )
+            await asyncio.wait_for(first_started.wait(), timeout=1)
+            await bot_module.run_research(self.message, "second request")
+
+            self.assertEqual(reserve.call_count, 1)
+            self.assertIn(
+                "Another StockMind request",
+                self.message.answer.await_args_list[-1].args[0],
+            )
+            release_first.set()
+            await asyncio.wait_for(first_task, timeout=1)
+
+        research.answer.assert_awaited_once()
+
     async def test_reset_fails_closed_when_shared_lock_store_is_unavailable(self):
         reset_message = SimpleNamespace(
             from_user=SimpleNamespace(id=self.user_id),
@@ -217,6 +252,35 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
 
         reset_message.answer.assert_awaited_once()
         self.assertIn("safely reset", reset_message.answer.await_args.args[0].lower())
+
+    async def test_reset_reports_busy_while_same_user_research_is_running(self):
+        research_started = asyncio.Event()
+        release_research = asyncio.Event()
+
+        async def answer(history, user_text):
+            research_started.set()
+            await release_research.wait()
+            return "completed answer"
+
+        self.use_research(answer=AsyncMock(side_effect=answer))
+        registry = UserLockRegistry(wait_timeout_seconds=0.02)
+        with patch.object(bot_module, "user_locks", registry):
+            research_task = asyncio.create_task(
+                bot_module.run_research(self.message, "active request")
+            )
+            await asyncio.wait_for(research_started.wait(), timeout=1)
+            reset_message = SimpleNamespace(
+                from_user=SimpleNamespace(id=self.user_id),
+                answer=AsyncMock(),
+            )
+            await bot_module.reset(reset_message)
+            reset_message.answer.assert_awaited_once()
+            self.assertIn(
+                "request is still running",
+                reset_message.answer.await_args.args[0],
+            )
+            release_research.set()
+            await asyncio.wait_for(research_task, timeout=1)
 
     async def test_research_reports_lost_shared_lock_and_does_not_start_model(self):
         class LostLeaseContext:
