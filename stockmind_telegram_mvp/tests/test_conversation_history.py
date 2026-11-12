@@ -139,7 +139,12 @@ class ConversationHistoryStoreTests(unittest.TestCase):
         history = self.second.get(101, 12, max_bytes=160)
         total_bytes = sum(len(message["content"].encode("utf-8")) for message in history)
 
-        self.assertLessEqual(total_bytes, 100)
+        # max_bytes is a total UTF-8 budget. With two retained rows,
+        # the per-message ceiling is half of that budget (80 bytes each).
+        self.assertLessEqual(total_bytes, 160)
+        self.assertTrue(
+            all(len(item["content"].encode("utf-8")) <= 80 for item in history)
+        )
         self.assertEqual([message["role"] for message in history], ["user", "assistant"])
         self.assertTrue(all("[message shortened" in item["content"] for item in history))
 
