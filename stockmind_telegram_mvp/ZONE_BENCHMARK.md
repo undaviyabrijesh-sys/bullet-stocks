@@ -111,10 +111,15 @@ measure whether those hidden rectangles would have matched. Low-confidence
 candidate counts must not be interpreted as correct or incorrect detections.
 
 Legacy predictions with missing or unsupported confidence are grouped under
-not_reported_or_invalid. They remain visible in the report rather than being
-silently mixed with high- or medium-confidence predictions. For current
-dns-chart-v8 manifests, the schema validator requires an explicit valid
-confidence category and policy, so this group should be empty.
+not_reported_or_invalid. They remain visible in the candidate count, but they
+are not considered drawable: the production renderer requires an explicit
+high- or medium-confidence value. Such candidates increment
+suppressed_or_invalid_count, cannot contribute a true or false positive, and
+leave any otherwise matching manual reference as a false negative. The manual
+reference geometry path opts out of the confidence gate because reference
+annotations are not model overlays. For current dns-chart-v8 manifests, the
+schema validator requires an explicit valid confidence category and policy,
+so this group should be empty.
 
 Paired comparison validates the per-fixture confidence counts against the
 matched-zone evidence and overall drawable/ignored counts, then reports
