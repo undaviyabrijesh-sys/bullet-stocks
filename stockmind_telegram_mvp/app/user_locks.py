@@ -44,6 +44,10 @@ async def _await_shielded_to_completion(task):
                 return task.result(), cancellation
 
 
+class UserLockBusy(RuntimeError):
+    """Raised when another request holds this user's lock beyond the wait budget."""
+
+
 class UserLockUnavailable(RuntimeError):
     """Raised when the shared lock store cannot safely grant or maintain a lock."""
 
@@ -57,7 +61,15 @@ class _LockEntry:
 class UserLockRegistry:
     """Serialize work per key inside one asyncio event loop."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, wait_timeout_seconds: float = 30.0) -> None:
+        if (
+            isinstance(wait_timeout_seconds, bool)
+            or not isinstance(wait_timeout_seconds, (int, float))
+            or not math.isfinite(wait_timeout_seconds)
+            or wait_timeout_seconds <= 0
+        ):
+            raise ValueError("wait_timeout_seconds must be a positive finite number")
+        self.wait_timeout_seconds = float(wait_timeout_seconds)
         self._entries: dict[Hashable, _LockEntry] = {}
 
     @asynccontextmanager
@@ -70,9 +82,22 @@ class UserLockRegistry:
         # Count holders and waiters before the first await so cleanup cannot
         # remove an entry while another task is queued on the same lock.
         entry.references += 1
+        acquired = False
         try:
-            async with entry.lock:
+            try:
+                await asyncio.wait_for(
+                    entry.lock.acquire(),
+                    timeout=self.wait_timeout_seconds,
+                )
+            except asyncio.TimeoutError as exc:
+                raise UserLockBusy(
+                    "Timed out waiting for the per-user request lock"
+                ) from exc
+            acquired = True
+            try:
                 yield
+            finally:
+                entry.lock.release()
         finally:
             entry.references -= 1
             if entry.references == 0 and self._entries.get(key) is entry:
@@ -108,6 +133,7 @@ class SQLiteUserLockRegistry:
         lease_seconds: float = 180.0,
         heartbeat_interval: float | None = None,
         poll_interval: float = 0.1,
+        wait_timeout_seconds: float = 30.0,
     ) -> None:
         raw_path = str(database_path).strip()
         if not raw_path or raw_path == ":memory:":
@@ -115,6 +141,7 @@ class SQLiteUserLockRegistry:
         for value, name in (
             (lease_seconds, "lease_seconds"),
             (poll_interval, "poll_interval"),
+            (wait_timeout_seconds, "wait_timeout_seconds"),
         ):
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise ValueError(f"{name} must be a positive finite number")
@@ -138,6 +165,7 @@ class SQLiteUserLockRegistry:
         self.lease_seconds = float(lease_seconds)
         self.heartbeat_interval = float(heartbeat_interval)
         self.poll_interval = float(poll_interval)
+        self.wait_timeout_seconds = float(wait_timeout_seconds)
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
@@ -222,7 +250,10 @@ class SQLiteUserLockRegistry:
             connection.close()
 
     async def _acquire(self, user_id: int, owner_token: str) -> None:
+        deadline = time.monotonic() + self.wait_timeout_seconds
         while True:
+            if time.monotonic() >= deadline:
+                raise UserLockBusy("Timed out waiting for the per-user request lock")
             attempt = asyncio.create_task(
                 asyncio.to_thread(self._try_acquire, user_id, owner_token)
             )
@@ -247,7 +278,10 @@ class SQLiteUserLockRegistry:
 
             if acquired:
                 return
-            await asyncio.sleep(self.poll_interval)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise UserLockBusy("Timed out waiting for the per-user request lock")
+            await asyncio.sleep(min(self.poll_interval, remaining))
 
     async def _heartbeat(self, user_id: int, owner_token: str, owner_task: asyncio.Task) -> None:
         while True:
@@ -348,7 +382,9 @@ def create_user_lock_registry(database_path: str | Path, **kwargs):
     if not raw_path:
         raise ValueError("A non-empty SQLite database path is required")
     if raw_path == ":memory:":
-        return UserLockRegistry()
+        return UserLockRegistry(
+            wait_timeout_seconds=kwargs.get("wait_timeout_seconds", 30.0)
+        )
     return SQLiteUserLockRegistry(raw_path, **kwargs)
 
 
