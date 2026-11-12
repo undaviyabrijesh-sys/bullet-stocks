@@ -8,7 +8,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 
-from .ai import ResearchAI, ResearchTurnDeadlineExceeded
+from .ai import ResearchAI, ResearchTurnDeadlineExceeded, ResearchResponseIncomplete
 from .crypto import BinanceMarketData
 from .overlay_engine import prepare_chart_image, _render_overlay_prepared
 from .image_upload import BoundedBytesIO, UploadTooLargeError
@@ -396,6 +396,11 @@ async def _run_research_locked(
             )
         if not await send_analysis_text(message, status, failure_message):
             logger.warning("StockMind research deadline expired and Telegram could not deliver the timeout message")
+        return
+    except ResearchResponseIncomplete:
+        failure_message = translate(language, "research_incomplete")
+        if not await send_analysis_text(message, status, failure_message):
+            logger.warning("StockMind received an incomplete model response and Telegram could not deliver the warning")
         return
     except Exception:
         logger.exception("StockMind research request failed")

@@ -282,6 +282,37 @@ class ResearchTurnDeadlineExceeded(TimeoutError):
         )
 
 
+class ResearchResponseIncomplete(RuntimeError):
+    """Raised when the provider does not return a complete usable model response."""
+
+
+def _completion_message(response, operation: str):
+    """Reject missing, truncated or filtered completions before using their content/tools."""
+    choices = getattr(response, "choices", None)
+    if not isinstance(choices, (list, tuple)) or not choices:
+        raise ResearchResponseIncomplete(
+            f"{operation} response did not contain a completion choice."
+        )
+
+    choice = choices[0]
+    finish_reason = getattr(choice, "finish_reason", None)
+    if finish_reason == "length":
+        raise ResearchResponseIncomplete(
+            f"{operation} response was truncated by the model output limit."
+        )
+    if finish_reason == "content_filter":
+        raise ResearchResponseIncomplete(
+            f"{operation} response was withheld by the provider content filter."
+        )
+
+    message = getattr(choice, "message", None)
+    if message is None:
+        raise ResearchResponseIncomplete(
+            f"{operation} response did not contain a message."
+        )
+    return message
+
+
 MAX_TOOL_CALLS_PER_TURN = 6
 MAX_TOOL_RESULT_BYTES = 12 * 1024
 MAX_TOOL_RESULT_BYTES_PER_TURN = 36 * 1024
@@ -1186,9 +1217,12 @@ class ResearchAI:
         response = await self._await_with_turn_deadline(
             self.client.chat.completions.create(**request_options)
         )
-        raw = response.choices[0].message.content
-        if not raw:
-            raise RuntimeError("Empty chart analysis response.")
+        message = _completion_message(response, "Chart analysis")
+        raw = getattr(message, "content", None)
+        if not isinstance(raw, str) or not raw.strip():
+            raise ResearchResponseIncomplete(
+                "Chart analysis returned no structured response content."
+            )
         data = strict_json_loads(raw)
         if not isinstance(data, dict) or not isinstance(data.get("zones"), list):
             raise ValueError("Invalid chart analysis structure.")
@@ -1236,11 +1270,13 @@ class ResearchAI:
             if self.model.startswith("gpt-6-luna"):
                 request_options["reasoning_effort"] = "none"
             response = await self.client.chat.completions.create(**request_options)
-            message = response.choices[0].message
-            if not message.tool_calls:
-                return finalize_answer(
-                    message.content or "I couldn't prepare a reliable answer. Please try again."
-                )
+            message = _completion_message(response, "Research")
+            tool_calls = getattr(message, "tool_calls", None)
+            if not tool_calls:
+                content = getattr(message, "content", None)
+                if not isinstance(content, str) or not content.strip():
+                    content = "I couldn't prepare a reliable answer. Please try again."
+                return finalize_answer(content)
 
             remaining_calls = MAX_TOOL_CALLS_PER_TURN - tool_calls_used
             if len(message.tool_calls) > remaining_calls:

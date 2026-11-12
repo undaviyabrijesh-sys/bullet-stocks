@@ -126,7 +126,11 @@ _MESSAGES = {
             "OPENAI_VISION_MODEL is set to a vision-capable model and try again. "
             "No missing price level or market figure has been guessed."
         ),
-        "overlay_caption": (
+                "research_incomplete": (
+            "The model did not return a complete usable response. No partial result was presented as complete. "
+            "Please narrow the question or resend the screenshot."
+        ),
+"overlay_caption": (
             "StockMind AI visual zone overlay — estimated from this screenshot; verify against the chart price scale."
         ),
         "reset_done": "Conversation context cleared. Ask a new research question.",
@@ -220,7 +224,11 @@ _MESSAGES = {
             "अभी analysis पूरा नहीं हो पाया। स्क्रीनशॉट के लिए जाँचें कि OPENAI_VISION_MODEL में "
             "image-capable model सेट है। कोई price level या market figure अनुमान से नहीं जोड़ा गया।"
         ),
-        "overlay_caption": "StockMind AI का visual zone overlay — इस स्क्रीनशॉट से अनुमानित; chart price scale से जाँचें।",
+                "research_incomplete": (
+            "Model से पूरा और उपयोगी जवाब नहीं मिला। अधूरे जवाब को पूरा बताकर नहीं दिखाया गया। "
+            "कृपया सवाल छोटा करें या screenshot फिर भेजें।"
+        ),
+"overlay_caption": "StockMind AI का visual zone overlay — इस स्क्रीनशॉट से अनुमानित; chart price scale से जाँचें।",
         "reset_done": "बातचीत का context साफ़ कर दिया गया है। नया रिसर्च सवाल पूछें।",
         "reset_storage_failed": "इस session की बातचीत साफ़ कर दी गई है, लेकिन saved history delete नहीं हो पाई। कृपया थोड़ी देर बाद /reset फिर चलाएँ।",
         "reset_lock_unavailable": "Request coordination उपलब्ध नहीं होने के कारण बातचीत को सुरक्षित रूप से reset नहीं किया जा सका। कृपया थोड़ी देर बाद /reset फिर चलाएँ।",
@@ -303,7 +311,11 @@ _MESSAGES = {
             "હાલ analysis પૂર્ણ કરી શક્યો નથી. Screenshot માટે OPENAI_VISION_MODEL માં image-capable model "
             "સેટ છે તેની તપાસો. કોઈ price level અથવા market figure અંદાજથી ઉમેર્યો નથી."
         ),
-        "overlay_caption": "StockMind AI visual zone overlay — આ screenshot પરથી અંદાજિત; chart price scale સામે તપાસો.",
+                "research_incomplete": (
+            "મોડેલ તરફથી સંપૂર્ણ અને ઉપયોગી જવાબ મળ્યો નથી. અધૂરા જવાબને પૂર્ણ બતાવ્યો નથી. "
+            "કૃપા કરીને પ્રશ્ન ટૂંકો કરો અથવા screenshot ફરી મોકલો."
+        ),
+"overlay_caption": "StockMind AI visual zone overlay — આ screenshot પરથી અંદાજિત; chart price scale સામે તપાસો.",
         "reset_done": "વાતચીતનો context સાફ કર્યો છે. નવો research પ્રશ્ન પૂછો.",
         "reset_storage_failed": "આ session ની વાતચીત સાફ કરી છે, પરંતુ saved history delete થઈ શકી નથી. કૃપા કરીને થોડી વાર પછી /reset ફરી ચલાવો.",
         "reset_lock_unavailable": "Request coordination ઉપલબ્ધ ન હોવાથી વાતચીત સુરક્ષિત રીતે reset કરી શકાઈ નથી. કૃપા કરીને થોડી વાર પછી /reset ફરી ચલાવો.",

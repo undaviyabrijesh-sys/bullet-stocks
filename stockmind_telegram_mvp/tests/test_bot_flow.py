@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, patch
 from unittest.mock import patch as environment_patch
 
 
-from stockmind_telegram_mvp.app.ai import ResearchTurnDeadlineExceeded
+from stockmind_telegram_mvp.app.ai import ResearchTurnDeadlineExceeded, ResearchResponseIncomplete
 from stockmind_telegram_mvp.app.telegram_delivery import split_telegram_text
 from stockmind_telegram_mvp.app.user_locks import (
     LEASE_LOST_CANCEL_MESSAGE,
@@ -522,6 +522,20 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("research turn", failure_message)
         self.assertNotIn("chart analysis", failure_message)
         self.assertIn("0.02-second time budget expired", failure_message)
+        self.assertEqual(list(bot_module.histories[self.user_id]), [])
+
+    async def test_incomplete_model_response_is_reported_in_selected_language_without_history(self):
+        bot_module.user_languages[self.user_id] = "gu"
+        research = self.use_research(
+            answer=AsyncMock(side_effect=ResearchResponseIncomplete("truncated"))
+        )
+
+        await bot_module.run_research(self.message, "Analyse BTC")
+
+        research.answer.assert_awaited_once()
+        failure_message = self.status.edit_text.await_args.args[0]
+        self.assertIn("સંપૂર્ણ અને ઉપયોગી જવાબ", failure_message)
+        self.assertIn("અધૂરા જવાબને પૂર્ણ બતાવ્યો નથી", failure_message)
         self.assertEqual(list(bot_module.histories[self.user_id]), [])
 
     async def test_chart_analysis_is_saved_even_when_overlay_delivery_fails(self):
