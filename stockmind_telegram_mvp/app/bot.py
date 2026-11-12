@@ -14,6 +14,7 @@ from .overlay_engine import prepare_chart_image, _render_overlay_prepared
 from .image_upload import BoundedBytesIO, UploadTooLargeError
 from .telegram_delivery import send_analysis_text, send_overlay_photo
 from .user_locks import (
+    UserLockBusy,
     UserLockUnavailable,
     create_user_lock_registry,
     is_lease_lost_cancellation,
@@ -32,6 +33,7 @@ from .config import (
     OPENAI_MODEL,
     OPENAI_VISION_MODEL,
     RESEARCH_TURN_TIMEOUT_SECONDS,
+    USER_LOCK_WAIT_TIMEOUT_SECONDS,
     TAPETIDE_TOKEN,
     TELEGRAM_BOT_TOKEN,
     USER_PREFERENCES_DB,
@@ -62,6 +64,7 @@ try:
     user_locks = create_user_lock_registry(
         USER_PREFERENCES_DB,
         lease_seconds=max(180.0, RESEARCH_TURN_TIMEOUT_SECONDS + 60.0),
+        wait_timeout_seconds=USER_LOCK_WAIT_TIMEOUT_SECONDS,
     )
 except Exception:
     logger.exception("Persistent StockMind per-user request locking is unavailable")
@@ -293,6 +296,8 @@ async def run_research(
     try:
         async with user_locks.hold(user.id):
             await _run_research_locked(message, user_text, image_bytes, image_mime_type)
+    except UserLockBusy:
+        await message.answer(translate(_language_for(message), "request_busy"))
     except UserLockUnavailable:
         logger.exception("StockMind could not acquire the shared per-user request lock")
         await message.answer(translate(_language_for(message), "quota_storage_unavailable"))
@@ -499,6 +504,9 @@ async def reset(message: Message):
                     history_storage_unavailable_users.add(user_id)
             else:
                 history_storage_unavailable_users.add(user_id)
+    except UserLockBusy:
+        await message.answer(translate(language, "reset_lock_busy"))
+        return
     except UserLockUnavailable:
         logger.exception("StockMind could not acquire the per-user lock for /reset")
         await message.answer(translate(language, "reset_lock_unavailable"))
