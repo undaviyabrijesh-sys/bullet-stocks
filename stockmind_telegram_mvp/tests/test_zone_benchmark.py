@@ -135,6 +135,10 @@ def _normalized_market_context(context):
 
 def _prediction(zone_type="demand", **overrides):
     value = _zone(zone_type, **overrides)
+    # Generic synthetic drawable predictions model the renderer's current
+    # high/medium confidence gate. Tests for missing confidence remove it
+    # explicitly so legacy/invalid candidates remain covered.
+    value.setdefault("confidence", "high")
     value["draw_overlay"] = True
     return value
 
@@ -227,15 +231,22 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
 
 
     def test_report_aggregates_confidence_strata_without_scoring_suppressed_low_zones(self):
+        missing_confidence = _prediction()
+        missing_confidence.pop("confidence")
         self._write(
             self._record("drawable"),
             self._record("empty", predicted_zones=[]),
+            self._record(
+                "missing-confidence",
+                reference_zones=[],
+                predicted_zones=[missing_confidence],
+            ),
         )
 
         result = evaluate_benchmark_manifest(self.manifest)
-        summary = result["confidence_stratified_results"]["not_reported_or_invalid"]
+        summary = result["confidence_stratified_results"]["high"]
 
-        self.assertEqual(result["fixture_count"], 2)
+        self.assertEqual(result["fixture_count"], 3)
         self.assertEqual(summary["candidate_count"], 1)
         self.assertEqual(summary["drawable_count"], 1)
         self.assertEqual(summary["matched_count"], 1)
@@ -243,13 +254,19 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         self.assertEqual(summary["fixture_count_with_candidates"], 1)
         self.assertEqual(summary["fixture_count_with_drawable_predictions"], 1)
         self.assertEqual(summary["fixture_count_with_matches"], 1)
-        empty_summary = result["fixtures"][1]["confidence_stratified_results"]["not_reported_or_invalid"]
+        empty_summary = result["fixtures"][1]["confidence_stratified_results"]["high"]
         self.assertEqual(empty_summary["fixture_count_with_candidates"], 0)
         self.assertEqual(empty_summary["fixture_count_with_drawable_predictions"], 0)
         self.assertEqual(empty_summary["fixture_count_with_matches"], 0)
         self.assertEqual(result["confidence_stratified_results"]["low"]["candidate_count"], 0)
+
+        invalid_summary = result["confidence_stratified_results"]["not_reported_or_invalid"]
+        self.assertEqual(invalid_summary["candidate_count"], 1)
+        self.assertEqual(invalid_summary["drawable_count"], 0)
+        self.assertEqual(invalid_summary["matched_count"], 0)
+        self.assertEqual(invalid_summary["suppressed_or_invalid_count"], 1)
         self.assertEqual(
-            result["fixtures"][0]["confidence_stratified_results"]["not_reported_or_invalid"]["matched_count"],
+            result["fixtures"][0]["confidence_stratified_results"]["high"]["matched_count"],
             1,
         )
 
@@ -957,7 +974,12 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
             evaluate_benchmark_manifest(self.manifest)
 
     def test_v6_manifest_rejects_missing_zone_confidence(self):
-        record = self._record(prediction_metadata=self._v6_metadata())
+        missing_confidence = _prediction()
+        missing_confidence.pop("confidence")
+        record = self._record(
+            prediction_metadata=self._v6_metadata(),
+            predicted_zones=[missing_confidence],
+        )
         self._write(record)
         with self.assertRaisesRegex(ValueError, r"predicted_zones\[0\].confidence"):
             evaluate_benchmark_manifest(self.manifest)
