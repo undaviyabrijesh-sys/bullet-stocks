@@ -31,8 +31,7 @@ _IMAGE_EXTENSIONS = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".
 _SAFE_IMAGE_INFO_KEYS = {
     "icc_profile", "dpi", "gamma", "chromaticity", "srgb", "transparency",
     "jfif", "jfif_version", "jfif_unit", "jfif_density", "progressive",
-    "progression", "adobe", "adobe_transform", "loop", "background",
-    "timestamp", "duration",
+    "progression", "adobe", "adobe_transform", "background",
 }
 
 

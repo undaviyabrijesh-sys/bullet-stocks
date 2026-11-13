@@ -115,6 +115,35 @@ class AnnotationIntakeTests(unittest.TestCase):
             result["image_sha256"], hashlib.sha256(stored).hexdigest()
         )
 
+    def test_strips_png_text_fields_named_like_nonessential_format_metadata(self):
+        from PIL import PngImagePlugin
+
+        pnginfo = PngImagePlugin.PngInfo()
+        private_values = {
+            "timestamp": "2026-11-13T14:00:00+05:30",
+            "duration": "Private capture duration",
+            "loop": "Private capture note",
+        }
+        for key, value in private_values.items():
+            pnginfo.add_text(key, value)
+        output = BytesIO()
+        Image.new("RGB", (64, 48), (24, 80, 140)).save(
+            output, format="PNG", pnginfo=pnginfo
+        )
+        self.source.write_bytes(output.getvalue())
+
+        result = prepare_annotation_draft(
+            self.source, self.output, "metadata-key-collision"
+        )
+        stored = (self.output / result["image_file"]).read_bytes()
+        with Image.open(BytesIO(stored)) as image:
+            for key in private_values:
+                self.assertNotIn(key, image.info)
+            self.assertEqual(image.getpixel((10, 10)), (24, 80, 140))
+        self.assertEqual(
+            result["image_sha256"], hashlib.sha256(stored).hexdigest()
+        )
+
     def test_strips_jpeg_exif_without_changing_dimensions(self):
         exif = Image.Exif()
         exif[315] = "Private annotator name"
