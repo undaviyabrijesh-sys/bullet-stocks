@@ -51,8 +51,23 @@ def _is_safe_image_info_key(image, key, *, image_format=None):
     )
 
 
-def _png_contains_unexposed_timestamp_chunk(image_bytes):
-    """Detect PNG tIME chunks, which Pillow does not expose in image.info."""
+_PNG_SAFE_CHUNK_TYPES = {
+    # Required image structure.
+    b"IHDR", b"PLTE", b"IDAT", b"IEND",
+    # Common color, transparency and physical-size information Pillow exposes
+    # and can preserve when it re-encodes a screenshot.
+    b"cHRM", b"gAMA", b"iCCP", b"sRGB", b"bKGD", b"tRNS", b"pHYs",
+}
+
+
+def _png_contains_unexposed_metadata(image_bytes):
+    """Detect non-allowlisted PNG chunks and bytes outside the PNG container.
+
+    Pillow does not expose every ancillary/private chunk. Unknown chunks can
+    carry application-specific metadata, and many decoders ignore bytes after
+    IEND. Treat either case as requiring a canonical re-encode. A missing,
+    truncated or malformed chunk stream is handled conservatively as well.
+    """
     signature = bytes((137, 80, 78, 71, 13, 10, 26, 10))
     if not image_bytes.startswith(signature):
         return False
@@ -63,15 +78,17 @@ def _png_contains_unexposed_timestamp_chunk(image_bytes):
         chunk_type = image_bytes[offset + 4:offset + 8]
         chunk_end = offset + 12 + chunk_length
         if chunk_end > len(image_bytes):
-            # A malformed/truncated chunk is treated conservatively. The caller
-            # has already performed full image validation before reaching here.
             return True
-        if chunk_type == b"tIME":
+        if chunk_type not in _PNG_SAFE_CHUNK_TYPES:
             return True
         if chunk_type == b"IEND":
-            return False
+            # IEND must be empty and must terminate the byte stream exactly.
+            return chunk_length != 0 or chunk_end != len(image_bytes)
         offset = chunk_end
-    return False
+
+    # A complete PNG must terminate with IEND. Partial trailing bytes and a
+    # missing terminator are not silently treated as metadata-free.
+    return True
 
 
 def _jpeg_contains_unexposed_metadata(image):
@@ -129,7 +146,7 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
         if image.format == "PNG":
             has_descriptive_metadata = (
                 has_descriptive_metadata
-                or _png_contains_unexposed_timestamp_chunk(image_bytes)
+                or _png_contains_unexposed_metadata(image_bytes)
             )
         if not has_descriptive_metadata:
             return image_bytes
@@ -182,7 +199,7 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
         if sanitized.format == "PNG":
             remaining_metadata = (
                 remaining_metadata
-                or _png_contains_unexposed_timestamp_chunk(sanitized_bytes)
+                or _png_contains_unexposed_metadata(sanitized_bytes)
             )
         if remaining_metadata:
             raise ValueError("could not remove embedded screenshot metadata safely")

@@ -178,6 +178,52 @@ class AnnotationIntakeTests(unittest.TestCase):
             result["image_sha256"], hashlib.sha256(stored).hexdigest()
         )
 
+    def test_strips_unrecognized_private_png_chunk(self):
+        original = _png_bytes()
+        chunk_type = b"vpAg"  # Unknown private ancillary chunk.
+        private_payload = b"PRIVATE-ANNOTATOR-ID=ann-secret"
+        chunk = (
+            struct.pack(">I", len(private_payload))
+            + chunk_type
+            + private_payload
+            + struct.pack(">I", zlib.crc32(chunk_type + private_payload) & 0xFFFFFFFF)
+        )
+        insert_at = original.rfind(b"IEND") - 4
+        original_with_private_chunk = original[:insert_at] + chunk + original[insert_at:]
+
+        # Pillow accepts and ignores this valid ancillary chunk.
+        with Image.open(BytesIO(original_with_private_chunk)) as image:
+            image.load()
+            self.assertEqual(image.getpixel((10, 10)), (255, 255, 255))
+
+        sanitized = _strip_annotation_metadata(
+            original_with_private_chunk, 5 * 1024 * 1024
+        )
+        self.assertNotEqual(sanitized, original_with_private_chunk)
+        self.assertNotIn(chunk_type, sanitized)
+        with Image.open(BytesIO(sanitized)) as image:
+            self.assertEqual(image.size, (64, 48))
+            self.assertEqual(image.getpixel((10, 10)), (255, 255, 255))
+
+    def test_strips_private_bytes_appended_after_png_iend(self):
+        original = _png_bytes()
+        private_suffix = b"PRIVATE-ANNOTATOR-ID=ann-secret"
+        image_with_suffix = original + private_suffix
+
+        # Pillow decodes the image and ignores the bytes after IEND.
+        with Image.open(BytesIO(image_with_suffix)) as image:
+            image.load()
+            self.assertEqual(image.getpixel((10, 10)), (255, 255, 255))
+
+        sanitized = _strip_annotation_metadata(
+            image_with_suffix, 5 * 1024 * 1024
+        )
+        self.assertNotEqual(sanitized, image_with_suffix)
+        self.assertFalse(sanitized.endswith(private_suffix))
+        with Image.open(BytesIO(sanitized)) as image:
+            self.assertEqual(image.size, (64, 48))
+            self.assertEqual(image.getpixel((10, 10)), (255, 255, 255))
+
     def test_strips_unexposed_jpeg_application_segment(self):
         output = BytesIO()
         Image.new("RGB", (80, 60), (90, 120, 150)).save(
