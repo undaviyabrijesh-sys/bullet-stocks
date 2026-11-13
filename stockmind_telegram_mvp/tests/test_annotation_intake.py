@@ -178,6 +178,37 @@ class AnnotationIntakeTests(unittest.TestCase):
             result["image_sha256"], hashlib.sha256(stored).hexdigest()
         )
 
+    def test_strips_unexposed_jpeg_application_segment(self):
+        output = BytesIO()
+        Image.new("RGB", (80, 60), (90, 120, 150)).save(
+            output, format="JPEG", quality=90
+        )
+        plain_jpeg = output.getvalue()
+
+        # Ordinary JFIF density metadata is retained without re-encoding.
+        self.assertEqual(
+            _strip_annotation_metadata(plain_jpeg, 5 * 1024 * 1024),
+            plain_jpeg,
+        )
+
+        private_payload = b"PRIVATE-ANNOTATOR-ID=ann-secret"
+        segment = (
+            b"\\xff\\xe3"
+            + struct.pack(">H", len(private_payload) + 2)
+            + private_payload
+        )
+        original = plain_jpeg[:2] + segment + plain_jpeg[2:]
+        with Image.open(BytesIO(original)) as image:
+            self.assertNotIn("APP3", image.info)
+            self.assertIn(("APP3", private_payload), image.applist)
+
+        sanitized = _strip_annotation_metadata(original, 5 * 1024 * 1024)
+        self.assertNotEqual(sanitized, original)
+        with Image.open(BytesIO(sanitized)) as image:
+            self.assertEqual(image.size, (80, 60))
+            self.assertFalse(image.getexif())
+            self.assertNotIn("APP3", [marker for marker, _ in image.applist])
+
     def test_strips_jpeg_exif_without_changing_dimensions(self):
         exif = Image.Exif()
         exif[315] = "Private annotator name"
