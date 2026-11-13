@@ -74,13 +74,42 @@ def _png_contains_unexposed_timestamp_chunk(image_bytes):
     return False
 
 
+def _jpeg_contains_unexposed_metadata(image):
+    """Detect JPEG APP/COM payloads not represented in Pillow image.info.
+
+    Pillow exposes raw application segments through applist. Unknown APP
+    markers can otherwise survive unchanged when no known descriptive field
+    is present. Retain only the standard JFIF header without an embedded
+    thumbnail, ICC profile segments and the Adobe color-transform segment.
+    Any other APP segment or comment triggers canonical re-encoding.
+    """
+    for marker, payload in getattr(image, "applist", ()):
+        if not isinstance(payload, bytes):
+            return True
+        if (
+            marker == "APP0"
+            and payload.startswith(b"JFIF\\x00")
+            and len(payload) == 14
+            and payload[12:14] == b"\\x00\\x00"
+        ):
+            continue
+        if marker == "APP2" and payload.startswith(b"ICC_PROFILE\\x00"):
+            continue
+        if marker == "APP14" and payload.startswith(b"Adobe") and len(payload) == 12:
+            continue
+        return True
+    return False
+
+
 def _has_embedded_descriptive_metadata(image):
-    """Return whether Pillow exposes metadata that should not enter the fixture set."""
+    """Return whether exposed or raw marker metadata should not enter fixtures."""
     try:
         if image.getexif():
             return True
     except (OSError, SyntaxError, TypeError, ValueError) as exc:
         raise ValueError("could not safely inspect screenshot metadata") from exc
+    if image.format == "JPEG" and _jpeg_contains_unexposed_metadata(image):
+        return True
     return any(
         not _is_safe_image_info_key(image, key)
         for key in image.info
@@ -206,8 +235,10 @@ def prepare_annotation_draft(
 ):
     """Store one validated, orientation-normalized screenshot and pending draft.
 
-    Images without EXIF rotation are preserved byte-for-byte. When EXIF requires
-    a rotation or flip, the visual image is normalized before hashing and saving.
+    Images needing neither EXIF orientation normalization nor descriptive-
+    metadata removal are preserved byte-for-byte. Otherwise the canonical visual
+    image is sanitized before hashing and saving (PNG/WEBP lossless; metadata-
+    bearing JPEGs use a quality-100 4:4:4 re-encode). The raw upload is not retained.
     Existing outputs are never overwritten. If either output write fails, any
     newly created partial files are removed. The draft is not scoreable until it
     is manually annotated, independently reviewed and paired with an AI result.
