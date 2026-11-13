@@ -33,6 +33,20 @@ _SAFE_IMAGE_INFO_KEYS = {
     "jfif", "jfif_version", "jfif_unit", "jfif_density", "progressive",
     "progression", "adobe", "adobe_transform", "background",
 }
+# Pillow exposes WEBP's native animation loop field even for a static image.
+# Keep it only for WEBP; a PNG text chunk named "loop" is user-supplied metadata.
+_WEBP_STRUCTURAL_INFO_KEYS = {"loop"}
+
+
+def _is_safe_image_info_key(image, key):
+    normalized = str(key).strip().casefold()
+    return (
+        normalized in _SAFE_IMAGE_INFO_KEYS
+        or (
+            getattr(image, "format", None) == "WEBP"
+            and normalized in _WEBP_STRUCTURAL_INFO_KEYS
+        )
+    )
 
 
 def _has_embedded_descriptive_metadata(image):
@@ -43,7 +57,7 @@ def _has_embedded_descriptive_metadata(image):
     except (OSError, SyntaxError, TypeError, ValueError) as exc:
         raise ValueError("could not safely inspect screenshot metadata") from exc
     return any(
-        str(key).strip().casefold() not in _SAFE_IMAGE_INFO_KEYS
+        not _is_safe_image_info_key(image, key)
         for key in image.info
     )
 
@@ -89,7 +103,7 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
         # Some Pillow format plugins copy metadata directly from image.info
         # even when it is not passed as a save option (notably WEBP EXIF/XMP).
         for key in tuple(image.info):
-            if str(key).strip().casefold() not in _SAFE_IMAGE_INFO_KEYS:
+            if not _is_safe_image_info_key(image, key):
                 image.info.pop(key, None)
 
         output = BytesIO()
