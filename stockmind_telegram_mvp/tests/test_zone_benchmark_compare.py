@@ -179,7 +179,7 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         self.assertEqual(confidence["fixture_count_with_matches"]["baseline"], 1)
         self.assertEqual(confidence["fixture_count_with_matches"]["candidate"], 0)
         self.assertEqual(
-            result["fixtures"][0]["confidence_stratified_results"]["not_reported_or_invalid"][
+            result["fixtures"][0]["confidence_stratified_results"]["high"][
                 "matched_count"
             ]["baseline"],
             1,
@@ -213,7 +213,7 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
         candidate = self._report("candidate", [])
         baseline["fixtures"][0]["confidence_stratified_results"][
-            "not_reported_or_invalid"
+            "high"
         ]["fixture_count_with_candidates"] = 0
 
         with self.assertRaisesRegex(
