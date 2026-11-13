@@ -1,7 +1,9 @@
 import hashlib
 import json
+import struct
 import tempfile
 import unittest
+import zlib
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
@@ -140,6 +142,38 @@ class AnnotationIntakeTests(unittest.TestCase):
             for key in private_values:
                 self.assertNotIn(key, image.info)
             self.assertEqual(image.getpixel((10, 10)), (24, 80, 140))
+        self.assertEqual(
+            result["image_sha256"], hashlib.sha256(stored).hexdigest()
+        )
+
+    def test_strips_png_time_chunk_not_exposed_by_pillow(self):
+        original = _png_bytes()
+        timestamp = struct.pack(">HBBBBB", 2026, 11, 13, 12, 34, 56)
+        chunk_type = b"tIME"
+        chunk = (
+            struct.pack(">I", len(timestamp))
+            + chunk_type
+            + timestamp
+            + struct.pack(">I", zlib.crc32(chunk_type + timestamp) & 0xFFFFFFFF)
+        )
+        insert_at = original.rfind(b"IEND") - 4
+        original_with_time = original[:insert_at] + chunk + original[insert_at:]
+        self.source.write_bytes(original_with_time)
+
+        # Pillow does not expose the native PNG modification-time chunk through
+        # image.info, so the intake path must inspect the chunk stream itself.
+        with Image.open(BytesIO(original_with_time)) as image:
+            self.assertNotIn("timestamp", image.info)
+
+        result = prepare_annotation_draft(
+            self.source, self.output, "png-time-metadata"
+        )
+        stored = (self.output / result["image_file"]).read_bytes()
+        self.assertNotIn(b"tIME", stored)
+        self.assertNotEqual(stored, original_with_time)
+        with Image.open(BytesIO(stored)) as image:
+            self.assertEqual(image.size, (64, 48))
+            self.assertEqual(image.getpixel((10, 10)), (255, 255, 255))
         self.assertEqual(
             result["image_sha256"], hashlib.sha256(stored).hexdigest()
         )

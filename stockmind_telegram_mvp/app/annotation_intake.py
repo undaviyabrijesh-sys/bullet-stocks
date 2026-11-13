@@ -51,6 +51,29 @@ def _is_safe_image_info_key(image, key, *, image_format=None):
     )
 
 
+def _png_contains_unexposed_timestamp_chunk(image_bytes):
+    """Detect PNG tIME chunks, which Pillow does not expose in image.info."""
+    signature = b"\\x89PNG\\r\\n\\x1a\\n"
+    if not image_bytes.startswith(signature):
+        return False
+
+    offset = len(signature)
+    while offset + 12 <= len(image_bytes):
+        chunk_length = int.from_bytes(image_bytes[offset:offset + 4], "big")
+        chunk_type = image_bytes[offset + 4:offset + 8]
+        chunk_end = offset + 12 + chunk_length
+        if chunk_end > len(image_bytes):
+            # A malformed/truncated chunk is treated conservatively. The caller
+            # has already performed full image validation before reaching here.
+            return True
+        if chunk_type == b"tIME":
+            return True
+        if chunk_type == b"IEND":
+            return False
+        offset = chunk_end
+    return False
+
+
 def _has_embedded_descriptive_metadata(image):
     """Return whether Pillow exposes metadata that should not enter the fixture set."""
     try:
@@ -73,7 +96,13 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
     original upload—are the hash-bound image that must be used for prediction.
     """
     with Image.open(BytesIO(image_bytes)) as image:
-        if not _has_embedded_descriptive_metadata(image):
+        has_descriptive_metadata = _has_embedded_descriptive_metadata(image)
+        if image.format == "PNG":
+            has_descriptive_metadata = (
+                has_descriptive_metadata
+                or _png_contains_unexposed_timestamp_chunk(image_bytes)
+            )
+        if not has_descriptive_metadata:
             return image_bytes
 
         image.load()
@@ -120,7 +149,13 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
 
     with Image.open(BytesIO(sanitized_bytes)) as sanitized:
         sanitized.load()
-        if _has_embedded_descriptive_metadata(sanitized):
+        remaining_metadata = _has_embedded_descriptive_metadata(sanitized)
+        if sanitized.format == "PNG":
+            remaining_metadata = (
+                remaining_metadata
+                or _png_contains_unexposed_timestamp_chunk(sanitized_bytes)
+            )
+        if remaining_metadata:
             raise ValueError("could not remove embedded screenshot metadata safely")
 
     return sanitized_bytes

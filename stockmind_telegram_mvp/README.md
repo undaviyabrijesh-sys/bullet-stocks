@@ -246,8 +246,10 @@ partial image or draft when a write fails; pre-existing outputs are never
 overwritten. When Pillow exposes EXIF, XMP/IPTC, comments or descriptive image
 text, intake re-encodes the screenshot without those fields while retaining the
 ICC profile and format essentials. PNG text keys such as `timestamp`,
-`duration` and `loop` are treated as descriptive metadata and stripped;
-Pillow's native WEBP `loop` field is retained only for WEBP because the plugin
+`duration` and `loop` are treated as descriptive metadata and stripped.
+PNG `tIME` modification-time chunks are also detected directly in the chunk
+stream because Pillow does not expose them in `image.info`. Pillow's native
+WEBP `loop` field is retained only for WEBP because the plugin
 exposes it even for static images. JPEG metadata-bearing images are re-encoded
 at quality 100 with 4:4:4 chroma; WEBP is re-encoded losslessly and PNG remains
 lossless. The SHA-256 and dimensions describe the cleaned canonical image, so
