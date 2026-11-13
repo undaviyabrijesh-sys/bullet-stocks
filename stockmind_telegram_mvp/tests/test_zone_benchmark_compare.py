@@ -113,11 +113,19 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
             )
         if predicted_plot_bounds is None:
             predicted_plot_bounds = reference_plot_bounds
+        normalized_predictions = []
+        for zone in predicted:
+            if isinstance(zone, dict):
+                zone = dict(zone)
+                # Most comparison fixtures exercise drawable predictions.
+                # Preserve explicit None/low/invalid values for suppression tests.
+                zone.setdefault("confidence", "high")
+            normalized_predictions.append(zone)
         record = {
             "fixture_id": fixture_id, "image_file": "chart.png",
             "image_sha256": self.image_hash, "image_width": 40, "image_height": 30,
             "reference_zones": reference if reference is not None else [_zone()],
-            "predicted_zones": predicted, "prediction_metadata": metadata,
+            "predicted_zones": normalized_predictions, "prediction_metadata": metadata,
             "annotation_metadata": _annotation(),
             "market_context": context if context is not None else self.context,
             "adjudication_metadata": _adjudication_metadata(
@@ -161,7 +169,7 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         candidate = self._report("candidate", [])
         result = compare_benchmark_reports(baseline, candidate)
 
-        confidence = result["confidence_stratified_results"]["not_reported_or_invalid"]
+        confidence = result["confidence_stratified_results"]["high"]
         self.assertEqual(confidence["precision"]["baseline"], 1.0)
         self.assertIsNone(confidence["precision"]["candidate"])
         self.assertEqual(confidence["drawable_count"]["delta"], -1)
@@ -178,16 +186,28 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         )
 
         baseline["fixtures"][0]["confidence_stratified_results"][
-            "not_reported_or_invalid"
+            "high"
         ]["matched_count"] = 0
         baseline["fixtures"][0]["confidence_stratified_results"][
-            "not_reported_or_invalid"
+            "high"
         ]["false_positive_count"] = 1
         baseline["fixtures"][0]["confidence_stratified_results"][
-            "not_reported_or_invalid"
+            "high"
         ]["fixture_count_with_matches"] = 0
         with self.assertRaisesRegex(ValueError, "matched count does not match match rows"):
             compare_benchmark_reports(baseline, candidate)
+
+    def test_comparison_keeps_missing_confidence_predictions_suppressed(self):
+        missing = {**_zone(), "draw_overlay": True, "confidence": None}
+        baseline = self._report("baseline", [missing])
+        candidate = self._report("candidate", [])
+        result = compare_benchmark_reports(baseline, candidate)
+
+        row = result["confidence_stratified_results"]["not_reported_or_invalid"]
+        self.assertEqual(row["candidate_count"]["baseline"], 1)
+        self.assertEqual(row["drawable_count"]["baseline"], 0)
+        self.assertEqual(row["suppressed_or_invalid_count"]["baseline"], 1)
+        self.assertIsNone(row["precision"]["baseline"])
 
     def test_rejects_confidence_fixture_coverage_counts_that_do_not_match_evidence(self):
         baseline = self._report("baseline", [{**_zone(), "draw_overlay": True}])
