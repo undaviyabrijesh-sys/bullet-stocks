@@ -88,12 +88,12 @@ def _jpeg_contains_unexposed_metadata(image):
             return True
         if (
             marker == "APP0"
-            and payload.startswith(b"JFIF\\x00")
+            and payload.startswith(b"JFIF\x00")
             and len(payload) == 14
-            and payload[12:14] == b"\\x00\\x00"
+            and payload[12:14] == b"\x00\x00"
         ):
             continue
-        if marker == "APP2" and payload.startswith(b"ICC_PROFILE\\x00"):
+        if marker == "APP2" and payload.startswith(b"ICC_PROFILE\x00"):
             continue
         if marker == "APP14" and payload.startswith(b"Adobe") and len(payload) == 12:
             continue
