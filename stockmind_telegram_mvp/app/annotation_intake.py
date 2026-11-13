@@ -33,9 +33,10 @@ _SAFE_IMAGE_INFO_KEYS = {
     "jfif", "jfif_version", "jfif_unit", "jfif_density", "progressive",
     "progression", "adobe", "adobe_transform", "background",
 }
-# Pillow exposes WEBP's native animation loop field even for a static image.
-# Keep it only for WEBP; a PNG text chunk named "loop" is user-supplied metadata.
-_WEBP_STRUCTURAL_INFO_KEYS = {"loop"}
+# Pillow exposes WEBP's native loop, timestamp and duration fields after
+# decoding even a static image. Keep them only for WEBP; identically named PNG
+# text chunks are user-supplied descriptive metadata and must be removed.
+_WEBP_STRUCTURAL_INFO_KEYS = {"loop", "timestamp", "duration"}
 
 
 def _is_safe_image_info_key(image, key, *, image_format=None):
