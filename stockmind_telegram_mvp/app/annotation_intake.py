@@ -53,7 +53,7 @@ def _is_safe_image_info_key(image, key, *, image_format=None):
 
 def _png_contains_unexposed_timestamp_chunk(image_bytes):
     """Detect PNG tIME chunks, which Pillow does not expose in image.info."""
-    signature = b"\\x89PNG\\r\\n\\x1a\\n"
+    signature = bytes((137, 80, 78, 71, 13, 10, 26, 10))
     if not image_bytes.startswith(signature):
         return False
 
