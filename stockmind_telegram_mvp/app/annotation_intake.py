@@ -38,12 +38,13 @@ _SAFE_IMAGE_INFO_KEYS = {
 _WEBP_STRUCTURAL_INFO_KEYS = {"loop"}
 
 
-def _is_safe_image_info_key(image, key):
+def _is_safe_image_info_key(image, key, *, image_format=None):
     normalized = str(key).strip().casefold()
+    format_name = image_format or getattr(image, "format", None)
     return (
         normalized in _SAFE_IMAGE_INFO_KEYS
         or (
-            getattr(image, "format", None) == "WEBP"
+            format_name == "WEBP"
             and normalized in _WEBP_STRUCTURAL_INFO_KEYS
         )
     )
@@ -103,7 +104,7 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
         # Some Pillow format plugins copy metadata directly from image.info
         # even when it is not passed as a save option (notably WEBP EXIF/XMP).
         for key in tuple(image.info):
-            if not _is_safe_image_info_key(image, key):
+            if not _is_safe_image_info_key(image, key, image_format=image_format):
                 image.info.pop(key, None)
 
         output = BytesIO()
