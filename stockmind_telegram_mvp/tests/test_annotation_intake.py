@@ -193,7 +193,7 @@ class AnnotationIntakeTests(unittest.TestCase):
 
         private_payload = b"PRIVATE-ANNOTATOR-ID=ann-secret"
         segment = (
-            b"\\xff\\xe3"
+            b"\xff\xe3"
             + struct.pack(">H", len(private_payload) + 2)
             + private_payload
         )
