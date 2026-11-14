@@ -657,6 +657,7 @@ TOOLS = [
                 "type": "object",
                 "properties": {"symbol": {"type": "string"}},
                 "required": ["symbol"],
+                "additionalProperties": False,
             },
         },
     },
@@ -685,6 +686,7 @@ TOOLS = [
                     "section": {"type": "string", "enum": ["annual", "quarterly"]},
                 },
                 "required": ["symbol"],
+                "additionalProperties": False,
             },
         },
     },
@@ -700,6 +702,7 @@ TOOLS = [
                     "days": {"type": "integer", "minimum": 1, "maximum": 365},
                 },
                 "required": ["symbol"],
+                "additionalProperties": False,
             },
         },
     },
@@ -759,6 +762,99 @@ TOOLS = [
         }
     },
 ]
+
+
+_TOOL_ARGUMENT_SCHEMAS = {
+    tool["function"]["name"]: tool["function"]["parameters"]
+    for tool in TOOLS
+}
+
+
+def _validate_tool_arguments(tool_name: str, arguments: dict) -> dict:
+    """Validate untrusted model arguments against the local dispatch schema.
+
+    Provider-side function schemas are useful guidance, not a trust boundary.
+    In particular, Python bool is a subclass of int, so integer limits must
+    explicitly reject booleans before any market-data client is called.
+    """
+    if not isinstance(arguments, dict):
+        raise ValueError("Tool arguments must be a JSON object.")
+
+    schema = _TOOL_ARGUMENT_SCHEMAS.get(tool_name)
+    if schema is None:
+        raise ValueError(f"Unsupported tool name: {tool_name!r}.")
+
+    properties = schema.get("properties", {})
+    required = schema.get("required", ())
+    missing = [name for name in required if name not in arguments]
+    if missing:
+        raise ValueError(
+            "Tool arguments are missing required field(s): "
+            + ", ".join(sorted(missing))
+            + "."
+        )
+
+    if schema.get("additionalProperties") is False:
+        unexpected = sorted(set(arguments) - set(properties))
+        if unexpected:
+            raise ValueError(
+                "Tool arguments contain unsupported field(s): "
+                + ", ".join(unexpected)
+                + "."
+            )
+
+    for name, value in arguments.items():
+        definition = properties.get(name)
+        if definition is None:
+            continue
+        expected = definition.get("type")
+        if expected == "string":
+            valid_type = isinstance(value, str) and bool(value.strip())
+        elif expected == "integer":
+            valid_type = isinstance(value, int) and not isinstance(value, bool)
+        elif expected == "number":
+            valid_type = (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+            )
+            if valid_type:
+                try:
+                    valid_type = math.isfinite(value)
+                except (OverflowError, TypeError, ValueError):
+                    valid_type = False
+        elif expected == "boolean":
+            valid_type = isinstance(value, bool)
+        elif expected == "array":
+            valid_type = isinstance(value, list)
+        elif expected == "object":
+            valid_type = isinstance(value, dict)
+        else:
+            valid_type = True
+
+        if not valid_type:
+            raise ValueError(
+                f"Tool argument {name!r} must be a valid {expected or 'value'}."
+            )
+
+        if "enum" in definition and value not in definition["enum"]:
+            raise ValueError(
+                f"Tool argument {name!r} must be one of: "
+                + ", ".join(str(item) for item in definition["enum"])
+                + "."
+            )
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            minimum = definition.get("minimum")
+            maximum = definition.get("maximum")
+            if minimum is not None and value < minimum:
+                raise ValueError(
+                    f"Tool argument {name!r} must be at least {minimum}."
+                )
+            if maximum is not None and value > maximum:
+                raise ValueError(
+                    f"Tool argument {name!r} must be at most {maximum}."
+                )
+
+    return arguments
 
 
 def _crypto_decimal(value, *, allow_zero=False):
@@ -1301,6 +1397,7 @@ class ResearchAI:
                 else:
                     try:
                         raw_args = _parse_tool_arguments(call.function.arguments)
+                        _validate_tool_arguments(call.function.name, raw_args)
                         args = _canonical_tool_arguments(call.function.name, raw_args)
                     except ValueError as exc:
                         result = {"error": str(exc), "type": "InvalidToolArguments"}
