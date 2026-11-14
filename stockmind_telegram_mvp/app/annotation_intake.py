@@ -118,6 +118,65 @@ def _jpeg_contains_unexposed_metadata(image):
     return False
 
 
+
+_WEBP_SAFE_CHUNK_TYPES = {
+    # Image bitstreams, alpha and color-profile data required to render the image.
+    b"VP8 ", b"VP8L", b"VP8X", b"ALPH", b"ICCP",
+}
+
+
+def _webp_contains_unexposed_metadata(image_bytes):
+    """Detect non-allowlisted WebP chunks and bytes outside the RIFF container.
+
+    Pillow/libwebp can decode a valid RIFF image while ignoring bytes after the
+    declared container or unknown RIFF chunks. Such bytes can carry private
+    application data. Require exact RIFF length, complete chunk framing and a
+    conservative allowlist. EXIF/XMP, animation and unknown chunks trigger a
+    lossless canonical re-encode of the single accepted chart frame.
+    """
+    if (
+        not isinstance(image_bytes, bytes)
+        or len(image_bytes) < 12
+        or image_bytes[:4] != b"RIFF"
+        or image_bytes[8:12] != b"WEBP"
+    ):
+        return True
+
+    riff_size = int.from_bytes(image_bytes[4:8], "little")
+    container_end = riff_size + 8
+    if riff_size < 4 or container_end != len(image_bytes):
+        return True
+
+    offset = 12
+    while offset < container_end:
+        if offset + 8 > container_end:
+            return True
+        chunk_type = image_bytes[offset:offset + 4]
+        chunk_size = int.from_bytes(image_bytes[offset + 4:offset + 8], "little")
+        payload_start = offset + 8
+        payload_end = payload_start + chunk_size
+        padded_end = payload_end + (chunk_size & 1)
+        if padded_end > container_end:
+            return True
+        if chunk_type not in _WEBP_SAFE_CHUNK_TYPES:
+            return True
+        if chunk_type == b"VP8X":
+            # VP8X is a 10-byte extended header. Its EXIF, XMP and animation
+            # flags are not suitable for a canonical static chart fixture.
+            if chunk_size != 10:
+                return True
+            flags = image_bytes[payload_start]
+            if flags & ~0x30:
+                return True
+            if image_bytes[payload_start + 1:payload_start + 4] != bytes((0, 0, 0)):
+                return True
+        if (chunk_size & 1) and image_bytes[payload_end] != 0:
+            return True
+        offset = padded_end
+
+    return offset != container_end
+
+
 def _has_embedded_descriptive_metadata(image):
     """Return whether exposed or raw marker metadata should not enter fixtures."""
     try:
@@ -147,6 +206,11 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
             has_descriptive_metadata = (
                 has_descriptive_metadata
                 or _png_contains_unexposed_metadata(image_bytes)
+            )
+        elif image.format == "WEBP":
+            has_descriptive_metadata = (
+                has_descriptive_metadata
+                or _webp_contains_unexposed_metadata(image_bytes)
             )
         if not has_descriptive_metadata:
             return image_bytes
@@ -200,6 +264,11 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
             remaining_metadata = (
                 remaining_metadata
                 or _png_contains_unexposed_metadata(sanitized_bytes)
+            )
+        elif sanitized.format == "WEBP":
+            remaining_metadata = (
+                remaining_metadata
+                or _webp_contains_unexposed_metadata(sanitized_bytes)
             )
         if remaining_metadata:
             raise ValueError("could not remove embedded screenshot metadata safely")

@@ -275,6 +275,59 @@ class AnnotationIntakeTests(unittest.TestCase):
             result["image_sha256"], hashlib.sha256(stored).hexdigest()
         )
 
+    def test_strips_private_riff_chunk_from_webp(self):
+        output = BytesIO()
+        Image.new("RGB", (32, 24), (12, 34, 56)).save(
+            output, format="WEBP", lossless=True
+        )
+        original = output.getvalue()
+        private_payload = b"PRIVATE-ANNOTATOR-ID=ann-secret"
+        chunk = (
+            b"JUNK"
+            + struct.pack("<I", len(private_payload))
+            + private_payload
+            + (bytes((0,)) if len(private_payload) & 1 else b"")
+        )
+        with_private_chunk = bytearray(original + chunk)
+        struct.pack_into("<I", with_private_chunk, 4, len(with_private_chunk) - 8)
+        with_private_chunk = bytes(with_private_chunk)
+
+        with Image.open(BytesIO(with_private_chunk)) as image:
+            image.load()
+            original_pixels = image.convert("RGB").tobytes()
+
+        sanitized = _strip_annotation_metadata(
+            with_private_chunk, 5 * 1024 * 1024
+        )
+        self.assertNotEqual(sanitized, with_private_chunk)
+        self.assertNotIn(b"JUNK", sanitized)
+        self.assertNotIn(private_payload, sanitized)
+        with Image.open(BytesIO(sanitized)) as image:
+            self.assertEqual(image.size, (32, 24))
+            self.assertEqual(image.convert("RGB").tobytes(), original_pixels)
+
+    def test_strips_bytes_appended_after_webp_riff_container(self):
+        output = BytesIO()
+        Image.new("RGB", (32, 24), (12, 34, 56)).save(
+            output, format="WEBP", lossless=True
+        )
+        original = output.getvalue()
+        private_suffix = b"PRIVATE-ANNOTATOR-ID=ann-secret"
+        image_with_suffix = original + private_suffix
+
+        with Image.open(BytesIO(image_with_suffix)) as image:
+            image.load()
+            original_pixels = image.convert("RGB").tobytes()
+
+        sanitized = _strip_annotation_metadata(
+            image_with_suffix, 5 * 1024 * 1024
+        )
+        self.assertNotEqual(sanitized, image_with_suffix)
+        self.assertFalse(sanitized.endswith(private_suffix))
+        with Image.open(BytesIO(sanitized)) as image:
+            self.assertEqual(image.size, (32, 24))
+            self.assertEqual(image.convert("RGB").tobytes(), original_pixels)
+
     def test_strips_webp_exif_with_lossless_pixel_preservation(self):
         exif = Image.Exif()
         exif[315] = "Private annotator name"
