@@ -18,9 +18,13 @@ strict parser and reach a market-data provider as an infinite numeric value.
 Finite exponent-form values remain supported. Ordinary strings containing
 words such as `"NaN"` or `"Infinity"` are also valid.
 
-For model tool calls, parsing happens before dispatch. Invalid arguments are
-returned to the model as an `InvalidToolArguments` result and do not invoke a
-market-data provider.
+For model tool calls, parsing and local schema validation happen before
+dispatch. StockMind checks required fields, rejects undeclared fields, validates
+primitive types (including rejecting booleans where an integer is required),
+enforces enum choices and numeric bounds, then applies provider defaults.
+Provider-side function schemas are guidance rather than the sole trust
+boundary. Invalid arguments are returned to the model as an
+`InvalidToolArguments` result and do not invoke a market-data provider.
 
 Outbound market-data results are also serialized with non-finite floats disabled.
 Python's default JSON encoder otherwise emits non-standard `NaN` and
