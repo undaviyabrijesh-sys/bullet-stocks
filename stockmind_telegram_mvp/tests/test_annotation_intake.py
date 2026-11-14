@@ -315,6 +315,19 @@ class AnnotationIntakeTests(unittest.TestCase):
             _jpeg_has_untrusted_container_tail(output.getvalue())
         )
 
+    def test_jpeg_marker_parser_accepts_dnl_inside_entropy_scan(self):
+        # DNL (FF DC) is a length-delimited marker that can occur within an
+        # entropy-coded scan. The scan resumes after its two-byte line count.
+        # This minimal marker stream exercises framing without claiming to be
+        # a decodable photographic JPEG.
+        image_with_dnl = bytes.fromhex(
+            "ffd8 ffda 0008 010100003f00 11 "
+            "ffdc 0004 0001 22 ffd9"
+        )
+        self.assertFalse(
+            _jpeg_has_untrusted_container_tail(image_with_dnl)
+        )
+
     def test_jpeg_marker_parser_rejects_missing_eoi_and_truncated_segments(self):
         output = BytesIO()
         Image.new("RGB", (80, 60), (90, 120, 150)).save(
