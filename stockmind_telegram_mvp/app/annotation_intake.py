@@ -130,7 +130,7 @@ def _jpeg_has_untrusted_container_tail(image_bytes):
     if (
         not isinstance(image_bytes, bytes)
         or len(image_bytes) < 4
-        or image_bytes[:2] != b"\\xff\\xd8"
+        or image_bytes[:2] != b"\xff\xd8"
     ):
         return True
 
