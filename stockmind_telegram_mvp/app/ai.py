@@ -5,7 +5,7 @@ import json
 import math
 import re
 from decimal import Decimal, InvalidOperation
-from datetime import datetime, timezone
+from datetime import date as date_type, datetime, timezone
 
 import httpx
 from openai import AsyncOpenAI
@@ -717,9 +717,9 @@ TOOLS = [
                 "properties": {
                     "symbol": {"type": "string"},
                     "interval": {"type": "integer", "enum": [1, 5, 15]},
-                    "date": {"type": "string", "description": "One IST trading date YYYY-MM-DD."},
-                    "from_date": {"type": "string", "description": "Start IST date YYYY-MM-DD; requires to_date."},
-                    "to_date": {"type": "string", "description": "End IST date YYYY-MM-DD; max 7 calendar days after from_date."},
+                    "date": {"type": "string", "description": "One IST trading date YYYY-MM-DD; mutually exclusive with from_date/to_date."},
+                    "from_date": {"type": "string", "description": "Start IST date YYYY-MM-DD; must be paired with to_date and used instead of date."},
+                    "to_date": {"type": "string", "description": "End IST date YYYY-MM-DD; must be paired with from_date, on or after it, and no more than 7 calendar days later."},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 2000}
                 },
                 "required": ["symbol"],
@@ -768,6 +768,20 @@ _TOOL_ARGUMENT_SCHEMAS = {
     tool["function"]["name"]: tool["function"]["parameters"]
     for tool in TOOLS
 }
+
+
+def _parse_intraday_calendar_date(field: str, value: str):
+    """Parse one exact ISO calendar date for the historical intraday tool."""
+    if not isinstance(value, str) or re.fullmatch(r"\d{4}-\d{2}-\d{2}", value) is None:
+        raise ValueError(
+            f"Tool argument {field!r} must use the YYYY-MM-DD date format."
+        )
+    try:
+        return date_type.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(
+            f"Tool argument {field!r} must be a valid calendar date."
+        ) from exc
 
 
 def _validate_tool_arguments(tool_name: str, arguments: dict) -> dict:
@@ -852,6 +866,39 @@ def _validate_tool_arguments(tool_name: str, arguments: dict) -> dict:
             if maximum is not None and value > maximum:
                 raise ValueError(
                     f"Tool argument {name!r} must be at most {maximum}."
+                )
+
+    if tool_name == "get_intraday_stock_bars":
+        single_date = arguments.get("date")
+        from_date = arguments.get("from_date")
+        to_date = arguments.get("to_date")
+
+        if single_date is not None and (
+            from_date is not None or to_date is not None
+        ):
+            raise ValueError(
+                "Tool argument 'date' cannot be combined with 'from_date' or 'to_date'; "
+                "provide either one date or a date range."
+            )
+
+        if (from_date is None) != (to_date is None):
+            raise ValueError(
+                "Tool arguments 'from_date' and 'to_date' must be supplied together."
+            )
+
+        if single_date is not None:
+            _parse_intraday_calendar_date("date", single_date)
+        elif from_date is not None and to_date is not None:
+            start = _parse_intraday_calendar_date("from_date", from_date)
+            end = _parse_intraday_calendar_date("to_date", to_date)
+            if end < start:
+                raise ValueError(
+                    "Tool argument 'to_date' must not be earlier than 'from_date'."
+                )
+            if (end - start).days > 7:
+                raise ValueError(
+                    "Intraday date ranges must span no more than 7 calendar days "
+                    "after 'from_date'."
                 )
 
     return arguments

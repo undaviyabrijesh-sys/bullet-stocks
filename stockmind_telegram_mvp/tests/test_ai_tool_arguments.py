@@ -355,6 +355,62 @@ class ToolArgumentSchemaValidationTests(unittest.TestCase):
         )
 
 
+    def test_rejects_invalid_intraday_date_combinations_and_ranges(self):
+        invalid_cases = (
+            (
+                {
+                    "symbol": "TCS",
+                    "date": "2026-11-14",
+                    "from_date": "2026-11-10",
+                    "to_date": "2026-11-12",
+                },
+                "cannot be combined",
+            ),
+            ({"symbol": "TCS", "from_date": "2026-11-10"}, "supplied together"),
+            ({"symbol": "TCS", "to_date": "2026-11-12"}, "supplied together"),
+            ({"symbol": "TCS", "date": "2026-02-30"}, "valid calendar date"),
+            ({"symbol": "TCS", "date": "2026-2-03"}, "YYYY-MM-DD"),
+            (
+                {
+                    "symbol": "TCS",
+                    "from_date": "2026-11-12",
+                    "to_date": "2026-11-10",
+                },
+                "must not be earlier",
+            ),
+            (
+                {
+                    "symbol": "TCS",
+                    "from_date": "2026-11-01",
+                    "to_date": "2026-11-09",
+                },
+                "no more than 7 calendar days",
+            ),
+        )
+        for arguments, expected_message in invalid_cases:
+            with self.subTest(arguments=arguments):
+                with self.assertRaises(ValueError) as raised:
+                    _validate_tool_arguments("get_intraday_stock_bars", arguments)
+                self.assertIn(expected_message, str(raised.exception))
+
+    def test_accepts_one_valid_date_or_a_seven_day_range(self):
+        single_date = {"symbol": "TCS", "date": "2026-11-14"}
+        self.assertIs(
+            _validate_tool_arguments("get_intraday_stock_bars", single_date),
+            single_date,
+        )
+
+        seven_day_range = {
+            "symbol": "TCS",
+            "from_date": "2026-11-01",
+            "to_date": "2026-11-08",
+        }
+        self.assertIs(
+            _validate_tool_arguments("get_intraday_stock_bars", seven_day_range),
+            seven_day_range,
+        )
+
+
 class ToolArgumentSchemaDispatchTests(unittest.IsolatedAsyncioTestCase):
     async def test_boolean_interval_is_rejected_before_provider_dispatch(self):
         raw_arguments = '{"symbol":"TCS","interval":true}'
@@ -411,6 +467,66 @@ class ToolArgumentSchemaDispatchTests(unittest.IsolatedAsyncioTestCase):
             json.loads(tool_result["content"])["type"],
             "InvalidToolArguments",
         )
+
+
+    async def test_invalid_intraday_date_arguments_are_rejected_before_provider_dispatch(self):
+        invalid_payloads = (
+            '{"symbol":"TCS","from_date":"2026-11-01"}',
+            '{"symbol":"TCS","date":"2026-11-14","from_date":"2026-11-10","to_date":"2026-11-12"}',
+            '{"symbol":"TCS","from_date":"2026-11-01","to_date":"2026-11-09"}',
+        )
+        for index, raw_arguments in enumerate(invalid_payloads):
+            with self.subTest(raw_arguments=raw_arguments):
+                call = SimpleNamespace(
+                    id=f"call-invalid-date-{index}",
+                    function=SimpleNamespace(
+                        name="get_intraday_stock_bars",
+                        arguments=raw_arguments,
+                    ),
+                )
+                assistant_tool_call = {
+                    "id": call.id,
+                    "type": "function",
+                    "function": {
+                        "name": call.function.name,
+                        "arguments": raw_arguments,
+                    },
+                }
+                first_message = SimpleNamespace(
+                    tool_calls=[call],
+                    content=None,
+                    model_dump=lambda **kwargs: {
+                        "role": "assistant",
+                        "tool_calls": [assistant_tool_call],
+                    },
+                )
+                final_message = SimpleNamespace(
+                    tool_calls=[],
+                    content="I rejected the invalid date request before requesting market data.",
+                )
+                create = AsyncMock(side_effect=[
+                    SimpleNamespace(choices=[SimpleNamespace(message=first_message)]),
+                    SimpleNamespace(choices=[SimpleNamespace(message=final_message)]),
+                ])
+                intraday_bars = AsyncMock(return_value={"data": []})
+                research = object.__new__(ResearchAI)
+                research.model = "gpt-4o-mini"
+                research.client = SimpleNamespace(
+                    chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+                )
+                research.market_data = SimpleNamespace(intraday_bars=intraday_bars)
+                research.crypto_data = None
+
+                answer = await research.answer([], "Get TCS intraday bars")
+
+                self.assertIn("rejected", answer)
+                intraday_bars.assert_not_awaited()
+                tool_message = create.await_args_list[1].kwargs["messages"][-1]
+                self.assertEqual(tool_message["role"], "tool")
+                self.assertEqual(
+                    json.loads(tool_message["content"])["type"],
+                    "InvalidToolArguments",
+                )
 
 
 class ToolRequestCanonicalizationTests(unittest.TestCase):

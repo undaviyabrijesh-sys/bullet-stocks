@@ -26,6 +26,13 @@ Provider-side function schemas are guidance rather than the sole trust
 boundary. Invalid arguments are returned to the model as an
 `InvalidToolArguments` result and do not invoke a market-data provider.
 
+For `get_intraday_stock_bars`, local validation also enforces the cross-field
+date contract before dispatch: supply either one `date` or both `from_date`
+and `to_date`, never both modes; dates must be exact valid `YYYY-MM-DD`
+calendar dates; the range must be ordered and may end at most seven calendar
+days after its start. This prevents incomplete, ambiguous or oversized
+historical requests from consuming provider calls.
+
 Outbound market-data results are also serialized with non-finite floats disabled.
 Python's default JSON encoder otherwise emits non-standard `NaN` and
 `Infinity` tokens. If a provider response contains a non-finite numeric value,
