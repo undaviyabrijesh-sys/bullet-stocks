@@ -12,6 +12,7 @@ from PIL import Image
 
 from stockmind_telegram_mvp.app.annotation_intake import (
     _strip_annotation_metadata,
+    _webp_contains_unexposed_metadata,
     prepare_annotation_draft,
 )
 
@@ -274,6 +275,29 @@ class AnnotationIntakeTests(unittest.TestCase):
         self.assertEqual(
             result["image_sha256"], hashlib.sha256(stored).hexdigest()
         )
+
+    def test_webp_container_detector_accepts_plain_static_image(self):
+        output = BytesIO()
+        Image.new("RGB", (32, 24), (12, 34, 56)).save(
+            output, format="WEBP", lossless=True
+        )
+        self.assertFalse(_webp_contains_unexposed_metadata(output.getvalue()))
+
+    def test_webp_container_detector_rejects_trailing_and_truncated_chunks(self):
+        output = BytesIO()
+        Image.new("RGB", (32, 24), (12, 34, 56)).save(
+            output, format="WEBP", lossless=True
+        )
+        original = output.getvalue()
+        self.assertTrue(
+            _webp_contains_unexposed_metadata(
+                original + b"PRIVATE-ANNOTATOR-ID=ann-secret"
+            )
+        )
+
+        malformed = bytearray(original)
+        struct.pack_into("<I", malformed, 16, len(original))
+        self.assertTrue(_webp_contains_unexposed_metadata(bytes(malformed)))
 
     def test_strips_private_riff_chunk_from_webp(self):
         output = BytesIO()
