@@ -293,6 +293,28 @@ class AnnotationIntakeTests(unittest.TestCase):
             image.load()
             self.assertEqual(image.size, (80, 60))
 
+        # Exercise the complete intake path, including EXIF normalization,
+        # canonical storage and the hash recorded in the pending draft.
+        self.source.write_bytes(image_with_suffix)
+        result = prepare_annotation_draft(
+            self.source, self.output, "jpeg-trailing-data"
+        )
+        stored = (self.output / result["image_file"]).read_bytes()
+        self.assertNotIn(private_suffix, stored)
+        self.assertFalse(_jpeg_has_untrusted_container_tail(stored))
+        self.assertEqual(
+            result["image_sha256"], hashlib.sha256(stored).hexdigest()
+        )
+
+    def test_jpeg_marker_parser_accepts_progressive_multiscan_images(self):
+        output = BytesIO()
+        Image.effect_noise((128, 96), 100).convert("RGB").save(
+            output, format="JPEG", quality=88, progressive=True, optimize=True
+        )
+        self.assertFalse(
+            _jpeg_has_untrusted_container_tail(output.getvalue())
+        )
+
     def test_jpeg_marker_parser_rejects_missing_eoi_and_truncated_segments(self):
         output = BytesIO()
         Image.new("RGB", (80, 60), (90, 120, 150)).save(
