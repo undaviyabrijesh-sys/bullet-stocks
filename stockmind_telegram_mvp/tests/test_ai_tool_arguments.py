@@ -344,15 +344,14 @@ class ToolArgumentSchemaValidationTests(unittest.TestCase):
             ),
             {"symbol": "TCS", "interval": 5},
         )
+        valid_crypto = {
+            "symbol": "BTCUSDT",
+            "interval": "15m",
+            "limit": 100,
+        }
         self.assertEqual(
-            _validate_tool_arguments(
-                "get_crypto_klines",
-                {"symbol": "BTCUSDT", "interval": "15m", "limit": 100},
-            )["market"] if "market" in _validate_tool_arguments(
-                "get_crypto_klines",
-                {"symbol": "BTCUSDT", "interval": "15m", "limit": 100},
-            ) else "spot",
-            "spot",
+            _validate_tool_arguments("get_crypto_klines", valid_crypto),
+            valid_crypto,
         )
 
 
