@@ -136,6 +136,7 @@ def _jpeg_has_untrusted_container_tail(image_bytes):
 
     offset = 2
     saw_scan = False
+    scan_marker_pending = False
     while offset < len(image_bytes):
         if image_bytes[offset] != 0xFF:
             return True
@@ -146,6 +147,8 @@ def _jpeg_has_untrusted_container_tail(image_bytes):
 
         marker = image_bytes[offset]
         offset += 1
+        marker_was_in_scan = scan_marker_pending
+        scan_marker_pending = False
         if marker == 0xD9:
             return not saw_scan or offset != len(image_bytes)
         if marker in {0x00, 0xD8} or 0xD0 <= marker <= 0xD7:
@@ -162,10 +165,17 @@ def _jpeg_has_untrusted_container_tail(image_bytes):
 
         if marker != 0xDA:
             offset = segment_end
-            continue
+            if marker != 0xDC or not marker_was_in_scan:
+                continue
+            # DNL (Define Number of Lines) is length-delimited but occurs
+            # inside an entropy-coded scan. Resume that same scan after it;
+            # otherwise valid DNL JPEGs would be needlessly re-encoded.
+            if segment_length != 4:
+                return True
+        else:
+            saw_scan = True
+            offset = segment_end
 
-        saw_scan = True
-        offset = segment_end
         while offset < len(image_bytes):
             if image_bytes[offset] != 0xFF:
                 offset += 1
@@ -189,9 +199,11 @@ def _jpeg_has_untrusted_container_tail(image_bytes):
                 offset += 1
                 continue
 
-            # A non-stuffed, non-restart marker ends this scan. Let the outer
-            # marker parser validate its segment and any subsequent scan.
+            # A non-stuffed, non-restart marker ends this scan. Remember that
+            # it was encountered inside entropy data so an in-scan DNL marker
+            # can resume the same scan after its length-delimited payload.
             offset = marker_start
+            scan_marker_pending = True
             break
 
         if offset >= len(image_bytes):
