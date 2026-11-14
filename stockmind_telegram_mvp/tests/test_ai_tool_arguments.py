@@ -336,6 +336,36 @@ class ToolArgumentSchemaValidationTests(unittest.TestCase):
                 "get_quote", {"symbol": "TCS", "debug": True}
             )
 
+    def test_rejects_overlong_string_arguments(self):
+        invalid_calls = (
+            ("get_quote", {"symbol": "S" * 33}, "at most 32"),
+            ("get_crypto_ticker", {"symbol": "S" * 33}, "at most 32"),
+            ("search_stocks", {"query": "Q" * 121}, "at most 120"),
+            ("search_stocks", {"query": "TCS", "sector": "X" * 81}, "at most 80"),
+            ("search_stocks", {"query": "TCS", "industry": "X" * 81}, "at most 80"),
+            ("get_intraday_stock_bars", {"symbol": "TCS", "date": "2026-11-141"}, "at most 10"),
+        )
+        for tool_name, arguments, expected_message in invalid_calls:
+            with self.subTest(tool=tool_name, arguments=arguments):
+                with self.assertRaises(ValueError) as raised:
+                    _validate_tool_arguments(tool_name, arguments)
+                self.assertIn(expected_message, str(raised.exception))
+
+    def test_accepts_string_arguments_at_schema_length_limits(self):
+        symbol = "S" * 32
+        query = "Q" * 120
+        filters = {"query": query, "sector": "X" * 80, "industry": "Y" * 80}
+        self.assertEqual(
+            _validate_tool_arguments("get_quote", {"symbol": symbol}),
+            {"symbol": symbol},
+        )
+        self.assertEqual(_validate_tool_arguments("search_stocks", filters), filters)
+        date_args = {"symbol": "TCS", "date": "2026-11-14"}
+        self.assertEqual(
+            _validate_tool_arguments("get_intraday_stock_bars", date_args),
+            date_args,
+        )
+
     def test_accepts_valid_arguments_for_all_tool_schema_shapes(self):
         self.assertEqual(
             _validate_tool_arguments(
@@ -461,6 +491,57 @@ class ToolArgumentSchemaDispatchTests(unittest.IsolatedAsyncioTestCase):
             "I rejected the invalid interval before requesting market data.",
         )
         intraday_bars.assert_not_awaited()
+        tool_result = create.await_args_list[1].kwargs["messages"][-1]
+        self.assertEqual(tool_result["role"], "tool")
+        self.assertEqual(
+            json.loads(tool_result["content"])["type"],
+            "InvalidToolArguments",
+        )
+
+
+    async def test_overlong_symbol_is_rejected_before_provider_dispatch(self):
+        raw_arguments = json.dumps({"symbol": "S" * 33})
+        call = SimpleNamespace(
+            id="call-overlong-symbol",
+            function=SimpleNamespace(name="get_quote", arguments=raw_arguments),
+        )
+        assistant_tool_call = {
+            "id": call.id,
+            "type": "function",
+            "function": {"name": call.function.name, "arguments": raw_arguments},
+        }
+        first_message = SimpleNamespace(
+            tool_calls=[call],
+            content=None,
+            model_dump=lambda **kwargs: {
+                "role": "assistant",
+                "tool_calls": [assistant_tool_call],
+            },
+        )
+        final_message = SimpleNamespace(
+            tool_calls=[],
+            content="I rejected the oversized symbol before requesting market data.",
+        )
+        create = AsyncMock(side_effect=[
+            SimpleNamespace(choices=[SimpleNamespace(message=first_message)]),
+            SimpleNamespace(choices=[SimpleNamespace(message=final_message)]),
+        ])
+        quote = AsyncMock(return_value={"data": {"symbol": "S" * 33}})
+        research = object.__new__(ResearchAI)
+        research.model = "gpt-4o-mini"
+        research.client = SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        )
+        research.market_data = SimpleNamespace(quote=quote)
+        research.crypto_data = None
+
+        answer = await research.answer([], "Get a stock quote")
+
+        self.assertEqual(
+            answer,
+            "I rejected the oversized symbol before requesting market data.",
+        )
+        quote.assert_not_awaited()
         tool_result = create.await_args_list[1].kwargs["messages"][-1]
         self.assertEqual(tool_result["role"], "tool")
         self.assertEqual(

@@ -21,7 +21,10 @@ words such as `"NaN"` or `"Infinity"` are also valid.
 For model tool calls, parsing and local schema validation happen before
 dispatch. StockMind checks required fields, rejects undeclared fields, validates
 primitive types (including rejecting booleans where an integer is required),
-enforces enum choices and numeric bounds, then applies provider defaults.
+enforces enum choices, numeric bounds and schema-defined string length limits, then applies
+provider defaults. Search queries are limited to 120 characters, sector/industry filters
+to 80 characters, stock/crypto symbols to 32 characters, and intraday date strings
+to 10 characters. Overlong values are rejected rather than silently truncated.
 Provider-side function schemas are guidance rather than the sole trust
 boundary. Invalid arguments are returned to the model as an
 `InvalidToolArguments` result and do not invoke a market-data provider.

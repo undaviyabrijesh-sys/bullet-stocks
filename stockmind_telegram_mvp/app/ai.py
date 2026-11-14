@@ -638,10 +638,10 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Company, brand, symbol, BSE code or ISIN."},
+                    "query": {"type": "string", "maxLength": 120, "description": "Company, brand, symbol, BSE code or ISIN."},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
-                    "sector": {"type": "string"},
-                    "industry": {"type": "string"},
+                    "sector": {"type": "string", "maxLength": 80},
+                    "industry": {"type": "string", "maxLength": 80},
                 },
                 "required": ["query"],
                 "additionalProperties": False,
@@ -655,7 +655,7 @@ TOOLS = [
             "description": "Get the latest available quote and quote metadata for an NSE/BSE stock.",
             "parameters": {
                 "type": "object",
-                "properties": {"symbol": {"type": "string"}},
+                "properties": {"symbol": {"type": "string", "maxLength": 32}},
                 "required": ["symbol"],
                 "additionalProperties": False,
             },
@@ -668,7 +668,7 @@ TOOLS = [
             "description": "Get a session-live quote for an NSE/BSE stock where the provider supports it.",
             "parameters": {
                 "type": "object",
-                "properties": {"symbol": {"type": "string"}},
+                "properties": {"symbol": {"type": "string", "maxLength": 32}},
                 "required": ["symbol"],
                 "additionalProperties": False
             }
@@ -682,7 +682,7 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "symbol": {"type": "string"},
+                    "symbol": {"type": "string", "maxLength": 32},
                     "section": {"type": "string", "enum": ["annual", "quarterly"]},
                 },
                 "required": ["symbol"],
@@ -698,7 +698,7 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "symbol": {"type": "string"},
+                    "symbol": {"type": "string", "maxLength": 32},
                     "days": {"type": "integer", "minimum": 1, "maximum": 365},
                 },
                 "required": ["symbol"],
@@ -715,11 +715,11 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "symbol": {"type": "string"},
+                    "symbol": {"type": "string", "maxLength": 32},
                     "interval": {"type": "integer", "enum": [1, 5, 15]},
-                    "date": {"type": "string", "description": "One IST trading date YYYY-MM-DD; mutually exclusive with from_date/to_date."},
-                    "from_date": {"type": "string", "description": "Start IST date YYYY-MM-DD; must be paired with to_date and used instead of date."},
-                    "to_date": {"type": "string", "description": "End IST date YYYY-MM-DD; must be paired with from_date, on or after it, and no more than 7 calendar days later."},
+                    "date": {"type": "string", "maxLength": 10, "description": "One IST trading date YYYY-MM-DD; mutually exclusive with from_date/to_date."},
+                    "from_date": {"type": "string", "maxLength": 10, "description": "Start IST date YYYY-MM-DD; must be paired with to_date and used instead of date."},
+                    "to_date": {"type": "string", "maxLength": 10, "description": "End IST date YYYY-MM-DD; must be paired with from_date, on or after it, and no more than 7 calendar days later."},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 2000}
                 },
                 "required": ["symbol"],
@@ -735,7 +735,7 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "symbol": {"type": "string"},
+                    "symbol": {"type": "string", "maxLength": 32},
                     "interval": {"type": "string", "enum": ["1m","3m","5m","15m","30m","1h","2h","4h","6h","8h","12h","1d","3d","1w","1M"]},
                     "market": {"type": "string", "enum": ["spot","usdm"]},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 500}
@@ -753,7 +753,7 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "symbol": {"type": "string"},
+                    "symbol": {"type": "string", "maxLength": 32},
                     "market": {"type": "string", "enum": ["spot","usdm"]}
                 },
                 "required": ["symbol"],
@@ -849,6 +849,14 @@ def _validate_tool_arguments(tool_name: str, arguments: dict) -> dict:
             raise ValueError(
                 f"Tool argument {name!r} must be a valid {expected or 'value'}."
             )
+
+        if expected == "string":
+            max_length = definition.get("maxLength")
+            if max_length is not None and len(value) > max_length:
+                raise ValueError(
+                    f"Tool argument {name!r} must contain at most "
+                    f"{max_length} characters."
+                )
 
         if "enum" in definition and value not in definition["enum"]:
             raise ValueError(
