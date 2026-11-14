@@ -11,6 +11,7 @@ from unittest.mock import patch
 from PIL import Image
 
 from stockmind_telegram_mvp.app.annotation_intake import (
+    _jpeg_has_untrusted_container_tail,
     _strip_annotation_metadata,
     _webp_contains_unexposed_metadata,
     prepare_annotation_draft,
@@ -255,6 +256,53 @@ class AnnotationIntakeTests(unittest.TestCase):
             self.assertEqual(image.size, (80, 60))
             self.assertFalse(image.getexif())
             self.assertNotIn("APP3", [marker for marker, _ in image.applist])
+
+
+    def test_jpeg_marker_parser_skips_app_payload_and_stuffed_scan_bytes(self):
+        # The minimal framed stream includes FF 00 (a stuffed data byte),
+        # FF D0 (a restart marker), and FF D9 inside an APP payload.
+        scan = bytes.fromhex(
+            "ffd8 ffda 0008 010100003f00 11ff00d9 22ffd0 33 ffd9"
+        )
+        self.assertFalse(_jpeg_has_untrusted_container_tail(scan))
+
+        payload = b"private-marker:" + bytes.fromhex("ffd9") + b":still-in-segment"
+        app3 = b"\xff\xe3" + struct.pack(">H", len(payload) + 2) + payload
+        with_app_payload = scan[:2] + app3 + scan[2:]
+        self.assertFalse(_jpeg_has_untrusted_container_tail(with_app_payload))
+
+    def test_strips_private_bytes_appended_after_jpeg_eoi(self):
+        output = BytesIO()
+        Image.new("RGB", (80, 60), (90, 120, 150)).save(
+            output, format="JPEG", quality=90
+        )
+        original = output.getvalue()
+        self.assertFalse(_jpeg_has_untrusted_container_tail(original))
+
+        private_suffix = b"PRIVATE-ANNOTATOR-ID=ann-secret"
+        image_with_suffix = original + private_suffix
+        self.assertTrue(_jpeg_has_untrusted_container_tail(image_with_suffix))
+
+        sanitized = _strip_annotation_metadata(
+            image_with_suffix, 5 * 1024 * 1024
+        )
+        self.assertNotEqual(sanitized, image_with_suffix)
+        self.assertNotIn(private_suffix, sanitized)
+        self.assertFalse(_jpeg_has_untrusted_container_tail(sanitized))
+        with Image.open(BytesIO(sanitized)) as image:
+            image.load()
+            self.assertEqual(image.size, (80, 60))
+
+    def test_jpeg_marker_parser_rejects_missing_eoi_and_truncated_segments(self):
+        output = BytesIO()
+        Image.new("RGB", (80, 60), (90, 120, 150)).save(
+            output, format="JPEG", quality=90
+        )
+        original = output.getvalue()
+        self.assertTrue(_jpeg_has_untrusted_container_tail(original[:-2]))
+
+        truncated_segment = b"\xff\xd8\xff\xe1\x00\x20\x01\x02"
+        self.assertTrue(_jpeg_has_untrusted_container_tail(truncated_segment))
 
     def test_strips_jpeg_exif_without_changing_dimensions(self):
         exif = Image.Exif()
