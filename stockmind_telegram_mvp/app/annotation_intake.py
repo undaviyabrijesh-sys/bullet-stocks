@@ -118,6 +118,88 @@ def _jpeg_contains_unexposed_metadata(image):
     return False
 
 
+def _jpeg_has_untrusted_container_tail(image_bytes):
+    """Require a well-framed JPEG scan ending exactly at the EOI marker.
+
+    Pillow can decode JPEGs with arbitrary bytes appended after EOI. Walk
+    length-delimited markers and entropy-coded scans so marker-like bytes
+    inside APP payloads or byte-stuffed scan data are not mistaken for EOI.
+    Malformed/truncated streams and any bytes after the real EOI are treated
+    as requiring a canonical re-encode.
+    """
+    if (
+        not isinstance(image_bytes, bytes)
+        or len(image_bytes) < 4
+        or image_bytes[:2] != b"\\xff\\xd8"
+    ):
+        return True
+
+    offset = 2
+    saw_scan = False
+    while offset < len(image_bytes):
+        if image_bytes[offset] != 0xFF:
+            return True
+        while offset < len(image_bytes) and image_bytes[offset] == 0xFF:
+            offset += 1
+        if offset >= len(image_bytes):
+            return True
+
+        marker = image_bytes[offset]
+        offset += 1
+        if marker == 0xD9:
+            return not saw_scan or offset != len(image_bytes)
+        if marker in {0x00, 0xD8} or 0xD0 <= marker <= 0xD7:
+            return True
+        if marker == 0x01:
+            continue
+
+        if offset + 2 > len(image_bytes):
+            return True
+        segment_length = int.from_bytes(image_bytes[offset:offset + 2], "big")
+        if segment_length < 2 or offset + segment_length > len(image_bytes):
+            return True
+        segment_end = offset + segment_length
+
+        if marker != 0xDA:
+            offset = segment_end
+            continue
+
+        saw_scan = True
+        offset = segment_end
+        while offset < len(image_bytes):
+            if image_bytes[offset] != 0xFF:
+                offset += 1
+                continue
+
+            marker_start = offset
+            offset += 1
+            while offset < len(image_bytes) and image_bytes[offset] == 0xFF:
+                offset += 1
+            if offset >= len(image_bytes):
+                return True
+
+            scan_marker = image_bytes[offset]
+            if scan_marker == 0x00:
+                # Entropy-coded literal 0xFF bytes use exactly FF 00.
+                if offset - marker_start != 1:
+                    return True
+                offset += 1
+                continue
+            if 0xD0 <= scan_marker <= 0xD7:
+                offset += 1
+                continue
+
+            # A non-stuffed, non-restart marker ends this scan. Let the outer
+            # marker parser validate its segment and any subsequent scan.
+            offset = marker_start
+            break
+
+        if offset >= len(image_bytes):
+            return True
+
+    return True
+
+
 
 _WEBP_SAFE_CHUNK_TYPES = {
     # Image bitstreams, alpha and color-profile data required to render the image.
@@ -202,7 +284,12 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
     """
     with Image.open(BytesIO(image_bytes)) as image:
         has_descriptive_metadata = _has_embedded_descriptive_metadata(image)
-        if image.format == "PNG":
+        if image.format == "JPEG":
+            has_descriptive_metadata = (
+                has_descriptive_metadata
+                or _jpeg_has_untrusted_container_tail(image_bytes)
+            )
+        elif image.format == "PNG":
             has_descriptive_metadata = (
                 has_descriptive_metadata
                 or _png_contains_unexposed_metadata(image_bytes)
@@ -260,7 +347,12 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
     with Image.open(BytesIO(sanitized_bytes)) as sanitized:
         sanitized.load()
         remaining_metadata = _has_embedded_descriptive_metadata(sanitized)
-        if sanitized.format == "PNG":
+        if sanitized.format == "JPEG":
+            remaining_metadata = (
+                remaining_metadata
+                or _jpeg_has_untrusted_container_tail(sanitized_bytes)
+            )
+        elif sanitized.format == "PNG":
             remaining_metadata = (
                 remaining_metadata
                 or _png_contains_unexposed_metadata(sanitized_bytes)
