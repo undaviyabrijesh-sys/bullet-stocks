@@ -113,7 +113,21 @@ class OverlayDeliveryTests(unittest.IsolatedAsyncioTestCase):
         message.answer_photo.assert_awaited_once()
         photo = message.answer_photo.await_args.args[0]
         self.assertIsInstance(photo, BufferedInputFile)
+        self.assertEqual(photo.filename, "stockmind-chart-zones.jpg")
         self.assertEqual(message.answer_photo.await_args.kwargs["caption"], "Estimated overlay")
+
+    async def test_png_overlay_uses_png_filename(self):
+        message = SimpleNamespace(answer_photo=AsyncMock())
+        png_bytes = b"\\x89PNG\\r\\n\\x1a\\n" + b"test-payload"
+
+        delivered = await send_overlay_photo(
+            message, png_bytes, caption="Estimated overlay"
+        )
+
+        self.assertTrue(delivered)
+        photo = message.answer_photo.await_args.args[0]
+        self.assertIsInstance(photo, BufferedInputFile)
+        self.assertEqual(photo.filename, "stockmind-chart-zones.png")
 
     async def test_telegram_failure_returns_false_without_raising(self):
         message = SimpleNamespace(answer_photo=AsyncMock(side_effect=RuntimeError("Telegram unavailable")))
