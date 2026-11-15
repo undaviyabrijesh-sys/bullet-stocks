@@ -318,7 +318,21 @@ def _render_overlay_prepared(
         # Preserve the source profile on the returned JPEG. The pixel values
         # are composited without a color transform; carrying the profile keeps
         # color-managed viewers from interpreting them in an unrelated space.
-        icc_profile = source.info.get("icc_profile")
+        source_profile = source.info.get("icc_profile")
+        # The output canvas is RGB. Never attach a grayscale/CMYK profile to
+        # RGB pixels: that would misdescribe the encoded colors. Preserve only
+        # a structurally recognizable RGB profile from an RGB-like source.
+        icc_profile = (
+            source_profile
+            if (
+                source.mode in {"RGB", "RGBA", "P"}
+                and isinstance(source_profile, bytes)
+                and len(source_profile) >= 128
+                and source_profile[16:20] == b"RGB "
+                and source_profile[36:40] == b"acsp"
+            )
+            else None
+        )
         image = source.convert("RGBA")
     width, height = image.size
     plot_box = (
