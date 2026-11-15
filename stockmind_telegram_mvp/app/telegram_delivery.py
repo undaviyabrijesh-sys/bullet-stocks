@@ -123,7 +123,7 @@ async def send_overlay_photo(message, image_bytes: bytes, *, caption: str) -> bo
 
     try:
         is_png = isinstance(image_bytes, bytes) and image_bytes.startswith(
-            b"\\x89PNG\\r\\n\\x1a\\n"
+            b"\x89PNG\r\n\x1a\n"
         )
         filename = (
             "stockmind-chart-zones.png"
