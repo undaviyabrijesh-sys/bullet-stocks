@@ -526,3 +526,20 @@ reviewed files and the adjudication sidecar with the benchmark source manifest.
 ## Directional plot-boundary spill diagnostics
 
 Plot-boundary reports separately measure predicted plot and drawable-zone area that extends beyond the manually marked main price plot on all four sides. The right price-scale margin and bottom indicator panel retain their existing metrics; left-toolbar spill and top-control spill are reported as `left_toolbar_overlap_pct` / `top_controls_overlap_pct` for the plot and `left_toolbar_zone_area_pct` / `top_controls_zone_area_pct` for drawn zones. These are geometric overlap proxies based on the manually reviewed reference rectangle, not semantic detection of toolbar or indicator content. The directional values are included in aggregate reports and paired baseline-versus-candidate deltas. Each side-strip metric excludes the corners: the residual between the overall outside-reference-area percentage and the sum of the four side-strip percentages is corner spill. A regression test covers all four corners and checks this decomposition for both the predicted plot and drawn zones. Zone-area percentages use the sum of predicted box areas as their denominator, so overlapping predicted boxes contribute separately rather than representing unique screenshot coverage; do not interpret them as a pixel-union measurement.
+
+## Overlay output fidelity and upload budget
+
+When the source screenshot is PNG, the overlay renderer now prefers a lossless
+PNG result so untouched candle bodies, wicks, grid lines and chart labels are
+not recompressed as JPEG. Compatible RGB ICC profiles are retained on that
+output. To stay below Telegram's photo-upload size ceiling, PNG output is
+limited to 9,000,000 bytes; a larger encoded result falls back to the existing
+optimized JPEG output at quality 88. JPEG and WEBP source screenshots continue
+to produce JPEG overlays. Telegram upload filenames follow the actual encoded
+container, so PNG bytes are not mislabeled with a .jpg extension.
+
+The regression tests verify pixel equality outside a drawn zone, a changed
+pixel inside the zone, PNG-to-JPEG fallback when the PNG budget is exceeded,
+and unchanged JPEG output for JPEG inputs. These tests validate image encoding
+and pixel preservation only; they do not measure whether the model selected
+the correct supply/demand zones on real market screenshots.
