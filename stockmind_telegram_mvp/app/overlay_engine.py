@@ -7,6 +7,7 @@ from PIL import Image, ImageDraw, ImageOps, UnidentifiedImageError
 
 MAX_CHART_IMAGE_PIXELS = 25_000_000
 MAX_OVERLAY_ZONES = 8
+MAX_OVERLAY_PNG_BYTES = 9_000_000
 SUPPORTED_IMAGE_MIME_TYPES = {
     "JPEG": "image/jpeg",
     "PNG": "image/png",
@@ -318,6 +319,7 @@ def _render_overlay_prepared(
         # Preserve the source profile on the returned JPEG. The pixel values
         # are composited without a color transform; carrying the profile keeps
         # color-managed viewers from interpreting them in an unrelated space.
+        source_format = source.format
         source_profile = source.info.get("icc_profile")
         # The output canvas is RGB. Never attach a grayscale/CMYK profile to
         # RGB pixels: that would misdescribe the encoded colors. Preserve only
@@ -391,6 +393,21 @@ def _render_overlay_prepared(
     if not count:
         return None, 0
     result = Image.alpha_composite(image, layer).convert("RGB")
+
+    # PNG chart screenshots often contain thin candle wicks, grid lines and
+    # small labels. Keep their untouched pixels lossless when the resulting
+    # Telegram photo remains below a conservative upload budget. Fall back to
+    # the established JPEG path for unusually large PNG outputs.
+    if source_format == "PNG":
+        png_out = BytesIO()
+        png_options = {"format": "PNG", "optimize": True}
+        if isinstance(icc_profile, bytes) and icc_profile:
+            png_options["icc_profile"] = icc_profile
+        result.save(png_out, **png_options)
+        png_bytes = png_out.getvalue()
+        if len(png_bytes) <= MAX_OVERLAY_PNG_BYTES:
+            return png_bytes, count
+
     out = BytesIO()
     save_options = {"format": "JPEG", "quality": 88, "optimize": True}
     if isinstance(icc_profile, bytes) and icc_profile:
