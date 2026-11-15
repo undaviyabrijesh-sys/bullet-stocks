@@ -118,7 +118,7 @@ class OverlayDeliveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_png_overlay_uses_png_filename(self):
         message = SimpleNamespace(answer_photo=AsyncMock())
-        png_bytes = b"\\x89PNG\\r\\n\\x1a\\n" + b"test-payload"
+        png_bytes = b"\x89PNG\r\n\x1a\n" + b"test-payload"
 
         delivered = await send_overlay_photo(
             message, png_bytes, caption="Estimated overlay"
