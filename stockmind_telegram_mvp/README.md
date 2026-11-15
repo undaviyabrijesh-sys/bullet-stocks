@@ -101,7 +101,7 @@ English.
 - MAX_HISTORY_MESSAGES (default: 12)
 - MAX_HISTORY_BYTES (default: 24 KiB of UTF-8 text across the retained conversation)
 - OPENAI_VISION_MODEL (defaults to OPENAI_MODEL; must support image input and structured outputs; default GPT-6 Luna)
-- MAX_CHART_IMAGE_BYTES (default: 5 MB)
+- MAX_CHART_IMAGE_BYTES (default: 5 MB; must be a positive integer; invalid values stop startup)
 - MAX_CONCURRENT_CHART_ANALYSES (default: 2; integer from 1 to 10, per process)
 - RESEARCH_TURN_TIMEOUT_SECONDS (default: 120 seconds; finite positive number)
 - USER_LOCK_WAIT_TIMEOUT_SECONDS (default: 30 seconds; finite positive number; per-user lock acquisition only)
