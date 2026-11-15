@@ -122,8 +122,16 @@ async def send_overlay_photo(message, image_bytes: bytes, *, caption: str) -> bo
     from aiogram.types import BufferedInputFile
 
     try:
+        is_png = isinstance(image_bytes, bytes) and image_bytes.startswith(
+            b"\\x89PNG\\r\\n\\x1a\\n"
+        )
+        filename = (
+            "stockmind-chart-zones.png"
+            if is_png
+            else "stockmind-chart-zones.jpg"
+        )
         await message.answer_photo(
-            BufferedInputFile(image_bytes, filename="stockmind-chart-zones.jpg"),
+            BufferedInputFile(image_bytes, filename=filename),
             caption=caption,
         )
     except Exception:
