@@ -15,9 +15,12 @@ from stockmind_telegram_mvp.app.overlay_engine import (
 )
 
 
-def sample_image(size=(640, 360), image_format="PNG"):
+def sample_image(size=(640, 360), image_format="PNG", icc_profile=None):
     output = BytesIO()
-    Image.new("RGB", size, "white").save(output, format=image_format)
+    save_options = {"format": image_format}
+    if icc_profile is not None:
+        save_options["icc_profile"] = icc_profile
+    Image.new("RGB", size, "white").save(output, **save_options)
     return output.getvalue()
 
 
@@ -176,6 +179,27 @@ class OverlayRendererTests(unittest.TestCase):
         with Image.open(BytesIO(result)) as rendered:
             self.assertEqual(rendered.format, "JPEG")
             self.assertEqual(rendered.size, (640, 360))
+
+    def test_renderer_preserves_source_icc_profile_on_overlay_output(self):
+        profile = b"stockmind-test-icc-profile"
+        source = sample_image(icc_profile=profile)
+        zone = {
+            "zone_type": "demand",
+            "draw_overlay": True,
+            "confidence": "high",
+            "x_start": 0.2,
+            "x_end": 0.8,
+            "y_top": 0.3,
+            "y_bottom": 0.5,
+        }
+
+        rendered, count = render_overlay(source, [zone])
+
+        self.assertEqual(count, 1)
+        self.assertIsNotNone(rendered)
+        with Image.open(BytesIO(rendered)) as image:
+            self.assertEqual(image.format, "JPEG")
+            self.assertEqual(image.info.get("icc_profile"), profile)
 
     def test_plot_bounds_convert_to_half_open_pixel_coordinates(self):
         self.assertEqual(
