@@ -18,8 +18,14 @@ strict parser and reach a market-data provider as an infinite numeric value.
 Finite exponent-form values remain supported. Ordinary strings containing
 words such as `"NaN"` or `"Infinity"` are also valid.
 
-For model tool calls, parsing and local schema validation happen before
-dispatch. StockMind checks required fields, rejects undeclared fields, validates
+For model tool calls, the raw JSON argument payload is limited to 8 KiB
+of UTF-8 before JSON decoding. Oversized or invalid-Unicode payloads are rejected
+without invoking the decoder, limiting parser work and preventing unnecessarily
+large model-generated object graphs from reaching schema validation. The limit is
+generous relative to the flat tool schemas and their individual field limits.
+
+Parsing and local schema validation happen before dispatch. StockMind checks
+required fields, rejects undeclared fields, validates
 primitive types (including rejecting booleans where an integer is required),
 enforces enum choices, numeric bounds and schema-defined string length limits, then applies
 provider defaults. Search queries are limited to 120 characters, sector/industry filters

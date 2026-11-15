@@ -314,6 +314,9 @@ def _completion_message(response, operation: str):
 
 
 MAX_TOOL_CALLS_PER_TURN = 6
+# Tool schemas are flat and tightly bounded; reject oversized raw payloads
+# before JSON decoding can allocate an attacker/model-controlled object graph.
+MAX_TOOL_ARGUMENT_BYTES = 8 * 1024
 MAX_TOOL_RESULT_BYTES = 12 * 1024
 MAX_TOOL_RESULT_BYTES_PER_TURN = 36 * 1024
 MAX_TOOL_DATA_ITEMS = 120
@@ -331,6 +334,21 @@ def _parse_tool_arguments(raw_arguments) -> dict:
         raw_arguments = "{}"
     if not isinstance(raw_arguments, str):
         raise ValueError("Tool arguments must be a JSON string.")
+    # Character count is a cheap lower bound on UTF-8 bytes. Avoid allocating
+    # an encoded copy for obviously oversized payloads, then enforce the byte
+    # limit for multibyte text before invoking the JSON decoder.
+    if len(raw_arguments) > MAX_TOOL_ARGUMENT_BYTES:
+        raise ValueError(
+            f"Tool arguments exceed the {MAX_TOOL_ARGUMENT_BYTES}-byte limit."
+        )
+    try:
+        raw_size_bytes = len(raw_arguments.encode("utf-8"))
+    except UnicodeEncodeError as exc:
+        raise ValueError("Tool arguments must be valid UTF-8.") from exc
+    if raw_size_bytes > MAX_TOOL_ARGUMENT_BYTES:
+        raise ValueError(
+            f"Tool arguments exceed the {MAX_TOOL_ARGUMENT_BYTES}-byte limit."
+        )
     try:
         arguments = strict_json_loads(raw_arguments)
     except ValueError as exc:

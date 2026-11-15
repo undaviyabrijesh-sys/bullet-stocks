@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from stockmind_telegram_mvp.app.ai import (
+    MAX_TOOL_ARGUMENT_BYTES,
     MAX_TOOL_CALLS_PER_TURN,
     ResearchAI,
     ResearchTurnDeadlineExceeded,
@@ -215,6 +216,31 @@ class ToolArgumentParsingTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(raw=raw):
                 with self.assertRaisesRegex(ValueError, "JSON string"):
                     _parse_tool_arguments(raw)
+
+    def test_rejects_oversized_utf8_payload_before_json_decoding(self):
+        raw = '{"query":"' + ("é" * (MAX_TOOL_ARGUMENT_BYTES // 2)) + '"}'
+        self.assertLess(len(raw), MAX_TOOL_ARGUMENT_BYTES)
+        self.assertGreater(len(raw.encode("utf-8")), MAX_TOOL_ARGUMENT_BYTES)
+        with patch(
+            "stockmind_telegram_mvp.app.ai.strict_json_loads"
+        ) as decoder:
+            with self.assertRaisesRegex(ValueError, "8192-byte limit"):
+                _parse_tool_arguments(raw)
+        decoder.assert_not_called()
+
+    def test_accepts_payload_at_exact_utf8_byte_limit(self):
+        raw = "{}" + (" " * (MAX_TOOL_ARGUMENT_BYTES - 2))
+        self.assertEqual(len(raw.encode("utf-8")), MAX_TOOL_ARGUMENT_BYTES)
+        self.assertEqual(_parse_tool_arguments(raw), {})
+
+    def test_rejects_unpaired_surrogate_before_json_decoding(self):
+        raw = '{"query":"' + chr(0xD800) + '"}'
+        with patch(
+            "stockmind_telegram_mvp.app.ai.strict_json_loads"
+        ) as decoder:
+            with self.assertRaisesRegex(ValueError, "valid UTF-8"):
+                _parse_tool_arguments(raw)
+        decoder.assert_not_called()
 
     async def test_malformed_tool_call_is_returned_to_model_and_turn_continues(self):
         malformed_call = SimpleNamespace(
