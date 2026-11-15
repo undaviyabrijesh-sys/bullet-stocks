@@ -393,6 +393,9 @@ def _render_overlay_prepared(
     if not count:
         return None, 0
     result = Image.alpha_composite(image, layer).convert("RGB")
+    # Image operations may carry source info forward. Clear inherited metadata
+    # so only the explicitly validated RGB ICC profile below can be emitted.
+    result.info.clear()
 
     # PNG chart screenshots often contain thin candle wicks, grid lines and
     # small labels. Keep their untouched pixels lossless when the resulting
