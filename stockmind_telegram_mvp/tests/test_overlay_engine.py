@@ -2,7 +2,7 @@ import unittest
 from io import BytesIO
 from unittest.mock import patch
 
-from PIL import Image
+from PIL import Image, ImageCms
 
 from stockmind_telegram_mvp.app import overlay_engine
 from stockmind_telegram_mvp.app.overlay_engine import (
@@ -181,7 +181,7 @@ class OverlayRendererTests(unittest.TestCase):
             self.assertEqual(rendered.size, (640, 360))
 
     def test_renderer_preserves_source_icc_profile_on_overlay_output(self):
-        profile = b"stockmind-test-icc-profile"
+        profile = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
         source = sample_image(icc_profile=profile)
         zone = {
             "zone_type": "demand",
