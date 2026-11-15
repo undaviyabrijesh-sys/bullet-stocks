@@ -25,6 +25,7 @@ from .usage_store import AdmissionStore
 from .conversation_history import ConversationHistoryStore, bound_history
 from .config import (
     BETA_USER_LIMIT,
+    CHART_CAPACITY_WAIT_TIMEOUT_SECONDS,
     DAILY_QUERY_LIMIT,
     MAX_CHART_IMAGE_BYTES,
     MAX_CONCURRENT_CHART_ANALYSES,
@@ -332,7 +333,7 @@ async def _run_research_locked(
     try:
         await asyncio.wait_for(
             chart_analysis_semaphore.acquire(),
-            timeout=USER_LOCK_WAIT_TIMEOUT_SECONDS,
+            timeout=CHART_CAPACITY_WAIT_TIMEOUT_SECONDS,
         )
     except TimeoutError:
         try:

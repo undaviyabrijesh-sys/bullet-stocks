@@ -33,6 +33,16 @@ RESEARCH_TURN_TIMEOUT_SECONDS = float(os.getenv("RESEARCH_TURN_TIMEOUT_SECONDS",
 USER_LOCK_WAIT_TIMEOUT_SECONDS = float(os.getenv("USER_LOCK_WAIT_TIMEOUT_SECONDS", "30"))
 if not math.isfinite(USER_LOCK_WAIT_TIMEOUT_SECONDS) or USER_LOCK_WAIT_TIMEOUT_SECONDS <= 0:
     raise RuntimeError("USER_LOCK_WAIT_TIMEOUT_SECONDS must be a positive finite number.")
+CHART_CAPACITY_WAIT_TIMEOUT_SECONDS = float(
+    os.getenv("CHART_CAPACITY_WAIT_TIMEOUT_SECONDS", "30")
+)
+if (
+    not math.isfinite(CHART_CAPACITY_WAIT_TIMEOUT_SECONDS)
+    or CHART_CAPACITY_WAIT_TIMEOUT_SECONDS <= 0
+):
+    raise RuntimeError(
+        "CHART_CAPACITY_WAIT_TIMEOUT_SECONDS must be a positive finite number."
+    )
 _DEFAULT_PREFERENCES_DB = Path(__file__).resolve().parents[1] / "data" / "user_preferences.sqlite3"
 USER_PREFERENCES_DB = os.getenv(
     "STOCKMIND_PREFERENCES_DB",

@@ -153,7 +153,9 @@ class ChartCapacityTests(unittest.IsolatedAsyncioTestCase):
         try:
             with (
                 patch.object(bot_module, "chart_analysis_semaphore", semaphore),
-                patch.object(bot_module, "USER_LOCK_WAIT_TIMEOUT_SECONDS", 0.01),
+                patch.object(bot_module, "CHART_CAPACITY_WAIT_TIMEOUT_SECONDS", 0.01),
+                # Chart queue patience is independent of the per-user lock timeout.
+                patch.object(bot_module, "USER_LOCK_WAIT_TIMEOUT_SECONDS", 120.0),
                 patch.object(bot_module, "_research_admission_error", return_value=None),
                 patch.object(bot_module, "_reserve_research_request") as reserve,
                 patch.object(
@@ -170,6 +172,55 @@ class ChartCapacityTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("chart-analysis slots", message.answer.await_args.args[0])
         finally:
             semaphore.release()
+
+    async def test_capacity_slot_is_released_when_pipeline_raises(self):
+        semaphore = asyncio.Semaphore(1)
+        message = self.message()
+        with (
+            patch.object(bot_module, "chart_analysis_semaphore", semaphore),
+            patch.object(bot_module, "_research_admission_error", return_value=None),
+            patch.object(
+                bot_module, "_run_research_locked_impl",
+                new_callable=AsyncMock, side_effect=RuntimeError("vision failure"),
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "vision failure"):
+                await bot_module._run_research_locked(
+                    message, "chart request", b"image", "image/png"
+                )
+
+        await asyncio.wait_for(semaphore.acquire(), timeout=1)
+        semaphore.release()
+
+    async def test_capacity_slot_is_released_when_pipeline_is_cancelled(self):
+        semaphore = asyncio.Semaphore(1)
+        message = self.message()
+        pipeline_started = asyncio.Event()
+
+        async def wait_for_cancellation(*args, **kwargs):
+            pipeline_started.set()
+            await asyncio.Event().wait()
+
+        with (
+            patch.object(bot_module, "chart_analysis_semaphore", semaphore),
+            patch.object(bot_module, "_research_admission_error", return_value=None),
+            patch.object(
+                bot_module, "_run_research_locked_impl",
+                new_callable=AsyncMock, side_effect=wait_for_cancellation,
+            ),
+        ):
+            task = asyncio.create_task(
+                bot_module._run_research_locked(
+                    message, "chart request", b"image", "image/png"
+                )
+            )
+            await asyncio.wait_for(pipeline_started.wait(), timeout=1)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+        await asyncio.wait_for(semaphore.acquire(), timeout=1)
+        semaphore.release()
 
     async def test_text_research_bypasses_chart_capacity_semaphore(self):
         semaphore = asyncio.Semaphore(1)

@@ -104,7 +104,8 @@ English.
 - MAX_CHART_IMAGE_BYTES (default: 5 MB)
 - MAX_CONCURRENT_CHART_ANALYSES (default: 2; integer from 1 to 10, per process)
 - RESEARCH_TURN_TIMEOUT_SECONDS (default: 120 seconds; finite positive number)
-- USER_LOCK_WAIT_TIMEOUT_SECONDS (default: 30 seconds; finite positive number)
+- USER_LOCK_WAIT_TIMEOUT_SECONDS (default: 30 seconds; finite positive number; per-user lock acquisition only)
+- CHART_CAPACITY_WAIT_TIMEOUT_SECONDS (default: 30 seconds; finite positive number; chart-semaphore queue only)
 - STOCKMIND_PREFERENCES_DB (SQLite file path for persistent UI-language preferences, beta membership, daily quotas, conversation history and same-host per-user request leases)
 
 ## Provider request bounds
@@ -126,9 +127,11 @@ OpenAI timeout. Chart requests additionally pass through a process-local
 semaphore controlled by `MAX_CONCURRENT_CHART_ANALYSES` (default 2, range 1–10).
 The slot covers image decoding/preparation, the vision request, overlay rendering
 and Telegram delivery, limiting peak decoded-image memory and simultaneous
-vision work. Waiting is bounded by `USER_LOCK_WAIT_TIMEOUT_SECONDS`; a capacity
-rejection happens before daily-slot reservation and returns a localized busy
-message. This limit is per process, not cluster-wide: multiple bot processes can
+vision work. Waiting is bounded independently by
+`CHART_CAPACITY_WAIT_TIMEOUT_SECONDS` (default 30 seconds); this is separate from
+`USER_LOCK_WAIT_TIMEOUT_SECONDS`, which applies only to per-user lock acquisition.
+A capacity rejection happens before daily-slot reservation and returns a localized
+busy message. This limit is per process, not cluster-wide: multiple bot processes can
 run up to their combined per-process limits. The existing SQLite user lease
 serializes the same user across processes but does not provide a global chart
 capacity limit. Whichever local deadline expires first stops the coroutine;
