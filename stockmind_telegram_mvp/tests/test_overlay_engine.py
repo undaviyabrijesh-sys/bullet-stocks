@@ -177,7 +177,7 @@ class OverlayRendererTests(unittest.TestCase):
         self.assertEqual(count, 1)
         self.assertIsNotNone(result)
         with Image.open(BytesIO(result)) as rendered:
-            self.assertEqual(rendered.format, "JPEG")
+            self.assertEqual(rendered.format, "PNG")
             self.assertEqual(rendered.size, (640, 360))
 
     def test_renderer_preserves_source_icc_profile_on_overlay_output(self):
@@ -198,8 +198,68 @@ class OverlayRendererTests(unittest.TestCase):
         self.assertEqual(count, 1)
         self.assertIsNotNone(rendered)
         with Image.open(BytesIO(rendered)) as image:
-            self.assertEqual(image.format, "JPEG")
+            self.assertEqual(image.format, "PNG")
             self.assertEqual(image.info.get("icc_profile"), profile)
+
+    def test_png_overlay_preserves_untouched_chart_pixels_losslessly(self):
+        source_image = Image.new("RGB", (64, 48))
+        pixels = source_image.load()
+        for y in range(48):
+            for x in range(64):
+                pixels[x, y] = (x * 3 % 256, y * 5 % 256, (x + y) * 7 % 256)
+        source_bytes = BytesIO()
+        source_image.save(source_bytes, format="PNG")
+        zone = {
+            "zone_type": "demand",
+            "draw_overlay": True,
+            "confidence": "high",
+            "x_start": 0.25,
+            "x_end": 0.75,
+            "y_top": 0.25,
+            "y_bottom": 0.75,
+        }
+
+        rendered, count = render_overlay(source_bytes.getvalue(), [zone])
+
+        self.assertEqual(count, 1)
+        with Image.open(BytesIO(rendered)) as output:
+            self.assertEqual(output.format, "PNG")
+            self.assertEqual(output.getpixel((2, 2)), source_image.getpixel((2, 2)))
+            self.assertNotEqual(output.getpixel((32, 24)), source_image.getpixel((32, 24)))
+
+    def test_large_png_overlay_falls_back_to_bounded_jpeg_encoding(self):
+        zone = {
+            "zone_type": "demand",
+            "draw_overlay": True,
+            "confidence": "high",
+            "x_start": 0.2,
+            "x_end": 0.8,
+            "y_top": 0.3,
+            "y_bottom": 0.5,
+        }
+        with patch.object(overlay_engine, "MAX_OVERLAY_PNG_BYTES", 1):
+            rendered, count = render_overlay(sample_image(), [zone])
+
+        self.assertEqual(count, 1)
+        with Image.open(BytesIO(rendered)) as output:
+            self.assertEqual(output.format, "JPEG")
+
+    def test_jpeg_source_keeps_jpeg_overlay_output(self):
+        zone = {
+            "zone_type": "supply",
+            "draw_overlay": True,
+            "confidence": "medium",
+            "x_start": 0.2,
+            "x_end": 0.8,
+            "y_top": 0.3,
+            "y_bottom": 0.5,
+        }
+
+        rendered, count = render_overlay(sample_image(image_format="JPEG"), [zone])
+
+        self.assertEqual(count, 1)
+        with Image.open(BytesIO(rendered)) as output:
+            self.assertEqual(output.format, "JPEG")
 
     def test_renderer_does_not_attach_non_rgb_profile_to_rgb_overlay(self):
         rgb_profile = b"\x00" * 16 + b"RGB " + b"\x00" * 16 + b"acsp" + b"\x00" * 88
