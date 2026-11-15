@@ -314,7 +314,12 @@ def _render_overlay_prepared(
     if not isinstance(zones, (list, tuple)):
         return None, 0
 
-    image = Image.open(BytesIO(image_bytes)).convert("RGBA")
+    with Image.open(BytesIO(image_bytes)) as source:
+        # Preserve the source profile on the returned JPEG. The pixel values
+        # are composited without a color transform; carrying the profile keeps
+        # color-managed viewers from interpreting them in an unrelated space.
+        icc_profile = source.info.get("icc_profile")
+        image = source.convert("RGBA")
     width, height = image.size
     plot_box = (
         normalized_plot_bounds_to_pixel_box(plot_bounds, width, height)
@@ -373,5 +378,8 @@ def _render_overlay_prepared(
         return None, 0
     result = Image.alpha_composite(image, layer).convert("RGB")
     out = BytesIO()
-    result.save(out, format="JPEG", quality=88, optimize=True)
+    save_options = {"format": "JPEG", "quality": 88, "optimize": True}
+    if isinstance(icc_profile, bytes) and icc_profile:
+        save_options["icc_profile"] = icc_profile
+    result.save(out, **save_options)
     return out.getvalue(), count
