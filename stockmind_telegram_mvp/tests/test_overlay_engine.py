@@ -216,7 +216,7 @@ class OverlayRendererTests(unittest.TestCase):
             "x_start": 0.25,
             "x_end": 0.75,
             "y_top": 0.25,
-            "y_bottom": 0.75,
+            "y_bottom": 0.65,
         }
 
         rendered, count = render_overlay(source_bytes.getvalue(), [zone])
