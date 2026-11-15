@@ -42,7 +42,7 @@ class LocalizationTests(unittest.TestCase):
             "welcome", "beta_full", "daily_limit", "quota_storage_unavailable",
             "progress_chart",
             "progress_research", "research_incomplete", "reset_done", "reset_lock_unavailable",
-            "request_busy", "reset_lock_busy", "unsupported_message",
+            "request_busy", "chart_capacity_busy", "reset_lock_busy", "unsupported_message",
         )
         for language in ("en", "hi", "gu"):
             for key in required:

@@ -102,6 +102,7 @@ English.
 - MAX_HISTORY_BYTES (default: 24 KiB of UTF-8 text across the retained conversation)
 - OPENAI_VISION_MODEL (defaults to OPENAI_MODEL; must support image input and structured outputs; default GPT-6 Luna)
 - MAX_CHART_IMAGE_BYTES (default: 5 MB)
+- MAX_CONCURRENT_CHART_ANALYSES (default: 2; integer from 1 to 10, per process)
 - RESEARCH_TURN_TIMEOUT_SECONDS (default: 120 seconds; finite positive number)
 - USER_LOCK_WAIT_TIMEOUT_SECONDS (default: 30 seconds; finite positive number)
 - STOCKMIND_PREFERENCES_DB (SQLite file path for persistent UI-language preferences, beta membership, daily quotas, conversation history and same-host per-user request leases)
@@ -121,7 +122,16 @@ cancellation does not guarantee that upstream processing or billing stopped.
 A provider's own timeout is preserved as a provider failure rather than being
 misreported as the overall turn deadline. Chart-image analysis also applies the
 same overall deadline around its vision request, in addition to the per-request
-OpenAI timeout. Whichever local deadline expires first stops the coroutine;
+OpenAI timeout. Chart requests additionally pass through a process-local
+semaphore controlled by `MAX_CONCURRENT_CHART_ANALYSES` (default 2, range 1–10).
+The slot covers image decoding/preparation, the vision request, overlay rendering
+and Telegram delivery, limiting peak decoded-image memory and simultaneous
+vision work. Waiting is bounded by `USER_LOCK_WAIT_TIMEOUT_SECONDS`; a capacity
+rejection happens before daily-slot reservation and returns a localized busy
+message. This limit is per process, not cluster-wide: multiple bot processes can
+run up to their combined per-process limits. The existing SQLite user lease
+serializes the same user across processes but does not provide a global chart
+capacity limit. Whichever local deadline expires first stops the coroutine;
 a chart timeout is reported as an incomplete analysis and is not saved as a
 successful assistant turn. Text-turn deadline exceptions are also propagated
 to Telegram and are not appended to conversation history as completed answers.

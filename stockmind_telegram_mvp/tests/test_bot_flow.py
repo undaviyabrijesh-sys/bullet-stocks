@@ -93,6 +93,101 @@ class OverlayOutcomeMessageTests(unittest.TestCase):
         self.assertIn("sharper, uncropped screenshot", note)
 
 
+class ChartCapacityTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def message(user_id=987654321):
+        return SimpleNamespace(
+            from_user=SimpleNamespace(id=user_id, language_code="en"),
+            answer=AsyncMock(),
+        )
+
+    async def test_chart_pipeline_respects_process_local_concurrency_limit(self):
+        semaphore = asyncio.Semaphore(1)
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+        active = 0
+        maximum_active = 0
+
+        async def slow_pipeline(*args, **kwargs):
+            nonlocal active, maximum_active
+            active += 1
+            maximum_active = max(maximum_active, active)
+            if active == 1:
+                first_started.set()
+            try:
+                await release_first.wait()
+            finally:
+                active -= 1
+
+        first_message = self.message()
+        second_message = self.message(987654322)
+        with (
+            patch.object(bot_module, "chart_analysis_semaphore", semaphore),
+            patch.object(bot_module, "_research_admission_error", return_value=None),
+            patch.object(
+                bot_module, "_run_research_locked_impl",
+                new_callable=AsyncMock, side_effect=slow_pipeline,
+            ) as pipeline,
+        ):
+            first = asyncio.create_task(
+                bot_module._run_research_locked(first_message, "chart one", b"image", "image/png")
+            )
+            await asyncio.wait_for(first_started.wait(), timeout=1)
+            second = asyncio.create_task(
+                bot_module._run_research_locked(second_message, "chart two", b"image", "image/png")
+            )
+            await asyncio.sleep(0.01)
+            self.assertEqual(pipeline.await_count, 1)
+            release_first.set()
+            await asyncio.wait_for(asyncio.gather(first, second), timeout=1)
+
+        self.assertEqual(pipeline.await_count, 2)
+        self.assertEqual(maximum_active, 1)
+        await asyncio.wait_for(semaphore.acquire(), timeout=1)
+        semaphore.release()
+
+    async def test_capacity_timeout_does_not_start_pipeline_or_consume_quota(self):
+        semaphore = asyncio.Semaphore(1)
+        await semaphore.acquire()
+        message = self.message()
+        try:
+            with (
+                patch.object(bot_module, "chart_analysis_semaphore", semaphore),
+                patch.object(bot_module, "USER_LOCK_WAIT_TIMEOUT_SECONDS", 0.01),
+                patch.object(bot_module, "_research_admission_error", return_value=None),
+                patch.object(bot_module, "_reserve_research_request") as reserve,
+                patch.object(
+                    bot_module, "_run_research_locked_impl", new_callable=AsyncMock
+                ) as pipeline,
+            ):
+                await bot_module._run_research_locked(
+                    message, "chart request", b"image", "image/png"
+                )
+
+            pipeline.assert_not_awaited()
+            reserve.assert_not_called()
+            message.answer.assert_awaited_once()
+            self.assertIn("chart-analysis slots", message.answer.await_args.args[0])
+        finally:
+            semaphore.release()
+
+    async def test_text_research_bypasses_chart_capacity_semaphore(self):
+        semaphore = asyncio.Semaphore(1)
+        await semaphore.acquire()
+        message = self.message()
+        try:
+            with (
+                patch.object(bot_module, "chart_analysis_semaphore", semaphore),
+                patch.object(
+                    bot_module, "_run_research_locked_impl", new_callable=AsyncMock
+                ) as pipeline,
+            ):
+                await bot_module._run_research_locked(message, "text-only question")
+            pipeline.assert_awaited_once_with(message, "text-only question", None, "image/jpeg")
+        finally:
+            semaphore.release()
+
+
 class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         bot_module.histories.clear()

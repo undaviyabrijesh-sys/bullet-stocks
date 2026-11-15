@@ -20,6 +20,9 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-6-luna")
 # Keep this vision-capable; the default model accepts image input.
 OPENAI_VISION_MODEL = os.getenv("OPENAI_VISION_MODEL", OPENAI_MODEL)
 MAX_CHART_IMAGE_BYTES = int(os.getenv("MAX_CHART_IMAGE_BYTES", str(5 * 1024 * 1024)))
+MAX_CONCURRENT_CHART_ANALYSES = int(os.getenv("MAX_CONCURRENT_CHART_ANALYSES", "2"))
+if not 1 <= MAX_CONCURRENT_CHART_ANALYSES <= 10:
+    raise RuntimeError("MAX_CONCURRENT_CHART_ANALYSES must be between 1 and 10.")
 DAILY_QUERY_LIMIT = int(os.getenv("DAILY_QUERY_LIMIT", "10"))
 BETA_USER_LIMIT = int(os.getenv("BETA_USER_LIMIT", "10"))
 MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "12"))

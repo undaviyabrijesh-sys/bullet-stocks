@@ -27,6 +27,7 @@ from .config import (
     BETA_USER_LIMIT,
     DAILY_QUERY_LIMIT,
     MAX_CHART_IMAGE_BYTES,
+    MAX_CONCURRENT_CHART_ANALYSES,
     MAX_HISTORY_MESSAGES,
     MAX_HISTORY_BYTES,
     OPENAI_API_KEY,
@@ -69,6 +70,8 @@ try:
 except Exception:
     logger.exception("Persistent StockMind per-user request locking is unavailable")
     user_locks = None
+# Bound decoded-image memory and concurrent vision requests within this process.
+chart_analysis_semaphore = asyncio.Semaphore(MAX_CONCURRENT_CHART_ANALYSES)
 usage = defaultdict(int)
 usage_day = {}
 beta_users = set()
@@ -309,6 +312,44 @@ async def run_research(
 
 
 async def _run_research_locked(
+    message: Message,
+    user_text: str,
+    image_bytes: bytes | None = None,
+    image_mime_type: str = "image/jpeg",
+):
+    """Limit concurrent chart decoding, vision calls and overlay delivery per process."""
+    if image_bytes is None or message.from_user is None:
+        return await _run_research_locked_impl(
+            message, user_text, image_bytes, image_mime_type
+        )
+
+    language = _language_for(message)
+    admission_error = _research_admission_error(message.from_user.id, language)
+    if admission_error:
+        await message.answer(admission_error)
+        return
+
+    try:
+        await asyncio.wait_for(
+            chart_analysis_semaphore.acquire(),
+            timeout=USER_LOCK_WAIT_TIMEOUT_SECONDS,
+        )
+    except TimeoutError:
+        try:
+            await message.answer(translate(language, "chart_capacity_busy"))
+        except Exception:
+            logger.exception("StockMind could not report chart-analysis capacity exhaustion")
+        return
+
+    try:
+        await _run_research_locked_impl(
+            message, user_text, image_bytes, image_mime_type
+        )
+    finally:
+        chart_analysis_semaphore.release()
+
+
+async def _run_research_locked_impl(
     message: Message,
     user_text: str,
     image_bytes: bytes | None = None,
