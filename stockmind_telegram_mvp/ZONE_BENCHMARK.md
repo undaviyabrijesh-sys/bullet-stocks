@@ -538,6 +538,16 @@ optimized JPEG output at quality 88. JPEG and WEBP source screenshots continue
 to produce JPEG overlays. Telegram upload filenames follow the actual encoded
 container, so PNG bytes are not mislabeled with a .jpg extension.
 
+EXIF normalization now checks an embedded ICC profile against the final pixel
+mode after any Pillow mode conversion. RGB/RGBA/palette, grayscale and CMYK
+profiles are retained only for matching channel data; malformed, truncated or
+mode-incompatible profiles are omitted rather than attached to different pixel
+channels. The overlay renderer similarly attaches only a structurally valid
+RGB profile to its RGB output. This is a conservative ICC-header compatibility
+check, not a color-managed conversion: CMYK and grayscale source pixels are
+still converted by Pillow's normal mode conversion when the overlay is rendered.
+No colorimetric accuracy improvement is claimed.
+
 The regression tests verify pixel equality outside a drawn zone, a changed
 pixel inside the zone, PNG-to-JPEG fallback when the PNG budget is exceeded,
 and unchanged JPEG output for JPEG inputs. These tests validate image encoding

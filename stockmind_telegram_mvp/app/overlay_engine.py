@@ -15,6 +15,41 @@ SUPPORTED_IMAGE_MIME_TYPES = {
 }
 
 
+_ICC_COLOR_SPACE_BY_MODE = {
+    "1": b"GRAY",
+    "L": b"GRAY",
+    "LA": b"GRAY",
+    "P": b"RGB ",
+    "RGB": b"RGB ",
+    "RGBA": b"RGB ",
+    "CMYK": b"CMYK",
+}
+
+
+def _compatible_icc_profile(profile: bytes | None, mode: str) -> bytes | None:
+    """Return a structurally valid ICC profile only when it matches pixel mode.
+
+    ICC color-space signatures describe channel data, not the container format.
+    A profile for grayscale or CMYK samples must not be copied onto RGB pixels
+    after Pillow converts the image mode. This is a conservative header check,
+    not a color-managed transform or a complete ICC profile parser.
+    """
+    expected_color_space = _ICC_COLOR_SPACE_BY_MODE.get(mode)
+    if expected_color_space is None or not isinstance(profile, bytes) or len(profile) < 128:
+        return None
+    declared_size = int.from_bytes(profile[:4], "big")
+    if (
+        declared_size < 128
+        or declared_size > len(profile)
+        or profile[16:20] != expected_color_space
+        or profile[36:40] != b"acsp"
+    ):
+        return None
+    # Ignore bytes beyond the profile's declared extent rather than passing
+    # unrelated trailing data into an encoder.
+    return profile[:declared_size]
+
+
 def validate_chart_image(image_bytes: bytes) -> str:
     """Fully decode and integrity-check a static chart image before any AI request.
 
@@ -113,9 +148,7 @@ def prepare_chart_image(
         image_format = image.format
         oriented = ImageOps.exif_transpose(image)
         save_options = {}
-        icc_profile = image.info.get("icc_profile")
-        if icc_profile:
-            save_options["icc_profile"] = icc_profile
+        source_profile = image.info.get("icc_profile")
 
         if image_format == "JPEG":
             if oriented.mode not in {"L", "RGB", "CMYK"}:
@@ -129,6 +162,13 @@ def prepare_chart_image(
             save_options["optimize"] = True
         else:
             raise ValueError("Please send a JPEG, PNG or WEBP chart image.")
+
+        # Check against the final encoded pixel mode, after any conversion.
+        # For example, a grayscale/CMYK WebP may be expanded to RGB by Pillow;
+        # its original non-RGB profile must not be attached to those RGB bytes.
+        icc_profile = _compatible_icc_profile(source_profile, oriented.mode)
+        if icc_profile:
+            save_options["icc_profile"] = icc_profile
 
         output = BytesIO()
         oriented.save(output, format=image_format, **save_options)
@@ -325,14 +365,8 @@ def _render_overlay_prepared(
         # RGB pixels: that would misdescribe the encoded colors. Preserve only
         # a structurally recognizable RGB profile from an RGB-like source.
         icc_profile = (
-            source_profile
-            if (
-                source.mode in {"RGB", "RGBA", "P"}
-                and isinstance(source_profile, bytes)
-                and len(source_profile) >= 128
-                and source_profile[16:20] == b"RGB "
-                and source_profile[36:40] == b"acsp"
-            )
+            _compatible_icc_profile(source_profile, "RGB")
+            if source.mode in {"RGB", "RGBA", "P"}
             else None
         )
         image = source.convert("RGBA")

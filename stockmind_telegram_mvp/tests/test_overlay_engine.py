@@ -12,6 +12,7 @@ from stockmind_telegram_mvp.app.overlay_engine import (
     prepare_chart_image,
     render_overlay,
     validate_chart_image,
+    _compatible_icc_profile,
 )
 
 
@@ -32,6 +33,14 @@ def oriented_sample_image(image_format="PNG", orientation=6):
         output, format=image_format, exif=exif
     )
     return output.getvalue()
+
+
+def synthetic_icc_profile(color_space, *, declared_size=128, signature=b"acsp"):
+    profile = bytearray(128)
+    profile[0:4] = declared_size.to_bytes(4, "big")
+    profile[16:20] = color_space
+    profile[36:40] = signature
+    return bytes(profile)
 
 
 class OverlayRendererTests(unittest.TestCase):
@@ -55,6 +64,84 @@ class OverlayRendererTests(unittest.TestCase):
                     self.assertNotIn(274, image.getexif())
                 self.assertEqual(mime_type, expected_mime[image_format])
                 self.assertEqual(validate_chart_image(normalized), mime_type)
+
+    def test_icc_profile_header_must_match_final_pixel_mode(self):
+        rgb_profile = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+        gray_profile = synthetic_icc_profile(b"GRAY")
+        cmyk_profile = synthetic_icc_profile(b"CMYK")
+
+        self.assertEqual(_compatible_icc_profile(rgb_profile, "RGB"), rgb_profile)
+        self.assertEqual(_compatible_icc_profile(gray_profile, "L"), gray_profile)
+        self.assertEqual(_compatible_icc_profile(cmyk_profile, "CMYK"), cmyk_profile)
+        self.assertIsNone(_compatible_icc_profile(gray_profile, "RGB"))
+        self.assertIsNone(_compatible_icc_profile(cmyk_profile, "RGBA"))
+        self.assertIsNone(_compatible_icc_profile(b"not-an-icc-profile", "RGB"))
+        self.assertIsNone(
+            _compatible_icc_profile(
+                synthetic_icc_profile(b"RGB ", declared_size=129), "RGB"
+            )
+        )
+        self.assertIsNone(
+            _compatible_icc_profile(
+                synthetic_icc_profile(b"RGB ", signature=b"nope"), "RGB"
+            )
+        )
+
+    def test_prepare_chart_image_drops_gray_profile_when_webp_is_expanded_to_rgb(self):
+        exif = Image.Exif()
+        exif[274] = 6
+        gray_profile = synthetic_icc_profile(b"GRAY")
+        output = BytesIO()
+        Image.new("LA", (64, 48), (128, 255)).save(
+            output,
+            format="WEBP",
+            exif=exif,
+            icc_profile=gray_profile,
+            quality=95,
+        )
+
+        normalized, mime_type = prepare_chart_image(output.getvalue())
+
+        self.assertEqual(mime_type, "image/webp")
+        with Image.open(BytesIO(normalized)) as image:
+            self.assertIn(image.mode, {"RGB", "RGBA"})
+            self.assertNotIn("icc_profile", image.info)
+
+    def test_prepare_chart_image_preserves_matching_cmyk_profile_after_rotation(self):
+        exif = Image.Exif()
+        exif[274] = 6
+        cmyk_profile = synthetic_icc_profile(b"CMYK")
+        output = BytesIO()
+        Image.new("CMYK", (64, 48), (0, 0, 0, 0)).save(
+            output,
+            format="JPEG",
+            exif=exif,
+            icc_profile=cmyk_profile,
+            quality=95,
+        )
+
+        normalized, mime_type = prepare_chart_image(output.getvalue())
+
+        self.assertEqual(mime_type, "image/jpeg")
+        with Image.open(BytesIO(normalized)) as image:
+            self.assertEqual(image.mode, "CMYK")
+            self.assertEqual(image.info.get("icc_profile"), cmyk_profile)
+
+    def test_prepare_chart_image_preserves_matching_srgb_profile_after_rotation(self):
+        exif = Image.Exif()
+        exif[274] = 6
+        rgb_profile = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+        output = BytesIO()
+        Image.new("RGB", (64, 48), "white").save(
+            output, format="PNG", exif=exif, icc_profile=rgb_profile
+        )
+
+        normalized, mime_type = prepare_chart_image(output.getvalue())
+
+        self.assertEqual(mime_type, "image/png")
+        with Image.open(BytesIO(normalized)) as image:
+            self.assertEqual(image.mode, "RGB")
+            self.assertEqual(image.info.get("icc_profile"), rgb_profile)
 
     def test_renderer_normalizes_exif_orientation_for_direct_callers(self):
         original = oriented_sample_image(image_format="PNG", orientation=6)
