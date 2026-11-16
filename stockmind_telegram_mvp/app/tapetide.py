@@ -15,6 +15,23 @@ def _parse_iso_calendar_date(value: str, field: str) -> calendar_date:
         raise ValueError(f"{field} must use YYYY-MM-DD")
     return parsed
 
+
+def _normalize_symbol(symbol: str) -> str:
+    """Validate and URL-encode one stock symbol as a single path segment."""
+    if not isinstance(symbol, str):
+        raise ValueError("Stock symbol must be text")
+    normalized = symbol.strip().upper()
+    if not normalized:
+        raise ValueError("Stock symbol cannot be empty")
+    return quote(normalized, safe="")
+
+
+def _bounded_integer(value: int, field: str, maximum: int) -> int:
+    """Reject coercible non-integers, then preserve the client's existing clamp policy."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{field} must be an integer")
+    return max(1, min(value, maximum))
+
 BASE_URL = "https://api.tapetide.com/v1"
 
 
@@ -104,33 +121,36 @@ class TapetideClient:
         if not query:
             raise ValueError("Stock search query cannot be empty")
 
-        params = {"q": query, "limit": max(1, min(int(limit), 50))}
-        if sector:
-            params["sector"] = sector
-        if industry:
-            params["industry"] = industry
+        params = {"q": query, "limit": _bounded_integer(limit, "Stock search limit", 50)}
+        for field, value in (("sector", sector), ("industry", industry)):
+            if value is not None:
+                if not isinstance(value, str):
+                    raise ValueError(f"{field.title()} filter must be text")
+                normalized_filter = value.strip()
+                if normalized_filter:
+                    params[field] = normalized_filter
         return await self._get("/stocks", params)
 
     async def quote(self, symbol: str):
-        symbol = quote(symbol.strip().upper(), safe="")
+        symbol = _normalize_symbol(symbol)
         return await self._get(f"/stocks/{symbol}/quote")
 
     async def live_quote(self, symbol: str):
         """Fetch the provider's session-live quote route; availability depends on coverage/session."""
-        symbol = quote(symbol.strip().upper(), safe="")
+        symbol = _normalize_symbol(symbol)
         return await self._get(f"/stocks/{symbol}/quote/live")
 
     async def financials(self, symbol: str, section: str = "annual"):
-        symbol = quote(symbol.strip().upper(), safe="")
-        if section not in {"annual", "quarterly"}:
+        symbol = _normalize_symbol(symbol)
+        if not isinstance(section, str) or section not in {"annual", "quarterly"}:
             raise ValueError("Financial section must be 'annual' or 'quarterly'")
         return await self._get(
             f"/stocks/{symbol}/financials", {"section": section}
         )
 
     async def price_history(self, symbol: str, days: int = 90):
-        symbol = quote(symbol.strip().upper(), safe="")
-        days = max(1, min(int(days), 365))
+        symbol = _normalize_symbol(symbol)
+        days = _bounded_integer(days, "Price-history days", 365)
         return await self._get(f"/stocks/{symbol}/price", {"days": days})
 
     async def intraday_bars(
@@ -144,7 +164,7 @@ class TapetideClient:
         limit: int = 375,
     ):
         """Fetch historical 1/5/15-minute NSE/BSE bars; Tapetide updates after session close."""
-        symbol = quote(symbol.strip().upper(), safe="")
+        symbol = _normalize_symbol(symbol)
         if isinstance(interval, bool) or not isinstance(interval, int) or interval not in (1, 5, 15):
             raise ValueError("Intraday interval must be 1, 5 or 15 minutes")
         if isinstance(limit, bool) or not isinstance(limit, int):
@@ -157,7 +177,7 @@ class TapetideClient:
         if has_range_start != has_range_end:
             raise ValueError("from_date and to_date must be supplied together")
 
-        params = {"interval": interval, "limit": max(1, min(limit, 2000))}
+        params = {"interval": interval, "limit": _bounded_integer(limit, "Intraday limit", 2000)}
         if has_single_date:
             params["date"] = _parse_iso_calendar_date(date, "date").isoformat()
         elif has_range_start:
