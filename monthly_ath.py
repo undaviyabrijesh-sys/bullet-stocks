@@ -38,6 +38,7 @@ FULL = "--full" in sys.argv
 
 # ---------- Setup rules ----------
 MIN_AGE_MONTHS = 48
+WATCHLIST_STRATEGY_VERSION = 3  # Bump to rebuild cached watchlists when qualification rules change.
 SETUP_LOOKBACK = 3
 ENTRY_BUFFER = 0.02       # trigger = monthly high + 2%
 MAX_CHASE = 0.06          # triggered: skip if price is > 6% above the trigger
@@ -1113,7 +1114,7 @@ def main():
 
     # ---- 1. watchlist: full scan on the first run of the day ----
     mode = "Live check"
-    if FULL or wl.get("date") != day_key or wl.get("strategy_version") != 2:
+    if FULL or wl.get("date") != day_key or wl.get("strategy_version") != WATCHLIST_STRATEGY_VERSION:
         symbols = load_symbols()
         if not symbols:
             discord("⚠️ ATH scan: could not load the stock list.")
@@ -1122,7 +1123,7 @@ def main():
         if scanned == 0:
             discord("⚠️ ATH scan: no price data returned, skipping this run.")
             return
-        wl = {"date": day_key, "strategy_version": 2, "scanned": scanned, "items": items}
+        wl = {"date": day_key, "strategy_version": WATCHLIST_STRATEGY_VERSION, "scanned": scanned, "items": items}
         save_json(WATCH_FILE, wl)
         mode = "Full scan"
     scanned = wl.get("scanned", 0)
