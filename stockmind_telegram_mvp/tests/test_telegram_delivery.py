@@ -1,9 +1,12 @@
 import unittest
+from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from aiogram.types import BufferedInputFile
+from PIL import Image
 
+from stockmind_telegram_mvp.app import telegram_delivery
 from stockmind_telegram_mvp.app.telegram_delivery import (
     send_analysis_text,
     send_overlay_photo,
@@ -104,21 +107,42 @@ class AnalysisDeliveryTests(unittest.IsolatedAsyncioTestCase):
 
 
 class OverlayDeliveryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_successful_photo_delivery_returns_true(self):
-        message = SimpleNamespace(answer_photo=AsyncMock())
+    @staticmethod
+    def sample_image(size=(640, 360), image_format="JPEG"):
+        output = BytesIO()
+        Image.new("RGB", size, "white").save(
+            output, format=image_format, optimize=True
+        )
+        return output.getvalue()
 
-        delivered = await send_overlay_photo(message, b"jpeg-bytes", caption="Estimated overlay")
+    async def test_successful_photo_delivery_returns_true(self):
+        message = SimpleNamespace(
+            answer_photo=AsyncMock(),
+            answer_document=AsyncMock(),
+        )
+        image_bytes = self.sample_image()
+
+        delivered = await send_overlay_photo(
+            message, image_bytes, caption="Estimated overlay"
+        )
 
         self.assertTrue(delivered)
         message.answer_photo.assert_awaited_once()
+        message.answer_document.assert_not_awaited()
         photo = message.answer_photo.await_args.args[0]
         self.assertIsInstance(photo, BufferedInputFile)
         self.assertEqual(photo.filename, "stockmind-chart-zones.jpg")
-        self.assertEqual(message.answer_photo.await_args.kwargs["caption"], "Estimated overlay")
+        self.assertEqual(
+            message.answer_photo.await_args.kwargs["caption"],
+            "Estimated overlay",
+        )
 
     async def test_png_overlay_uses_png_filename(self):
-        message = SimpleNamespace(answer_photo=AsyncMock())
-        png_bytes = b"\x89PNG\r\n\x1a\n" + b"test-payload"
+        message = SimpleNamespace(
+            answer_photo=AsyncMock(),
+            answer_document=AsyncMock(),
+        )
+        png_bytes = self.sample_image(image_format="PNG")
 
         delivered = await send_overlay_photo(
             message, png_bytes, caption="Estimated overlay"
@@ -128,15 +152,123 @@ class OverlayDeliveryTests(unittest.IsolatedAsyncioTestCase):
         photo = message.answer_photo.await_args.args[0]
         self.assertIsInstance(photo, BufferedInputFile)
         self.assertEqual(photo.filename, "stockmind-chart-zones.png")
+        message.answer_document.assert_not_awaited()
 
-    async def test_telegram_failure_returns_false_without_raising(self):
-        message = SimpleNamespace(answer_photo=AsyncMock(side_effect=RuntimeError("Telegram unavailable")))
+    async def test_photo_byte_limit_routes_exact_image_as_document(self):
+        message = SimpleNamespace(
+            answer_photo=AsyncMock(),
+            answer_document=AsyncMock(),
+        )
+        png_bytes = self.sample_image(image_format="PNG")
 
-        delivered = await send_overlay_photo(message, b"jpeg-bytes", caption="Estimated overlay")
+        with patch.object(telegram_delivery, "TELEGRAM_PHOTO_MAX_BYTES", 1):
+            delivered = await send_overlay_photo(
+                message, png_bytes, caption="Estimated overlay"
+            )
+
+        self.assertTrue(delivered)
+        message.answer_photo.assert_not_awaited()
+        message.answer_document.assert_awaited_once()
+        document = message.answer_document.await_args.args[0]
+        self.assertEqual(document.filename, "stockmind-chart-zones.png")
+        self.assertEqual(document.data, png_bytes)
+
+    async def test_extreme_aspect_ratio_routes_image_as_document(self):
+        message = SimpleNamespace(
+            answer_photo=AsyncMock(),
+            answer_document=AsyncMock(),
+        )
+        png_bytes = self.sample_image(size=(1000, 20), image_format="PNG")
+
+        delivered = await send_overlay_photo(
+            message, png_bytes, caption="Estimated overlay"
+        )
+
+        self.assertTrue(delivered)
+        message.answer_photo.assert_not_awaited()
+        message.answer_document.assert_awaited_once()
+
+    async def test_photo_limit_helper_checks_size_dimension_sum_and_ratio(self):
+        self.assertTrue(
+            telegram_delivery._fits_telegram_photo_limits(
+                5000, 5000, telegram_delivery.TELEGRAM_PHOTO_MAX_BYTES
+            )
+        )
+        self.assertFalse(
+            telegram_delivery._fits_telegram_photo_limits(5001, 5000, 1)
+        )
+        self.assertFalse(
+            telegram_delivery._fits_telegram_photo_limits(1000, 20, 1)
+        )
+        self.assertFalse(
+            telegram_delivery._fits_telegram_photo_limits(
+                100, 100, telegram_delivery.TELEGRAM_PHOTO_MAX_BYTES + 1
+            )
+        )
+        self.assertFalse(
+            telegram_delivery._fits_telegram_photo_limits(True, 100, 1)
+        )
+
+    async def test_document_above_safety_limit_is_not_sent(self):
+        message = SimpleNamespace(
+            answer_photo=AsyncMock(),
+            answer_document=AsyncMock(),
+        )
+        png_bytes = self.sample_image(image_format="PNG")
+
+        with patch.object(telegram_delivery, "TELEGRAM_DOCUMENT_MAX_BYTES", 1):
+            delivered = await send_overlay_photo(
+                message, png_bytes, caption="Estimated overlay"
+            )
+
+        self.assertFalse(delivered)
+        message.answer_photo.assert_not_awaited()
+        message.answer_document.assert_not_awaited()
+
+    async def test_invalid_overlay_bytes_are_not_sent(self):
+        message = SimpleNamespace(
+            answer_photo=AsyncMock(),
+            answer_document=AsyncMock(),
+        )
+
+        delivered = await send_overlay_photo(
+            message, b"not-an-image", caption="Estimated overlay"
+        )
+
+        self.assertFalse(delivered)
+        message.answer_photo.assert_not_awaited()
+        message.answer_document.assert_not_awaited()
+
+    async def test_telegram_photo_failure_returns_false_without_document_retry(self):
+        message = SimpleNamespace(
+            answer_photo=AsyncMock(side_effect=RuntimeError("Telegram unavailable")),
+            answer_document=AsyncMock(),
+        )
+
+        delivered = await send_overlay_photo(
+            message, self.sample_image(), caption="Estimated overlay"
+        )
 
         self.assertFalse(delivered)
         message.answer_photo.assert_awaited_once()
+        message.answer_document.assert_not_awaited()
 
+    async def test_telegram_document_failure_returns_false(self):
+        message = SimpleNamespace(
+            answer_photo=AsyncMock(),
+            answer_document=AsyncMock(
+                side_effect=RuntimeError("Telegram unavailable")
+            ),
+        )
+        png_bytes = self.sample_image(image_format="PNG")
+
+        with patch.object(telegram_delivery, "TELEGRAM_PHOTO_MAX_BYTES", 1):
+            delivered = await send_overlay_photo(
+                message, png_bytes, caption="Estimated overlay"
+            )
+
+        self.assertFalse(delivered)
+        message.answer_document.assert_awaited_once()
 
 if __name__ == "__main__":
     unittest.main()

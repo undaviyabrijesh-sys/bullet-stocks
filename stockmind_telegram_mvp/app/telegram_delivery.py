@@ -2,6 +2,13 @@
 
 TELEGRAM_TEXT_CHUNK_LIMIT = 4000
 
+# Keep a margin below Telegram's documented 10 MB photo ceiling. Oversized
+# or unusually shaped overlays are sent as documents instead of being resized.
+TELEGRAM_PHOTO_MAX_BYTES = 9_000_000
+TELEGRAM_DOCUMENT_MAX_BYTES = 45_000_000
+TELEGRAM_PHOTO_MAX_DIMENSION_SUM = 10_000
+TELEGRAM_PHOTO_MAX_ASPECT_RATIO = 20
+
 
 def _telegram_text_units(text: str) -> int:
     """Count UTF-16 code units, the coordinate unit used by Telegram entities."""
@@ -112,6 +119,22 @@ async def send_analysis_text(message, status, text: str) -> bool:
     return True
 
 
+def _fits_telegram_photo_limits(width: int, height: int, byte_count: int) -> bool:
+    """Return whether an image satisfies Telegram's sendPhoto constraints."""
+    if any(
+        isinstance(value, bool) or not isinstance(value, int)
+        for value in (width, height, byte_count)
+    ):
+        return False
+    if width < 1 or height < 1 or byte_count < 1:
+        return False
+    if byte_count > TELEGRAM_PHOTO_MAX_BYTES:
+        return False
+    if width + height > TELEGRAM_PHOTO_MAX_DIMENSION_SUM:
+        return False
+    return max(width / height, height / width) <= TELEGRAM_PHOTO_MAX_ASPECT_RATIO
+
+
 async def send_overlay_photo(message, image_bytes: bytes, *, caption: str) -> bool:
     """Send an already-rendered overlay without affecting the written analysis.
 
@@ -119,21 +142,42 @@ async def send_overlay_photo(message, image_bytes: bytes, *, caption: str) -> bo
     failure is reported to the caller as False and must not invalidate the
     chart analysis that has already been sent as text.
     """
+    from io import BytesIO
+
     from aiogram.types import BufferedInputFile
+    from PIL import Image
+
+    if (
+        not isinstance(image_bytes, bytes)
+        or not image_bytes
+        or len(image_bytes) > TELEGRAM_DOCUMENT_MAX_BYTES
+    ):
+        return False
 
     try:
-        is_png = isinstance(image_bytes, bytes) and image_bytes.startswith(
-            b"\x89PNG\r\n\x1a\n"
-        )
-        filename = (
-            "stockmind-chart-zones.png"
-            if is_png
-            else "stockmind-chart-zones.jpg"
-        )
-        await message.answer_photo(
-            BufferedInputFile(image_bytes, filename=filename),
-            caption=caption,
-        )
+        with Image.open(BytesIO(image_bytes)) as image:
+            image_format = image.format
+            width, height = image.size
+            image.verify()
+    except Exception:
+        return False
+
+    if image_format not in {"PNG", "JPEG"}:
+        return False
+
+    filename = (
+        "stockmind-chart-zones.png"
+        if image_format == "PNG"
+        else "stockmind-chart-zones.jpg"
+    )
+    upload = BufferedInputFile(image_bytes, filename=filename)
+    try:
+        if _fits_telegram_photo_limits(width, height, len(image_bytes)):
+            await message.answer_photo(upload, caption=caption)
+        else:
+            # A document preserves the exact rendered pixels. Do not retry as a
+            # document after a photo transport error: the photo may have arrived.
+            await message.answer_document(upload, caption=caption)
     except Exception:
         return False
     return True
