@@ -448,6 +448,32 @@ def save_json(path, obj):
         json.dump(obj, f, indent=1)
 
 
+def get_entry_alerted_symbols(state):
+    """Return symbols that already have an entry or are currently being tracked.
+
+    This is a persistent, cross-month duplicate-entry guard. Potential-only alerts
+    are intentionally excluded so a later genuine breakout can still trigger.
+    """
+    alerted = set(state.get("entry_alerted", []))
+    triggered = state.get("triggered", {})
+    if isinstance(triggered, dict):
+        for symbols in triggered.values():
+            if isinstance(symbols, list):
+                alerted.update(symbols)
+    alerted.update(state.get("positions", {}).keys())
+    for closed_position in state.get("closed", []):
+        symbol = closed_position.get("symbol")
+        if symbol:
+            alerted.add(symbol)
+    return alerted
+
+
+def filter_fresh_watchlist_items(items, state):
+    """Keep only candidates without an existing or previously triggered entry."""
+    blocked = get_entry_alerted_symbols(state)
+    return [item for item in items if item.get("symbol") not in blocked]
+
+
 # ---------- Market guard ----------
 def market_hours_now(now):
     if now.weekday() >= 5:
@@ -1123,12 +1149,23 @@ def main():
         if scanned == 0:
             discord("⚠️ ATH scan: no price data returned, skipping this run.")
             return
+        # Exclude symbols that already generated an entry or are still being tracked.
+        # Their lifecycle continues through state.json; they must not re-enter the
+        # candidate watchlist and create a duplicate Telegram entry alert.
+        items = filter_fresh_watchlist_items(items, state)
         wl = {"date": day_key, "strategy_version": WATCHLIST_STRATEGY_VERSION, "scanned": scanned, "items": items}
         save_json(WATCH_FILE, wl)
         mode = "Full scan"
     scanned = wl.get("scanned", 0)
 
+    # Also clean an existing same-day cached watchlist after state changes/restarts.
+    fresh_items = filter_fresh_watchlist_items(wl.get("items", []), state)
+    if len(fresh_items) != len(wl.get("items", [])):
+        wl["items"] = fresh_items
+        save_json(WATCH_FILE, wl)
+
     trig_done = set(state.get("triggered", {}).get(month_key, []))
+    entry_alerted = get_entry_alerted_symbols(state)
     # Remember potential/watchlist notifications permanently so the same stock does not ping again every day.
     legacy_potential = state.get("potential", {})
     legacy_seen = {sym for values in legacy_potential.values() for sym in values} if isinstance(legacy_potential, dict) else set()
@@ -1202,14 +1239,14 @@ def main():
     trig_all = sorted(
         [r for r in found
          if r["status"] == "TRIGGERED" and r["score"] >= MIN_SCORE
-         and r["symbol"] not in trig_done and r["symbol"] not in positions],
+         and r["symbol"] not in trig_done and r["symbol"] not in entry_alerted],
         key=lambda x: x["score"], reverse=True,
     )
     pot_all = sorted(
         [r for r in found
          if r["status"] == "POTENTIAL" and r["score"] >= MIN_SCORE
          and r["symbol"] not in trig_done and r["symbol"] not in pot_done
-         and r["symbol"] not in positions],
+         and r["symbol"] not in entry_alerted],
         key=lambda x: x["score"], reverse=True,
     )
     trig = trig_all[:MAX_TRIGGERED]
@@ -1223,8 +1260,19 @@ def main():
         )
         if pos is not None:
             positions[r["symbol"]] = pos
+            # Mark before any later scan can classify this symbol again.
+            entry_alerted.add(r["symbol"])
             telegram_entry_alert(r, pos, now)
         prices[r["symbol"]] = r["price"]
+
+    # Remove newly triggered entries from the candidate watchlist immediately.
+    # Position management continues independently from state.json.
+    if trig:
+        wl["items"] = [
+            item for item in wl.get("items", [])
+            if item.get("symbol") not in entry_alerted
+        ]
+        save_json(WATCH_FILE, wl)
 
     # ---- 6. Discord ----
     for sym, ev, event_entry, telegram_allowed in milestone_alerts:
@@ -1250,6 +1298,7 @@ def main():
     pot_done.update(r["symbol"] for r in pot)
     save_json(STATE_FILE, {
         "triggered": {month_key: sorted(trig_done)},
+        "entry_alerted": sorted(entry_alerted),
         "potential_notified": sorted(pot_done),
         "positions": positions,
         "closed": closed_hist,

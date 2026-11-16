@@ -6,6 +6,10 @@ Monthly ATH breakout scanner with Discord alerts and a Streamlit paper portfolio
 
 A candidate must have at least one earlier completed monthly candle that CLOSED below its contemporaneous 20-month SMA. The 20-month SMA is calculated from monthly closes; an intramonth wick below the SMA alone does not qualify. This reset must occur before the latest completed monthly candle, which must still be at a closing all-time high.
 
+## Duplicate-entry protection
+
+Once a symbol has generated an entry, it is removed from the candidate watchlist and recorded in the persistent `entry_alerted` state. The scanner excludes previously entered symbols across month changes and keeps existing open-position tracking independent of the watchlist. Potential-only notifications do not block a later genuine entry. Closed symbols remain suppressed to prevent the same stock from sending another entry alert; intentionally re-arming a symbol requires clearing it from `entry_alerted` after reviewing its prior trade.
+
 ## Cyber trading desk dashboard
 
 The Streamlit app now uses a cyberpunk multi-workspace layout:

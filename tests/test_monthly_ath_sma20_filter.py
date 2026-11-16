@@ -62,3 +62,40 @@ class MonthlySMA20UndercutFilterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DuplicateEntryGuardTests(unittest.TestCase):
+    def test_filters_symbols_with_any_prior_entry_across_months(self):
+        state = {
+            "triggered": {"2026-10": ["OLDENTRY"], "2026-11": ["RECENTENTRY"]},
+            "entry_alerted": ["PERSISTENTENTRY"],
+            "positions": {"OPENPOSITION": {"entry": 100}},
+            "closed": [{"symbol": "CLOSEDPOSITION", "result": "SL"}],
+            "potential_notified": ["POTENTIALONLY"],
+        }
+        items = [{"symbol": symbol} for symbol in [
+            "OLDENTRY", "RECENTENTRY", "PERSISTENTENTRY",
+            "OPENPOSITION", "CLOSEDPOSITION", "POTENTIALONLY", "FRESH"
+        ]]
+
+        filtered = ath.filter_fresh_watchlist_items(items, state)
+
+        self.assertEqual([item["symbol"] for item in filtered], ["POTENTIALONLY", "FRESH"])
+
+    def test_potential_only_notification_does_not_block_a_future_entry(self):
+        state = {"potential_notified": ["POTENTIALONLY"]}
+        items = [{"symbol": "POTENTIALONLY"}, {"symbol": "FRESH"}]
+
+        filtered = ath.filter_fresh_watchlist_items(items, state)
+
+        self.assertEqual([item["symbol"] for item in filtered], ["POTENTIALONLY", "FRESH"])
+
+    def test_filter_does_not_mutate_position_tracking(self):
+        original_position = {"entry": 123.45, "sl": 100.0, "t1": 150.0}
+        state = {"positions": {"OPENPOSITION": original_position}}
+        filtered = ath.filter_fresh_watchlist_items(
+            [{"symbol": "OPENPOSITION"}, {"symbol": "FRESH"}], state
+        )
+
+        self.assertEqual([item["symbol"] for item in filtered], ["FRESH"])
+        self.assertEqual(state["positions"]["OPENPOSITION"], original_position)
