@@ -8,9 +8,11 @@ import monthly_ath as ath
 class MonthlySMA20UndercutFilterTests(unittest.TestCase):
     def build_frame(self, with_prior_close_undercut=False, wick_only=False):
         rows = []
-        months = pd.period_range("2021-06", "2026-10", freq="M")
+        months = pd.period_range("2021-06", "2026-11", freq="M")
         for month_index, month in enumerate(months):
             dates = pd.bdate_range(month.start_time, month.end_time)[:20]
+            if month == pd.Period("2026-11", freq="M"):
+                dates = dates[dates <= pd.Timestamp("2026-11-13")]
             close = 100.0 + 2.0 * month_index
             if with_prior_close_undercut and month_index == 40:
                 # Close below the 20-month SMA, then later recover to a closing ATH.
@@ -35,7 +37,7 @@ class MonthlySMA20UndercutFilterTests(unittest.TestCase):
 
     def test_rejects_ath_stock_without_any_prior_monthly_close_below_sma20(self):
         result = ath.analyse(
-            self.build_frame(), nifty_6m=0.05, today=pd.Timestamp("2026-11-15")
+            self.build_frame(), nifty_6m=0.05, today=pd.Timestamp("2026-11-16")
         )
         self.assertIsNone(result)
 
@@ -43,7 +45,7 @@ class MonthlySMA20UndercutFilterTests(unittest.TestCase):
         result = ath.analyse(
             self.build_frame(with_prior_close_undercut=True),
             nifty_6m=0.05,
-            today=pd.Timestamp("2026-11-15"),
+            today=pd.Timestamp("2026-11-16"),
         )
         self.assertIsNotNone(result)
         self.assertTrue(result["monthly_sma20_undercut"])
@@ -53,7 +55,7 @@ class MonthlySMA20UndercutFilterTests(unittest.TestCase):
         result = ath.analyse(
             self.build_frame(wick_only=True),
             nifty_6m=0.05,
-            today=pd.Timestamp("2026-11-15"),
+            today=pd.Timestamp("2026-11-16"),
         )
         self.assertIsNone(result)
 
