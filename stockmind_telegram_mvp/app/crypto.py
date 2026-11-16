@@ -34,6 +34,13 @@ class BinanceMarketData:
             raise ValueError("Use a valid Binance symbol such as BTCUSDT or ETHUSDT")
         return symbol
 
+    @staticmethod
+    def _bounded_integer(value: int, field: str, maximum: int) -> int:
+        """Reject coercible non-integers, then clamp an integer to provider limits."""
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"{field} must be an integer")
+        return max(1, min(value, maximum))
+
     def _base(self, market: str) -> str:
         if market == "spot":
             return SPOT
@@ -170,9 +177,9 @@ class BinanceMarketData:
 
     async def klines(self, symbol: str, interval: str = "15m", market: str = "spot", limit: int = 100):
         symbol = self._symbol(symbol)
-        if interval not in INTERVALS:
+        if not isinstance(interval, str) or interval not in INTERVALS:
             raise ValueError(f"Unsupported interval. Choose from: {', '.join(sorted(INTERVALS))}")
-        limit = max(1, min(int(limit), 500))
+        limit = self._bounded_integer(limit, "Kline limit", 500)
         base = self._base(market)
         path = "/api/v3/klines" if market == "spot" else "/fapi/v1/klines"
         rows = await self._get_json(
