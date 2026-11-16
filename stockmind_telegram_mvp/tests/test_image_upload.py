@@ -83,7 +83,7 @@ class BoundedBytesIOTests(unittest.TestCase):
         destination.truncate(3)
         self.assertEqual(destination.getvalue(), b"abc")
         destination.truncate(5)
-        self.assertEqual(destination.getvalue(), b"abc\\x00\\x00")
+        self.assertEqual(destination.getvalue(), b"abc\x00\x00")
 
 
 if __name__ == "__main__":
