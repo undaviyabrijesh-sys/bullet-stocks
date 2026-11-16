@@ -6,35 +6,6 @@ import monthly_ath as ath
 
 
 class MonthlySMA20UndercutFilterTests(unittest.TestCase):
-    @staticmethod
-    def make_history(with_prior_undercut=False, current_month_only=False):
-        rows = []
-        months = pd.period_range("2021-06", "2026-11" if current_month_only else "2026-10", freq="M")
-        for month_index, month in enumerate(months):
-            dates = pd.bdate_range(month.start_time, month.end_time)
-            # The completed monthly closes form a steadily rising closing-ATH series.
-            close = 100.0 + 2.0 * month_index
-            for day_index, date in enumerate(dates[:20]):
-                low = close - 1.0
-                if with_prior_undercut and month_index == 40 and day_index == 10:
-                    # A single historical monthly wick pierces the 20-month SMA.
-                    low = 50.0
-                if current_month_only and month_index == len(months) - 1 and day_index == 10:
-                    # An unfinished current month must not satisfy the historical filter.
-                    low = 50.0
-                rows.append({
-                    "Open": close,
-                    "High": close + 1.0,
-                    "Low": low,
-                    "Close": close,
-                    "Volume": 1_000_000,
-                })
-        return pd.DataFrame(
-            rows,
-            index=pd.DatetimeIndex([row_date for row_date in pd.bdate_range("2021-06-01", "2026-11-30")][:0])
-            if False else None,
-        )
-
     def build_frame(self, with_prior_undercut=False, current_month_only=False):
         rows = []
         months = pd.period_range("2021-06", "2026-11" if current_month_only else "2026-10", freq="M")
