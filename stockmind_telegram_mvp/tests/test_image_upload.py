@@ -65,26 +65,6 @@ class BoundedBytesIOTests(unittest.TestCase):
             destination.writelines(iter((b"abc", b"def")))
         self.assertEqual(destination.getvalue(), b"abc")
 
-    def test_truncate_cannot_extend_past_the_byte_limit(self):
-        destination = BoundedBytesIO(5)
-        destination.write(b"abc")
-        with self.assertRaises(UploadTooLargeError):
-            destination.truncate(6)
-        self.assertEqual(destination.getvalue(), b"abc")
-
-        destination.seek(6)
-        with self.assertRaises(UploadTooLargeError):
-            destination.truncate()
-        self.assertEqual(destination.getvalue(), b"abc")
-
-    def test_truncate_within_the_limit_keeps_bytesio_semantics(self):
-        destination = BoundedBytesIO(5)
-        destination.write(b"abcde")
-        destination.truncate(3)
-        self.assertEqual(destination.getvalue(), b"abc")
-        destination.truncate(5)
-        self.assertEqual(destination.getvalue(), b"abc\x00\x00")
-
 
 if __name__ == "__main__":
     unittest.main()

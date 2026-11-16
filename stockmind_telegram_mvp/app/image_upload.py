@@ -1,6 +1,5 @@
 """Bounded in-memory destination for Telegram image downloads."""
 from io import BytesIO
-from operator import index
 
 
 class UploadTooLargeError(ValueError):
@@ -48,17 +47,3 @@ class BoundedBytesIO(BytesIO):
         for line in lines:
             self.write(line)
 
-    def truncate(self, size=None):
-        # truncate() can extend a BytesIO with NUL bytes. Bound that path too,
-        # including the implicit current-position form.
-        requested_size = self.tell() if size is None else size
-        try:
-            target_size = index(requested_size)
-        except TypeError:
-            # Let BytesIO raise its normal error for non-indexable sizes.
-            return super().truncate(size)
-        if target_size > self.max_bytes:
-            raise UploadTooLargeError(
-                f"Image download exceeds the {self.max_bytes}-byte limit."
-            )
-        return super().truncate(target_size)
