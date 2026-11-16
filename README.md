@@ -12,6 +12,10 @@ The StockMind Telegram assistant supports multilingual Indian-equity and crypto 
 
 The chart benchmark is an offline evaluation aid. Synthetic unit tests do not establish real-market chart accuracy; only independently reviewed screenshots paired with actual model predictions are eligible for that evaluation.
 
+## Monthly ATH stock qualification
+
+A candidate must have at least one earlier completed monthly candle whose low traded below its contemporaneous 20-month SMA. The 20-month SMA is calculated from monthly closes. The qualifying undercut must occur before the latest completed monthly candle, which must still be at a closing all-time high. An unfinished current-month candle cannot satisfy the historical undercut condition.
+
 ## Cyber trading desk dashboard
 
 The Streamlit app now uses a cyberpunk multi-workspace layout:
