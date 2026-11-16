@@ -2,6 +2,10 @@
 
 Monthly ATH breakout scanner with Discord alerts and a Streamlit paper portfolio.
 
+## Monthly ATH stock qualification
+
+A candidate must have at least one earlier completed monthly candle that CLOSED below its contemporaneous 20-month SMA. The 20-month SMA is calculated from monthly closes; an intramonth wick below the SMA alone does not qualify. This reset must occur before the latest completed monthly candle, which must still be at a closing all-time high.
+
 ## Cyber trading desk dashboard
 
 The Streamlit app now uses a cyberpunk multi-workspace layout:

@@ -38,6 +38,7 @@ FULL = "--full" in sys.argv
 
 # ---------- Setup rules ----------
 MIN_AGE_MONTHS = 48
+WATCHLIST_STRATEGY_VERSION = 3  # Bump to rebuild cached watchlists when qualification rules change.
 SETUP_LOOKBACK = 3
 ENTRY_BUFFER = 0.02       # trigger = monthly high + 2%
 MAX_CHASE = 0.06          # triggered: skip if price is > 6% above the trigger
@@ -550,15 +551,31 @@ def analyse(df, nifty_6m, today):
         return None
 
     closes = hist["Close"].dropna()
+    if len(closes) < MIN_AGE_MONTHS:
+        return None
+
+    # New qualification filter:
+    # Before the latest completed ATH month, at least one earlier completed
+    # monthly candle must have CLOSED below its contemporaneous 20-month SMA.
+    # Both the candle close and SMA use completed monthly data only; an intramonth
+    # wick below the SMA does not qualify as a completed monthly reset.
+    monthly_sma20_history = closes.rolling(20).mean()
+    prior_month_closes = closes.iloc[:-1]
+    prior_month_sma20 = monthly_sma20_history.iloc[:-1]
+    undercut_mask = (prior_month_closes < prior_month_sma20).fillna(False)
+    undercut_months = undercut_mask.index[undercut_mask]
+    if len(undercut_months) == 0:
+        return None
+
     # Only the latest completed monthly candle can qualify as the current ATH setup.
-    if len(closes) < MIN_AGE_MONTHS or closes.iloc[-1] < closes.iloc[:-1].max():
+    if closes.iloc[-1] < closes.iloc[:-1].max():
         return None
 
     setup_idx = hist.index[-1]
     # Confirmed rule: breakout is 2% above the previous completed month's HIGH.
     level = float(hist["High"].iloc[-1])
     trigger = level * (1 + ENTRY_BUFFER)
-    sma20 = float(closes.rolling(20).mean().iloc[-1]) if len(closes) >= 20 else None
+    sma20 = float(monthly_sma20_history.iloc[-1]) if len(closes) >= 20 else None
     sma10 = float(closes.rolling(10).mean().iloc[-1]) if len(closes) >= 10 else None
 
     gap = price / trigger - 1
@@ -584,6 +601,8 @@ def analyse(df, nifty_6m, today):
         "trigger": float(trigger),
         "monthly_sma20": sma20,
         "monthly_sma10": sma10,
+        "monthly_sma20_undercut": True,
+        "monthly_sma20_undercut_month": undercut_months[-1].strftime("%b'%y"),
         "static_score": float(static_score),
         "vol_ratio": vol_ratio,
         "rs": float(rs),
@@ -1095,7 +1114,7 @@ def main():
 
     # ---- 1. watchlist: full scan on the first run of the day ----
     mode = "Live check"
-    if FULL or wl.get("date") != day_key or wl.get("strategy_version") != 2:
+    if FULL or wl.get("date") != day_key or wl.get("strategy_version") != WATCHLIST_STRATEGY_VERSION:
         symbols = load_symbols()
         if not symbols:
             discord("⚠️ ATH scan: could not load the stock list.")
@@ -1104,7 +1123,7 @@ def main():
         if scanned == 0:
             discord("⚠️ ATH scan: no price data returned, skipping this run.")
             return
-        wl = {"date": day_key, "strategy_version": 2, "scanned": scanned, "items": items}
+        wl = {"date": day_key, "strategy_version": WATCHLIST_STRATEGY_VERSION, "scanned": scanned, "items": items}
         save_json(WATCH_FILE, wl)
         mode = "Full scan"
     scanned = wl.get("scanned", 0)
