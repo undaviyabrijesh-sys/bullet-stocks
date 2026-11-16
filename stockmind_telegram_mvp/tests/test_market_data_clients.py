@@ -252,6 +252,32 @@ class BinanceResponseValidationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["data"][0]["trades"], 100)
         self.assertEqual(result["market"], "usdm")
 
+    async def test_rejects_non_integer_kline_limits_before_provider_request(self):
+        for value in (True, 1.5, "100", None, []):
+            with self.subTest(limit=value):
+                client = self.make_client(httpx.Response(200, json=[]))
+                with self.assertRaisesRegex(ValueError, "Kline limit must be an integer"):
+                    await client.klines("BTCUSDT", limit=value)
+                client.client.get.assert_not_awaited()
+
+    async def test_rejects_non_string_or_unhashable_intervals_before_provider_request(self):
+        for value in (None, True, 15, []):
+            with self.subTest(interval=value):
+                client = self.make_client(httpx.Response(200, json=[]))
+                with self.assertRaisesRegex(ValueError, "Unsupported interval"):
+                    await client.klines("BTCUSDT", interval=value)
+                client.client.get.assert_not_awaited()
+
+    async def test_clamps_integer_kline_limits_to_provider_range(self):
+        for requested, expected in ((0, 1), (600, 500)):
+            with self.subTest(requested=requested):
+                client = self.make_client(httpx.Response(200, json=[]))
+                await client.klines("BTCUSDT", limit=requested)
+                self.assertEqual(
+                    client.client.get.await_args.kwargs["params"]["limit"],
+                    expected,
+                )
+
     async def test_marks_closed_and_forming_klines_against_conservative_binance_time(self):
         first = [1700000000000, "1", "2", "0.5", "1.5", "10", 1700000899999, "15", 100]
         boundary = [1700000900000, "1", "2", "0.5", "1.5", "10", 1700000900000, "15", 100]
