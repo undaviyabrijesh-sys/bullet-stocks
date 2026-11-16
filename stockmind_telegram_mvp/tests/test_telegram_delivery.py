@@ -1,7 +1,7 @@
 import unittest
 from io import BytesIO
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from aiogram.types import BufferedInputFile
 from PIL import Image

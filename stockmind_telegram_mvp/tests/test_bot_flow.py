@@ -691,14 +691,14 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
             "zones": [{"zone_type": "demand", "draw_overlay": True}],
         }
         research = self.use_research(analyze_chart_image=AsyncMock(return_value=result))
-        self.message.answer_photo.side_effect = RuntimeError("Telegram photo delivery failed")
-
         with patch.object(
             bot_module, "prepare_chart_image",
             return_value=(b"normalized-chart", "image/png"),
         ) as prepare, patch.object(
             bot_module, "_render_overlay_prepared", return_value=(b"overlay-jpeg", 1)
-        ) as render:
+        ) as render, patch.object(
+            bot_module, "send_overlay_photo", new_callable=AsyncMock, return_value=False
+        ) as send_overlay:
             await bot_module.run_research(self.message, "Map BTC 1H DNS", b"chart-bytes", "image/png")
 
         prepare.assert_called_once_with(
@@ -712,7 +712,9 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
         self.status.edit_text.assert_awaited_once_with(
             "Visible demand structure; verify the price scale."
         )
-        self.message.answer_photo.assert_awaited_once()
+        send_overlay.assert_awaited_once()
+        self.assertEqual(send_overlay.await_args.args[0], self.message)
+        self.assertEqual(send_overlay.await_args.args[1], b"overlay-jpeg")
         self.assertEqual(bot_module.histories[self.user_id][-1]["content"], result["analysis"])
 
     async def test_chart_analysis_reports_overlay_render_failure_separately(self):
