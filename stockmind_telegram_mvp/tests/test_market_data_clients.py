@@ -153,6 +153,75 @@ class TapetideIntradayRequestValidationTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+
+class TapetideDirectCallValidationTests(unittest.IsolatedAsyncioTestCase):
+    def make_client(self):
+        client = object.__new__(TapetideClient)
+        response = httpx.Response(200, json={"data": [], "meta": {}})
+        client.client = SimpleNamespace(get=AsyncMock(return_value=response))
+        return client
+
+    async def test_rejects_blank_or_non_text_symbols_for_every_symbol_route(self):
+        operations = (
+            lambda client, symbol: client.quote(symbol),
+            lambda client, symbol: client.live_quote(symbol),
+            lambda client, symbol: client.financials(symbol),
+            lambda client, symbol: client.price_history(symbol),
+            lambda client, symbol: client.intraday_bars(symbol),
+        )
+        for symbol in ("", "   ", None, 123):
+            for operation in operations:
+                with self.subTest(symbol=symbol, operation=operation):
+                    client = self.make_client()
+                    with self.assertRaises(ValueError):
+                        await operation(client, symbol)
+                    client.client.get.assert_not_awaited()
+
+    async def test_rejects_boolean_float_and_string_numeric_limits(self):
+        for value in (True, 2.5, "10"):
+            with self.subTest(value=value, field="search limit"):
+                client = self.make_client()
+                with self.assertRaisesRegex(ValueError, "integer"):
+                    await client.search_stocks("TCS", limit=value)
+                client.client.get.assert_not_awaited()
+
+            with self.subTest(value=value, field="price-history days"):
+                client = self.make_client()
+                with self.assertRaisesRegex(ValueError, "integer"):
+                    await client.price_history("TCS", days=value)
+                client.client.get.assert_not_awaited()
+
+    async def test_rejects_non_text_filters_and_unhashable_financial_section(self):
+        cases = (
+            lambda client: client.search_stocks("TCS", sector=[]),
+            lambda client: client.search_stocks("TCS", industry=42),
+            lambda client: client.financials("TCS", section=[]),
+        )
+        for operation in cases:
+            client = self.make_client()
+            with self.assertRaises(ValueError):
+                await operation(client)
+            client.client.get.assert_not_awaited()
+
+    async def test_normalizes_symbols_and_preserves_numeric_clamping(self):
+        client = self.make_client()
+        await client.search_stocks(
+            " TCS ", limit=100, sector=" IT ", industry=" Software "
+        )
+        call = client.client.get.await_args
+        self.assertEqual(call.args[0], "/stocks")
+        self.assertEqual(
+            call.kwargs["params"],
+            {"q": "TCS", "limit": 50, "sector": "IT", "industry": "Software"},
+        )
+
+        client = self.make_client()
+        await client.price_history(" tcs ", days=500)
+        call = client.client.get.await_args
+        self.assertEqual(call.args[0], "/stocks/TCS/price")
+        self.assertEqual(call.kwargs["params"], {"days": 365})
+
+
 class BinanceResponseValidationTests(unittest.IsolatedAsyncioTestCase):
     def prepare_response(self, response):
         # AsyncClient attaches the originating request before raise_for_status().
