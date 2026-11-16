@@ -1,3 +1,4 @@
+import array
 import unittest
 
 from stockmind_telegram_mvp.app.image_upload import (
@@ -46,6 +47,43 @@ class BoundedBytesIOTests(unittest.TestCase):
             with self.subTest(invalid=invalid):
                 with self.assertRaises(ValueError):
                     BoundedBytesIO(invalid)
+
+    def test_counts_buffer_bytes_not_memoryview_elements(self):
+        payload = array.array("I", [1, 2])
+        view = memoryview(payload)
+        try:
+            destination = BoundedBytesIO(view.nbytes - 1)
+            with self.assertRaises(UploadTooLargeError):
+                destination.write(view)
+            self.assertEqual(destination.getvalue(), b"")
+        finally:
+            view.release()
+
+    def test_writelines_cannot_bypass_the_byte_limit(self):
+        destination = BoundedBytesIO(5)
+        with self.assertRaises(UploadTooLargeError):
+            destination.writelines(iter((b"abc", b"def")))
+        self.assertEqual(destination.getvalue(), b"abc")
+
+    def test_truncate_cannot_extend_past_the_byte_limit(self):
+        destination = BoundedBytesIO(5)
+        destination.write(b"abc")
+        with self.assertRaises(UploadTooLargeError):
+            destination.truncate(6)
+        self.assertEqual(destination.getvalue(), b"abc")
+
+        destination.seek(6)
+        with self.assertRaises(UploadTooLargeError):
+            destination.truncate()
+        self.assertEqual(destination.getvalue(), b"abc")
+
+    def test_truncate_within_the_limit_keeps_bytesio_semantics(self):
+        destination = BoundedBytesIO(5)
+        destination.write(b"abcde")
+        destination.truncate(3)
+        self.assertEqual(destination.getvalue(), b"abc")
+        destination.truncate(5)
+        self.assertEqual(destination.getvalue(), b"abc\\x00\\x00")
 
 
 if __name__ == "__main__":
