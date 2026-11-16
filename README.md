@@ -14,7 +14,7 @@ The chart benchmark is an offline evaluation aid. Synthetic unit tests do not es
 
 ## Monthly ATH stock qualification
 
-A candidate must have at least one earlier completed monthly candle whose low traded below its contemporaneous 20-month SMA. The 20-month SMA is calculated from monthly closes. The qualifying undercut must occur before the latest completed monthly candle, which must still be at a closing all-time high. An unfinished current-month candle cannot satisfy the historical undercut condition.
+A candidate must have at least one earlier completed monthly candle that CLOSED below its contemporaneous 20-month SMA. The 20-month SMA is calculated from monthly closes; an intramonth wick below the SMA alone does not qualify. This reset must occur before the latest completed monthly candle, which must still be at a closing all-time high.
 
 ## Cyber trading desk dashboard
 
