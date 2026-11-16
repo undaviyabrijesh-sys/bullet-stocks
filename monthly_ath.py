@@ -1265,6 +1265,15 @@ def main():
             telegram_entry_alert(r, pos, now)
         prices[r["symbol"]] = r["price"]
 
+    # Remove newly triggered entries from the candidate watchlist immediately.
+    # Position management continues independently from state.json.
+    if trig:
+        wl["items"] = [
+            item for item in wl.get("items", [])
+            if item.get("symbol") not in entry_alerted
+        ]
+        save_json(WATCH_FILE, wl)
+
     # ---- 6. Discord ----
     for sym, ev, event_entry, telegram_allowed in milestone_alerts:
         discord_post({"embeds": [position_event_embed(sym, ev, event_entry)]})
