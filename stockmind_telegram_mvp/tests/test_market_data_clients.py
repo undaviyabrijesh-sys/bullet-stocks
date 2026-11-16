@@ -274,7 +274,7 @@ class BinanceResponseValidationTests(unittest.IsolatedAsyncioTestCase):
                 client = self.make_client(httpx.Response(200, json=[]))
                 await client.klines("BTCUSDT", limit=requested)
                 self.assertEqual(
-                    client.client.get.await_args.kwargs["params"]["limit"],
+                    client.client.get.await_args_list[0].kwargs["params"]["limit"],
                     expected,
                 )
 
