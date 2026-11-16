@@ -495,7 +495,8 @@ def load_symbols():
 
 # ---------- Analysis ----------
 def monthly(df):
-    agg = {"High": "max", "Close": "last", "Volume": "sum"}
+    # Keep monthly lows so the setup can verify a prior 20-month SMA undercut.
+    agg = {"High": "max", "Low": "min", "Close": "last", "Volume": "sum"}
     try:
         return df.resample("ME").agg(agg)
     except ValueError:
@@ -550,15 +551,32 @@ def analyse(df, nifty_6m, today):
         return None
 
     closes = hist["Close"].dropna()
+    if len(closes) < MIN_AGE_MONTHS:
+        return None
+
+    # New qualification filter:
+    # Before the latest completed ATH month, at least one completed monthly
+    # candle must have traded below its contemporaneous 20-month SMA.
+    # Use the monthly LOW for the undercut test and the rolling monthly CLOSE
+    # average for the SMA. Excluding the latest setup month prevents the ATH
+    # candle itself from satisfying this historical-reset requirement.
+    monthly_sma20_history = closes.rolling(20).mean()
+    prior_month_lows = hist["Low"].reindex(closes.index).iloc[:-1]
+    prior_month_sma20 = monthly_sma20_history.iloc[:-1]
+    undercut_mask = (prior_month_lows < prior_month_sma20).fillna(False)
+    undercut_months = undercut_mask.index[undercut_mask]
+    if len(undercut_months) == 0:
+        return None
+
     # Only the latest completed monthly candle can qualify as the current ATH setup.
-    if len(closes) < MIN_AGE_MONTHS or closes.iloc[-1] < closes.iloc[:-1].max():
+    if closes.iloc[-1] < closes.iloc[:-1].max():
         return None
 
     setup_idx = hist.index[-1]
     # Confirmed rule: breakout is 2% above the previous completed month's HIGH.
     level = float(hist["High"].iloc[-1])
     trigger = level * (1 + ENTRY_BUFFER)
-    sma20 = float(closes.rolling(20).mean().iloc[-1]) if len(closes) >= 20 else None
+    sma20 = float(monthly_sma20_history.iloc[-1]) if len(closes) >= 20 else None
     sma10 = float(closes.rolling(10).mean().iloc[-1]) if len(closes) >= 10 else None
 
     gap = price / trigger - 1
@@ -584,6 +602,8 @@ def analyse(df, nifty_6m, today):
         "trigger": float(trigger),
         "monthly_sma20": sma20,
         "monthly_sma10": sma10,
+        "monthly_sma20_undercut": True,
+        "monthly_sma20_undercut_month": undercut_months[-1].strftime("%b'%y"),
         "static_score": float(static_score),
         "vol_ratio": vol_ratio,
         "rs": float(rs),
