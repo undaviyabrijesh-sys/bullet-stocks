@@ -92,6 +92,67 @@ class TapetideResponseValidationTests(unittest.IsolatedAsyncioTestCase):
         client.client.get.assert_not_awaited()
 
 
+class TapetideIntradayRequestValidationTests(unittest.IsolatedAsyncioTestCase):
+    def make_client(self):
+        client = object.__new__(TapetideClient)
+        response = httpx.Response(200, json={"data": [], "meta": {}})
+        client.client = SimpleNamespace(get=AsyncMock(return_value=response))
+        return client
+
+    async def test_rejects_non_integer_interval_or_limit_before_provider_request(self):
+        cases = (
+            {"interval": True},
+            {"interval": 1.0},
+            {"limit": True},
+            {"limit": 375.0},
+        )
+        for kwargs in cases:
+            with self.subTest(kwargs=kwargs):
+                client = self.make_client()
+                with self.assertRaises(ValueError):
+                    await client.intraday_bars("TCS", **kwargs)
+                client.client.get.assert_not_awaited()
+
+    async def test_rejects_invalid_or_ambiguous_dates_before_provider_request(self):
+        cases = (
+            {"date": ""},
+            {"date": "2026-2-03"},
+            {"date": "2026-02-30"},
+            {"date": 20261114},
+            {"from_date": "", "to_date": ""},
+            {"from_date": "2026-11-01"},
+            {"date": "2026-11-14", "from_date": "2026-11-10", "to_date": "2026-11-12"},
+            {"from_date": "2026-11-12", "to_date": "2026-11-10"},
+            {"from_date": "2026-11-01", "to_date": "2026-11-09"},
+        )
+        for kwargs in cases:
+            with self.subTest(kwargs=kwargs):
+                client = self.make_client()
+                with self.assertRaises(ValueError):
+                    await client.intraday_bars("TCS", **kwargs)
+                client.client.get.assert_not_awaited()
+
+    async def test_accepts_strict_single_date_and_seven_day_range(self):
+        client = self.make_client()
+        await client.intraday_bars("TCS", date="2026-11-14")
+        call = client.client.get.await_args
+        self.assertEqual(call.args[0], "/stocks/TCS/prices/intraday")
+        self.assertEqual(
+            call.kwargs["params"],
+            {"interval": 5, "limit": 375, "date": "2026-11-14"},
+        )
+
+        client = self.make_client()
+        await client.intraday_bars(
+            "TCS", from_date="2026-11-01", to_date="2026-11-08"
+        )
+        call = client.client.get.await_args
+        self.assertEqual(
+            call.kwargs["params"],
+            {"interval": 5, "limit": 375, "from": "2026-11-01", "to": "2026-11-08"},
+        )
+
+
 class BinanceResponseValidationTests(unittest.IsolatedAsyncioTestCase):
     def prepare_response(self, response):
         # AsyncClient attaches the originating request before raise_for_status().

@@ -1,5 +1,19 @@
 import httpx
+from datetime import date as calendar_date
 from urllib.parse import quote
+
+
+def _parse_iso_calendar_date(value: str, field: str) -> calendar_date:
+    """Parse one strict YYYY-MM-DD date before dispatching a provider request."""
+    if not isinstance(value, str) or len(value) != 10:
+        raise ValueError(f"{field} must use YYYY-MM-DD")
+    try:
+        parsed = calendar_date.fromisoformat(value)
+    except ValueError:
+        raise ValueError(f"{field} must be a valid calendar date") from None
+    if parsed.isoformat() != value:
+        raise ValueError(f"{field} must use YYYY-MM-DD")
+    return parsed
 
 BASE_URL = "https://api.tapetide.com/v1"
 
@@ -131,17 +145,29 @@ class TapetideClient:
     ):
         """Fetch historical 1/5/15-minute NSE/BSE bars; Tapetide updates after session close."""
         symbol = quote(symbol.strip().upper(), safe="")
-        if interval not in (1, 5, 15):
+        if isinstance(interval, bool) or not isinstance(interval, int) or interval not in (1, 5, 15):
             raise ValueError("Intraday interval must be 1, 5 or 15 minutes")
-        if date and (from_date or to_date):
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise ValueError("Intraday limit must be an integer")
+        has_single_date = date is not None
+        has_range_start = from_date is not None
+        has_range_end = to_date is not None
+        if has_single_date and (has_range_start or has_range_end):
             raise ValueError("Use date or from_date/to_date, not both")
-        if bool(from_date) != bool(to_date):
+        if has_range_start != has_range_end:
             raise ValueError("from_date and to_date must be supplied together")
-        params = {"interval": interval, "limit": max(1, min(int(limit), 2000))}
-        if date:
-            params["date"] = date
-        elif from_date and to_date:
-            params.update({"from": from_date, "to": to_date})
+
+        params = {"interval": interval, "limit": max(1, min(limit, 2000))}
+        if has_single_date:
+            params["date"] = _parse_iso_calendar_date(date, "date").isoformat()
+        elif has_range_start:
+            start = _parse_iso_calendar_date(from_date, "from_date")
+            end = _parse_iso_calendar_date(to_date, "to_date")
+            if end < start:
+                raise ValueError("to_date must not precede from_date")
+            if (end - start).days > 7:
+                raise ValueError("Intraday date range cannot exceed 7 days")
+            params.update({"from": start.isoformat(), "to": end.isoformat()})
         return await self._get(f"/stocks/{symbol}/prices/intraday", params)
 
     async def close(self):
