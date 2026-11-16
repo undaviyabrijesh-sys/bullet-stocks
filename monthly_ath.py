@@ -495,8 +495,7 @@ def load_symbols():
 
 # ---------- Analysis ----------
 def monthly(df):
-    # Keep monthly lows so the setup can verify a prior 20-month SMA undercut.
-    agg = {"High": "max", "Low": "min", "Close": "last", "Volume": "sum"}
+    agg = {"High": "max", "Close": "last", "Volume": "sum"}
     try:
         return df.resample("ME").agg(agg)
     except ValueError:
@@ -555,15 +554,14 @@ def analyse(df, nifty_6m, today):
         return None
 
     # New qualification filter:
-    # Before the latest completed ATH month, at least one completed monthly
-    # candle must have traded below its contemporaneous 20-month SMA.
-    # Use the monthly LOW for the undercut test and the rolling monthly CLOSE
-    # average for the SMA. Excluding the latest setup month prevents the ATH
-    # candle itself from satisfying this historical-reset requirement.
+    # Before the latest completed ATH month, at least one earlier completed
+    # monthly candle must have CLOSED below its contemporaneous 20-month SMA.
+    # Both the candle close and SMA use completed monthly data only; an intramonth
+    # wick below the SMA does not qualify as a completed monthly reset.
     monthly_sma20_history = closes.rolling(20).mean()
-    prior_month_lows = hist["Low"].reindex(closes.index).iloc[:-1]
+    prior_month_closes = closes.iloc[:-1]
     prior_month_sma20 = monthly_sma20_history.iloc[:-1]
-    undercut_mask = (prior_month_lows < prior_month_sma20).fillna(False)
+    undercut_mask = (prior_month_closes < prior_month_sma20).fillna(False)
     undercut_months = undercut_mask.index[undercut_mask]
     if len(undercut_months) == 0:
         return None
