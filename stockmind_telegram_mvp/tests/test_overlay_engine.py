@@ -928,6 +928,19 @@ class ChartImageValidationErrorTests(unittest.TestCase):
         self._assert_error_code(lambda: validate_chart_image(b""), "invalid")
         self._assert_error_code(lambda: validate_chart_image(b"not an image"), "invalid")
 
+    def test_pillow_value_error_is_normalized_to_stable_invalid_code(self):
+        # Preserve ChartImageError codes raised by our own checks, but normalize
+        # unexpected ValueErrors from Pillow to the public "invalid" code too.
+        with patch.object(
+            overlay_engine.Image,
+            "open",
+            side_effect=ValueError("malformed image metadata"),
+        ):
+            self._assert_error_code(
+                lambda: validate_chart_image(b"untrusted image bytes"),
+                "invalid",
+            )
+
     def test_unsupported_format_has_stable_code(self):
         self._assert_error_code(
             lambda: validate_chart_image(sample_image(image_format="BMP")),

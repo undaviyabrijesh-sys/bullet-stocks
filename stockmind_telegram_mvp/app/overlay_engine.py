@@ -96,9 +96,11 @@ def validate_chart_image(image_bytes: bytes) -> str:
             # malformed container structure are rejected before the API call.
             with Image.open(BytesIO(image_bytes)) as verification_image:
                 verification_image.verify()
-    except ValueError:
+    except ChartImageError:
+        # Preserve our deliberate, stable user-facing validation codes.
         raise
     except (
+        ValueError,
         UnidentifiedImageError,
         OSError,
         SyntaxError,
