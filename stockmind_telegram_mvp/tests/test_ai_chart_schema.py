@@ -240,7 +240,7 @@ class ChartResponseValidationTests(unittest.TestCase):
         self.assertNotIn("Numeric price bounds were withheld", result["analysis"])
 
     def test_chart_prompt_requires_ordered_price_bounds_and_bumps_version(self):
-        self.assertEqual(CHART_PROMPT_VERSION, "dns-chart-v8")
+        self.assertEqual(CHART_PROMPT_VERSION, "dns-chart-v9")
         combined = CHART_IMAGE_PROMPT + CHART_IMAGE_INSTRUCTIONS
         self.assertIn("price_high", combined)
         self.assertIn("price_low < price_high", combined)
@@ -254,6 +254,16 @@ class ChartResponseValidationTests(unittest.TestCase):
         self.assertIn("directional displacement", combined)
         self.assertIn("isolated wick", combined)
         self.assertIn("empty list", combined)
+        self.assertLess(
+            CHART_IMAGE_PROMPT.index("1. Locate the MAIN PRICE-PLOT"),
+            CHART_IMAGE_PROMPT.index("2. Read the visible symbol"),
+        )
+        self.assertLess(
+            CHART_IMAGE_PROMPT.index("2. Read the visible symbol"),
+            CHART_IMAGE_PROMPT.index("3. Identify meaningful supply and demand"),
+        )
+        self.assertNotIn("8. Locate the MAIN PRICE-PLOT", combined)
+        self.assertIn("First identify plot_bounds", CHART_IMAGE_INSTRUCTIONS)
     def test_rejects_missing_or_wrongly_typed_response_fields(self):
         for payload in (
             None,

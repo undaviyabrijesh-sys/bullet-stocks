@@ -43,7 +43,7 @@ def _prediction_metadata(**overrides):
         "provider": "openai",
         "model": "vision-model-2026-11-07",
         "requested_model": "vision-model",
-        "prompt_version": "dns-chart-v8",
+        "prompt_version": "dns-chart-v9",
         "prompt_sha256": "a" * 64,
         "generated_at": "2026-11-07T12:10:00Z",
         "system_fingerprint": "fp-test",

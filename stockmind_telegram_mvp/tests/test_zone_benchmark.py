@@ -1042,6 +1042,14 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
             )
         return metadata
 
+    def _v9_metadata(self, include_evidence_policy=True, include_origin_policy=True):
+        metadata = self._v8_metadata(
+            include_evidence_policy=include_evidence_policy,
+            include_origin_policy=include_origin_policy,
+        )
+        metadata["prompt_version"] = "dns-chart-v9"
+        return metadata
+
     def test_v7_metadata_requires_explicit_origin_policy(self):
         record = self._record(prediction_metadata=self._v7_metadata(include_origin_policy=False))
         self._write(record)
@@ -1091,6 +1099,52 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         self._write(record)
         with self.assertRaisesRegex(ValueError, "zone_evidence_policy"):
             evaluate_benchmark_manifest(self.manifest)
+
+    def test_v9_metadata_requires_explicit_confidence_origin_and_evidence_policies(self):
+        metadata = self._v9_metadata()
+        del metadata["settings"]["confidence_policy"]
+        record = self._record(prediction_metadata=metadata)
+        self._write(record)
+        with self.assertRaisesRegex(ValueError, "confidence_policy"):
+            evaluate_benchmark_manifest(self.manifest)
+
+        metadata = self._v9_metadata()
+        del metadata["settings"]["zone_origin_policy"]
+        record = self._record(prediction_metadata=metadata)
+        self._write(record)
+        with self.assertRaisesRegex(ValueError, "zone_origin_policy"):
+            evaluate_benchmark_manifest(self.manifest)
+
+        metadata = self._v9_metadata(include_evidence_policy=False)
+        record = self._record(prediction_metadata=metadata)
+        self._write(record)
+        with self.assertRaisesRegex(ValueError, "zone_evidence_policy"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_v9_manifest_rejects_missing_zone_origin(self):
+        record = self._record(
+            prediction_metadata=self._v9_metadata(),
+            predicted_zones=[_prediction(confidence="high")],
+        )
+        self._write(record)
+        with self.assertRaisesRegex(ValueError, r"predicted_zones\\[0\\].origin"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_v9_manifest_accepts_versioned_zone_evidence_contract(self):
+        zones = [
+            _prediction(confidence="high", origin="ai_inferred", label="AI DEMAND"),
+            _prediction("supply", confidence="medium", origin="user_marked", label="USER SUPPLY"),
+        ]
+        record = self._record(
+            prediction_metadata=self._v9_metadata(),
+            predicted_zones=zones,
+        )
+        self._write(record)
+        result = evaluate_benchmark_manifest(self.manifest)
+        self.assertEqual(result["fixture_count"], 1)
+        self.assertEqual(result["overall"]["predicted"], 2)
+        self.assertEqual(result["overall"]["true_positive"], 1)
+        self.assertEqual(result["overall"]["false_positive"], 1)
 
     def test_v8_manifest_rejects_missing_zone_origin(self):
         record = self._record(

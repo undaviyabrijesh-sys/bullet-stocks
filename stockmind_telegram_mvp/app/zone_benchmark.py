@@ -112,7 +112,7 @@ def _validate_prediction_metadata(metadata, line_number, fixture_id):
     # Generated time is fixture-specific; the remaining fields define the
     # inference profile and must be identical within one aggregate report.
     if (
-        normalized["prompt_version"] in {"dns-chart-v6", "dns-chart-v7", "dns-chart-v8"}
+        normalized["prompt_version"] in {"dns-chart-v6", "dns-chart-v7", "dns-chart-v8", "dns-chart-v9"}
         and settings.get("confidence_policy") != "high_medium_only"
     ):
         raise ValueError(
@@ -120,7 +120,7 @@ def _validate_prediction_metadata(metadata, line_number, fixture_id):
             "must declare confidence_policy=high_medium_only"
         )
     if (
-        normalized["prompt_version"] in {"dns-chart-v7", "dns-chart-v8"}
+        normalized["prompt_version"] in {"dns-chart-v7", "dns-chart-v8", "dns-chart-v9"}
         and settings.get("zone_origin_policy") != "user_marked_only_when_visibly_marked"
     ):
         raise ValueError(
@@ -129,11 +129,11 @@ def _validate_prediction_metadata(metadata, line_number, fixture_id):
         )
 
     if (
-        normalized["prompt_version"] == "dns-chart-v8"
+        normalized["prompt_version"] in {"dns-chart-v8", "dns-chart-v9"}
         and settings.get("zone_evidence_policy") != "compact_base_plus_directional_displacement_v1"
     ):
         raise ValueError(
-            f"line {line_number} ({fixture_id}): dns-chart-v8 prediction metadata "
+            f"line {line_number} ({fixture_id}): {normalized['prompt_version']} prediction metadata "
             "must declare zone_evidence_policy=compact_base_plus_directional_displacement_v1"
         )
 
@@ -164,7 +164,7 @@ def _validate_versioned_prediction_confidence(
 ):
     """Enforce versioned confidence gates in hand-authored benchmark manifests too."""
     prompt_version = prediction_metadata.get("prompt_version")
-    if prompt_version not in {"dns-chart-v6", "dns-chart-v7", "dns-chart-v8"}:
+    if prompt_version not in {"dns-chart-v6", "dns-chart-v7", "dns-chart-v8", "dns-chart-v9"}:
         return
 
     prefix = f"line {line_number} ({fixture_id}): predicted_zones"
@@ -197,7 +197,7 @@ def _validate_versioned_prediction_origin(
     prediction_metadata, predicted_zones, line_number, fixture_id
 ):
     """Require explicit origin provenance and consistent labels for v7/v8 predictions."""
-    if prediction_metadata.get("prompt_version") not in {"dns-chart-v7", "dns-chart-v8"}:
+    if prediction_metadata.get("prompt_version") not in {"dns-chart-v7", "dns-chart-v8", "dns-chart-v9"}:
         return
 
     prefix = f"line {line_number} ({fixture_id}): predicted_zones"
