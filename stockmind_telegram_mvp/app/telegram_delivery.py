@@ -1,5 +1,7 @@
 """Best-effort Telegram delivery for StockMind text and chart overlays."""
 
+import warnings
+
 TELEGRAM_TEXT_CHUNK_LIMIT = 4000
 
 # Keep a margin below Telegram's documented 10 MB photo ceiling. Oversized
