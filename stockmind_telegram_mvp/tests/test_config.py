@@ -10,6 +10,9 @@ _TEST_ENV = {
     "OPENAI_API_KEY": "stockmind-test-key",
     "TAPETIDE_TOKEN": "stockmind-test-tapetide-token",
     "MAX_CHART_IMAGE_BYTES": "5242880",
+    "DAILY_QUERY_LIMIT": "10",
+    "BETA_USER_LIMIT": "10",
+    "MAX_HISTORY_MESSAGES": "12",
     "MAX_HISTORY_BYTES": "24576",
     "RESEARCH_TURN_TIMEOUT_SECONDS": "120",
     "USER_LOCK_WAIT_TIMEOUT_SECONDS": "30",
@@ -61,12 +64,34 @@ class PositiveFiniteFloatSettingTests(unittest.TestCase):
 
 
 class ConfigurationWiringTests(unittest.TestCase):
-    def test_image_and_timeout_settings_use_validated_parsers(self):
+    def test_resource_and_runtime_limits_use_validated_parsers(self):
         self.assertEqual(config.MAX_CHART_IMAGE_BYTES, 5 * 1024 * 1024)
+        self.assertEqual(config.DAILY_QUERY_LIMIT, 10)
+        self.assertEqual(config.BETA_USER_LIMIT, 10)
+        self.assertEqual(config.MAX_HISTORY_MESSAGES, 12)
         self.assertEqual(config.MAX_HISTORY_BYTES, 24 * 1024)
         self.assertEqual(config.RESEARCH_TURN_TIMEOUT_SECONDS, 120.0)
         self.assertEqual(config.USER_LOCK_WAIT_TIMEOUT_SECONDS, 30.0)
         self.assertEqual(config.CHART_CAPACITY_WAIT_TIMEOUT_SECONDS, 30.0)
+
+    def test_admission_and_history_limits_fail_fast_when_invalid(self):
+        setting_names = (
+            "DAILY_QUERY_LIMIT",
+            "BETA_USER_LIMIT",
+            "MAX_HISTORY_MESSAGES",
+        )
+        for name in setting_names:
+            for raw_value in ("0", "-1", "1.5", "not-a-number"):
+                with self.subTest(name=name, raw_value=raw_value):
+                    invalid_environment = {**_TEST_ENV, name: raw_value}
+                    with patch.dict(os.environ, invalid_environment, clear=True):
+                        with self.assertRaisesRegex(
+                            RuntimeError, f"{name} must be a positive integer"
+                        ):
+                            importlib.reload(config)
+                    # Restore a valid module state before the next subtest.
+                    with patch.dict(os.environ, _TEST_ENV, clear=True):
+                        importlib.reload(config)
 
 
 if __name__ == "__main__":
