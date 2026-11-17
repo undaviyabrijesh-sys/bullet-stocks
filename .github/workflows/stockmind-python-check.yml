@@ -7,6 +7,13 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+
+# Keep only the newest validation run for a ref; rapid commits should not
+# spend Actions minutes finishing checks for superseded branch heads.
+concurrency:
+  group: stockmind-python-check-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
