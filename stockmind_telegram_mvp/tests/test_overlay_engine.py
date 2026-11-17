@@ -314,6 +314,63 @@ class OverlayRendererTests(unittest.TestCase):
             self.assertEqual(output.getpixel((2, 2)), source_image.getpixel((2, 2)))
             self.assertNotEqual(output.getpixel((32, 24)), source_image.getpixel((32, 24)))
 
+    def test_transparent_png_overlay_preserves_alpha_and_translucent_fill(self):
+        source_image = Image.new("RGBA", (64, 48), (0, 0, 0, 0))
+        source_image.putpixel((2, 2), (20, 40, 60, 255))
+        source_bytes = BytesIO()
+        source_image.save(source_bytes, format="PNG")
+        zone = {
+            "zone_type": "demand",
+            "draw_overlay": True,
+            "confidence": "high",
+            "x_start": 0.25,
+            "x_end": 0.75,
+            "y_top": 0.25,
+            "y_bottom": 0.65,
+        }
+
+        rendered, count = render_overlay(source_bytes.getvalue(), [zone])
+
+        self.assertEqual(count, 1)
+        with Image.open(BytesIO(rendered)) as output:
+            self.assertEqual(output.format, "PNG")
+            self.assertEqual(output.mode, "RGBA")
+            self.assertEqual(output.getpixel((2, 2)), (20, 40, 60, 255))
+            self.assertEqual(output.getpixel((5, 5))[3], 0)
+            # The translucent demand fill remains translucent over the
+            # transparent source instead of becoming an opaque green pixel.
+            self.assertEqual(output.getpixel((32, 24))[3], 60)
+
+    def test_transparent_webp_jpeg_fallback_flattens_against_white(self):
+        source_image = Image.new("RGBA", (64, 48), (0, 0, 0, 0))
+        source_image.putpixel((2, 2), (20, 40, 60, 255))
+        source_bytes = BytesIO()
+        source_image.save(source_bytes, format="WEBP", lossless=True)
+        zone = {
+            "zone_type": "demand",
+            "draw_overlay": True,
+            "confidence": "high",
+            "x_start": 0.25,
+            "x_end": 0.75,
+            "y_top": 0.25,
+            "y_bottom": 0.65,
+        }
+
+        with patch.object(overlay_engine, "MAX_OVERLAY_PNG_BYTES", 1):
+            rendered, count = render_overlay(source_bytes.getvalue(), [zone])
+
+        self.assertEqual(count, 1)
+        with Image.open(BytesIO(rendered)) as output:
+            self.assertEqual(output.format, "JPEG")
+            background = output.convert("RGB").getpixel((5, 5))
+            fill = output.convert("RGB").getpixel((32, 24))
+            self.assertTrue(all(channel >= 235 for channel in background))
+            # A white matte preserves the translucent appearance; dropping
+            # alpha would leave a much darker, fully saturated green.
+            self.assertGreater(fill[0], 100)
+            self.assertGreater(fill[1], fill[0])
+            self.assertGreater(fill[2], 100)
+
     def test_large_png_overlay_falls_back_to_bounded_jpeg_encoding(self):
         zone = {
             "zone_type": "demand",
