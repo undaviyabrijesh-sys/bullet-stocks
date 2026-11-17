@@ -99,6 +99,8 @@ language; low-level decoder details are not sent to users.
 - DAILY_QUERY_LIMIT (default: 10)
 - BETA_USER_LIMIT (default: 10)
 - MAX_HISTORY_MESSAGES (default: 12)
+
+`DAILY_QUERY_LIMIT`, `BETA_USER_LIMIT` and `MAX_HISTORY_MESSAGES` must be positive integers. Invalid values stop startup instead of failing later during quota admission or conversation-history access.
 - MAX_HISTORY_BYTES (default: 24 KiB of UTF-8 text across the retained conversation)
 - OPENAI_VISION_MODEL (defaults to OPENAI_MODEL; must support image input and structured outputs; default GPT-6 Luna)
 - MAX_CHART_IMAGE_BYTES (default: 5 MB; must be a positive integer; invalid values stop startup)
