@@ -374,12 +374,13 @@ def _render_overlay_prepared(
         # color-managed viewers from interpreting them in an unrelated space.
         source_format = source.format
         source_profile = source.info.get("icc_profile")
-        # The output canvas is RGB. Never attach a grayscale/CMYK profile to
-        # RGB pixels: that would misdescribe the encoded colors. Preserve only
-        # a structurally recognizable RGB profile from an RGB-like source.
+        source_has_alpha = "A" in source.getbands() or "transparency" in source.info
+        # The output canvas is RGB/RGBA. Never attach a grayscale/CMYK profile
+        # to RGB pixels: that would misdescribe the encoded colors. Preserve
+        # only a structurally recognizable RGB profile from an RGB-like source.
         icc_profile = (
             _compatible_icc_profile(source_profile, "RGB")
-            if source.mode in {"RGB", "RGBA", "P"}
+            if source.mode in {"RGB", "RGBA", "P", "PA"}
             else None
         )
         image = source.convert("RGBA")
@@ -439,28 +440,39 @@ def _render_overlay_prepared(
 
     if not count:
         return None, 0
-    result = Image.alpha_composite(image, layer).convert("RGB")
-    # Image operations may carry source info forward. Clear inherited metadata
-    # so only the explicitly validated RGB ICC profile below can be emitted.
-    result.info.clear()
+    composited = Image.alpha_composite(image, layer)
 
-    # PNG chart screenshots often contain thin candle wicks, grid lines and
-    # small labels. Keep their untouched pixels lossless when the resulting
-    # Telegram photo remains below a conservative upload budget. Fall back to
-    # the established JPEG path for unusually large PNG outputs.
+    # Preserve transparency for PNG screenshots. Converting RGBA directly to
+    # RGB discards alpha rather than blending it: translucent overlay fills can
+    # become fully saturated, and transparent chart backgrounds can turn dark.
+    # Keep the original alpha channel in PNG output; JPEG fallback must instead
+    # flatten the composited result against an explicit white background.
     if source_format == "PNG":
+        png_result = composited if source_has_alpha else composited.convert("RGB")
+        # Image operations may carry source info forward. Clear inherited
+        # metadata so only the explicitly validated RGB ICC profile is emitted.
+        png_result.info.clear()
         png_out = BytesIO()
         png_options = {"format": "PNG", "optimize": True}
         if isinstance(icc_profile, bytes) and icc_profile:
             png_options["icc_profile"] = icc_profile
-        result.save(png_out, **png_options)
+        png_result.save(png_out, **png_options)
         png_bytes = png_out.getvalue()
         if len(png_bytes) <= MAX_OVERLAY_PNG_BYTES:
             return png_bytes, count
 
+    if source_has_alpha:
+        white_background = Image.new("RGBA", composited.size, (255, 255, 255, 255))
+        jpeg_result = Image.alpha_composite(white_background, composited).convert("RGB")
+    else:
+        jpeg_result = composited.convert("RGB")
+    jpeg_result.info.clear()
+
+    # JPEG cannot represent transparency. Flatten it deliberately rather than
+    # silently dropping alpha and changing the screenshot's visible colors.
     out = BytesIO()
     save_options = {"format": "JPEG", "quality": 88, "optimize": True}
     if isinstance(icc_profile, bytes) and icc_profile:
         save_options["icc_profile"] = icc_profile
-    result.save(out, **save_options)
+    jpeg_result.save(out, **save_options)
     return out.getvalue(), count
