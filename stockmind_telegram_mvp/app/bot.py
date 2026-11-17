@@ -10,7 +10,7 @@ from aiogram.types import Message
 
 from .ai import ResearchAI, ResearchTurnDeadlineExceeded, ResearchResponseIncomplete
 from .crypto import BinanceMarketData
-from .overlay_engine import prepare_chart_image, _render_overlay_prepared
+from .overlay_engine import ChartImageError, prepare_chart_image, _render_overlay_prepared
 from .image_upload import BoundedBytesIO, UploadTooLargeError
 from .telegram_delivery import send_analysis_text, send_overlay_photo
 from .user_locks import (
@@ -19,7 +19,13 @@ from .user_locks import (
     create_user_lock_registry,
     is_lease_lost_cancellation,
 )
-from .localization import LANGUAGE_NAMES, normalize_language, resolve_language, translate
+from .localization import (
+    LANGUAGE_NAMES,
+    chart_image_error_message,
+    normalize_language,
+    resolve_language,
+    translate,
+)
 from .user_preferences import LanguagePreferenceStore
 from .usage_store import AdmissionStore
 from .conversation_history import ConversationHistoryStore, bound_history
@@ -374,8 +380,12 @@ async def _run_research_locked_impl(
             image_bytes, image_mime_type = prepare_chart_image(
                 image_bytes, max_output_bytes=MAX_CHART_IMAGE_BYTES
             )
-        except ValueError as exc:
-            await message.answer(str(exc))
+        except ChartImageError as exc:
+            await message.answer(chart_image_error_message(language, exc.code))
+            return
+        except ValueError:
+            logger.exception("StockMind chart image preparation failed with an unclassified validation error")
+            await message.answer(chart_image_error_message(language, "invalid"))
             return
 
     today = datetime.now(IST).date().isoformat()

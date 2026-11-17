@@ -15,6 +15,8 @@ from unittest.mock import patch as environment_patch
 
 
 from stockmind_telegram_mvp.app.ai import ResearchTurnDeadlineExceeded, ResearchResponseIncomplete
+from stockmind_telegram_mvp.app.overlay_engine import ChartImageError
+from stockmind_telegram_mvp.app.localization import translate
 from stockmind_telegram_mvp.app.telegram_delivery import split_telegram_text
 from stockmind_telegram_mvp.app.user_locks import (
     LEASE_LOST_CANCEL_MESSAGE,
@@ -91,6 +93,32 @@ class OverlayOutcomeMessageTests(unittest.TestCase):
         )
         self.assertIn("final pixel-size and plot-boundary checks", note)
         self.assertIn("sharper, uncropped screenshot", note)
+
+
+class ChartImageLocalizationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_image_validation_error_is_localized_before_quota_reservation(self):
+        message = SimpleNamespace(
+            from_user=SimpleNamespace(id=987654321, language_code="gu"),
+            answer=AsyncMock(),
+        )
+        with (
+            patch.object(bot_module, "_language_for", return_value="gu"),
+            patch.object(bot_module, "_research_admission_error", return_value=None),
+            patch.object(
+                bot_module,
+                "prepare_chart_image",
+                side_effect=ChartImageError("animated", "decoder detail must not be shown"),
+            ),
+            patch.object(bot_module, "_reserve_research_request") as reserve,
+        ):
+            await bot_module._run_research_locked_impl(
+                message, "analyse chart", b"image bytes", "image/png"
+            )
+
+        message.answer.assert_awaited_once_with(
+            translate("gu", "chart_image_animated")
+        )
+        reserve.assert_not_called()
 
 
 class ChartCapacityTests(unittest.IsolatedAsyncioTestCase):

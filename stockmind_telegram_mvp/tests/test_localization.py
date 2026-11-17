@@ -5,6 +5,7 @@ from stockmind_telegram_mvp.app.localization import (
     normalize_language,
     resolve_language,
     translate,
+    chart_image_error_message,
 )
 
 
@@ -35,12 +36,24 @@ class LocalizationTests(unittest.TestCase):
         self.assertIn("12.5", message)
         self.assertIn("चार्ट", message)
 
+    def test_chart_image_error_codes_use_supported_translations_and_safe_fallback(self):
+        codes = ("invalid", "unsupported", "too_many_pixels", "animated", "too_large")
+        for language in ("en", "hi", "gu"):
+            for code in codes:
+                with self.subTest(language=language, code=code):
+                    self.assertTrue(chart_image_error_message(language, code))
+        self.assertEqual(
+            chart_image_error_message("gu", "unknown-code"),
+            translate("gu", "chart_image_invalid"),
+        )
+
     def test_all_supported_languages_have_core_beta_messages(self):
         required = (
             "language_help", "language_invalid", "language_changed",
             "language_changed_not_saved",
             "welcome", "beta_full", "daily_limit", "quota_storage_unavailable",
-            "progress_chart",
+            "progress_chart", "chart_image_invalid", "chart_image_unsupported",
+            "chart_image_too_many_pixels", "chart_image_animated", "chart_image_too_large",
             "progress_research", "research_incomplete", "reset_done", "reset_lock_unavailable",
             "request_busy", "chart_capacity_busy", "reset_lock_busy", "unsupported_message",
         )

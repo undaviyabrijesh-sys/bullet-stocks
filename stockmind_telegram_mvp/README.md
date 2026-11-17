@@ -88,8 +88,8 @@ can additionally take up to the SQLite busy timeout to finish.
 This is same-host/local-file coordination only:
 do not put SQLite on a network filesystem or point different hosts at one
 database file. Multi-host replicas require a dedicated shared lock service or
-database. Low-level image-decoder validation messages may still be returned in
-English.
+database. Chart-image validation errors are mapped to the selected interface
+language; low-level decoder details are not sent to users.
 
 ## Configuration
 - TELEGRAM_BOT_TOKEN

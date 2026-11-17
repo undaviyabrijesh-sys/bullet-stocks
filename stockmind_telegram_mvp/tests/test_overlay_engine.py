@@ -861,5 +861,54 @@ class ExifOrientationMatrixTests(unittest.TestCase):
         self.assertIsNone(normalized_plot_bounds_to_pixel_box(bounds, 640, huge_dimension))
 
 
+class ChartImageValidationErrorTests(unittest.TestCase):
+    def _assert_error_code(self, operation, expected_code):
+        with self.assertRaises(overlay_engine.ChartImageError) as caught:
+            operation()
+        self.assertEqual(caught.exception.code, expected_code)
+
+    def test_empty_and_corrupt_uploads_have_stable_invalid_code(self):
+        self._assert_error_code(lambda: validate_chart_image(b""), "invalid")
+        self._assert_error_code(lambda: validate_chart_image(b"not an image"), "invalid")
+
+    def test_unsupported_format_has_stable_code(self):
+        self._assert_error_code(
+            lambda: validate_chart_image(sample_image(image_format="BMP")),
+            "unsupported",
+        )
+
+    def test_animated_image_has_stable_code(self):
+        output = BytesIO()
+        frames = [Image.new("RGB", (16, 16), color) for color in ("white", "black")]
+        frames[0].save(
+            output, format="PNG", save_all=True, append_images=frames[1:],
+            duration=100, loop=0,
+        )
+        self._assert_error_code(
+            lambda: validate_chart_image(output.getvalue()),
+            "animated",
+        )
+
+    def test_pixel_limit_has_stable_code(self):
+        with patch.object(overlay_engine, "MAX_CHART_IMAGE_PIXELS", 4):
+            self._assert_error_code(
+                lambda: validate_chart_image(sample_image(size=(3, 2))),
+                "too_many_pixels",
+            )
+
+    def test_processing_byte_limit_has_stable_code(self):
+        image_bytes = sample_image()
+        self._assert_error_code(
+            lambda: prepare_chart_image(image_bytes, max_output_bytes=1),
+            "too_large",
+        )
+
+    def test_invalid_exif_orientation_has_stable_invalid_code(self):
+        self._assert_error_code(
+            lambda: prepare_chart_image(oriented_sample_image(orientation=9)),
+            "invalid",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -87,6 +87,11 @@ _MESSAGES = {
         "progress_chart": "🖼️ Reading the chart and mapping visible structure…",
         "progress_research": "🔎 Understanding your question and checking market data…",
         "chart_analysis_fallback": "I could not read the chart reliably.",
+        "chart_image_invalid": "I could not read that file as a valid static chart image. Please re-export it as JPEG, PNG or WEBP and try again.",
+        "chart_image_unsupported": "Please send a chart image in JPEG, PNG or WEBP format.",
+        "chart_image_too_many_pixels": "This chart image has too many pixels for safe processing. Please resize or re-export it at a lower resolution.",
+        "chart_image_animated": "Animated images are not supported. Please send a single-frame chart screenshot.",
+        "chart_image_too_large": "The chart image exceeds StockMind's processing-size limit. Please resize or re-export it.",
         "overlay_plot_missing": (
             "\n\nI could not locate the main price-plot boundary confidently, so I withheld all overlays. "
             "Keep the full candle panel and its edges visible in the screenshot."
@@ -190,6 +195,11 @@ _MESSAGES = {
         "progress_chart": "🖼️ चार्ट पढ़ रहा हूँ और दिखाई देने वाली संरचना देख रहा हूँ…",
         "progress_research": "🔎 आपका सवाल समझ रहा हूँ और मार्केट डेटा जाँच रहा हूँ…",
         "chart_analysis_fallback": "मैं चार्ट को भरोसेमंद तरीके से पढ़ नहीं पाया।",
+        "chart_image_invalid": "यह फ़ाइल मान्य static chart image के रूप में पढ़ी नहीं जा सकी। कृपया इसे JPEG, PNG या WEBP में दोबारा export करके भेजें।",
+        "chart_image_unsupported": "कृपया chart image JPEG, PNG या WEBP format में भेजें।",
+        "chart_image_too_many_pixels": "इस chart image में सुरक्षित processing से अधिक pixels हैं। कृपया कम resolution में resize या export करें।",
+        "chart_image_animated": "Animated image समर्थित नहीं है। कृपया chart का single-frame screenshot भेजें।",
+        "chart_image_too_large": "यह chart image StockMind की processing-size सीमा से बड़ी है। कृपया resize या re-export करें।",
         "overlay_plot_missing": (
             "\n\nमुख्य price-plot की सीमा भरोसे से पहचान नहीं पाया, इसलिए कोई overlay नहीं बनाया। "
             "कृपया पूरा candle panel और उसके किनारे स्क्रीनशॉट में रखें।"
@@ -278,6 +288,11 @@ _MESSAGES = {
         "progress_chart": "🖼️ Chart વાંચી રહ્યો છું અને દેખાતી રચનાનું mapping કરું છું…",
         "progress_research": "🔎 તમારો પ્રશ્ન સમજી રહ્યો છું અને market data તપાસું છું…",
         "chart_analysis_fallback": "હું chart વિશ્વસનીય રીતે વાંચી શક્યો નથી.",
+        "chart_image_invalid": "આ ફાઇલ માન્ય static chart image તરીકે વાંચી શકાઈ નથી. કૃપા કરીને તેને JPEG, PNG અથવા WEBP માં ફરી export કરીને મોકલો.",
+        "chart_image_unsupported": "કૃપા કરીને chart image JPEG, PNG અથવા WEBP format માં મોકલો.",
+        "chart_image_too_many_pixels": "આ chart image માં સુરક્ષિત processing કરતાં વધુ pixels છે. કૃપા કરીને ઓછી resolution માં resize અથવા export કરો.",
+        "chart_image_animated": "Animated image સપોર્ટેડ નથી. કૃપા કરીને chart નો single-frame screenshot મોકલો.",
+        "chart_image_too_large": "આ chart image StockMind ની processing-size મર્યાદાથી મોટી છે. કૃપા કરીને resize અથવા re-export કરો.",
         "overlay_plot_missing": (
             "\n\nમુખ્ય price-plot ની સીમા વિશ્વાસપૂર્વક ઓળખી શક્યો નથી, તેથી overlay બનાવ્યું નથી. "
             "કૃપા કરીને આખું candle panel અને તેની કિનારીઓ screenshot માં દેખાય તે રીતે મોકલો."
@@ -340,3 +355,15 @@ def translate(language, key, **values):
     if template is None:
         raise KeyError(f"Unknown StockMind UI message: {key}")
     return template.format(**values)
+
+
+def chart_image_error_message(language, code):
+    """Translate a stable chart-image validation code without exposing decoder details."""
+    keys = {
+        "invalid": "chart_image_invalid",
+        "unsupported": "chart_image_unsupported",
+        "too_many_pixels": "chart_image_too_many_pixels",
+        "animated": "chart_image_animated",
+        "too_large": "chart_image_too_large",
+    }
+    return translate(language, keys.get(code, "chart_image_invalid"))

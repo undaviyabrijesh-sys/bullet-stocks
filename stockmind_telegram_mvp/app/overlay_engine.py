@@ -15,6 +15,16 @@ SUPPORTED_IMAGE_MIME_TYPES = {
 }
 
 
+class ChartImageError(ValueError):
+    """A safe, user-facing chart-image validation failure with a stable code."""
+
+    CODES = {"invalid", "unsupported", "too_many_pixels", "animated", "too_large"}
+
+    def __init__(self, code: str, message: str):
+        self.code = code if isinstance(code, str) and code in self.CODES else "invalid"
+        super().__init__(message)
+
+
 _ICC_COLOR_SPACE_BY_MODE = {
     "1": b"GRAY",
     "L": b"GRAY",
@@ -58,7 +68,7 @@ def validate_chart_image(image_bytes: bytes) -> str:
     on a fresh decoder before the bytes are sent to the vision provider.
     """
     if not isinstance(image_bytes, bytes) or not image_bytes:
-        raise ValueError("Please send a non-empty JPEG, PNG or WEBP chart image.")
+        raise ChartImageError("invalid", "Please send a non-empty JPEG, PNG or WEBP chart image.")
 
     try:
         with warnings.catch_warnings():
@@ -68,13 +78,14 @@ def validate_chart_image(image_bytes: bytes) -> str:
                 width, height = image.size
                 frame_count = getattr(image, "n_frames", 1)
                 if image_format not in SUPPORTED_IMAGE_MIME_TYPES:
-                    raise ValueError("Please send a JPEG, PNG or WEBP chart image.")
+                    raise ChartImageError("unsupported", "Please send a JPEG, PNG or WEBP chart image.")
                 if width < 1 or height < 1 or width * height > MAX_CHART_IMAGE_PIXELS:
-                    raise ValueError(
-                        "That image has too many pixels. Please resize the chart screenshot and try again."
+                    raise ChartImageError(
+                        "too_many_pixels",
+                        "That image has too many pixels. Please resize the chart screenshot and try again.",
                     )
                 if frame_count != 1:
-                    raise ValueError("Animated images are not supported. Please send a single chart frame.")
+                    raise ChartImageError("animated", "Animated images are not supported. Please send a single chart frame.")
                 # Image.verify() checks file structure but does not fully decode
                 # pixel data. In particular, a truncated JPEG can pass verify().
                 # Force the decoder to read every pixel before spending vision tokens.
@@ -94,7 +105,7 @@ def validate_chart_image(image_bytes: bytes) -> str:
         Image.DecompressionBombError,
         Image.DecompressionBombWarning,
     ) as exc:
-        raise ValueError("The upload is not a valid JPEG, PNG or WEBP image. Please resend the chart.") from exc
+        raise ChartImageError("invalid", "The upload is not a valid JPEG, PNG or WEBP image. Please resend the chart.") from exc
 
     return SUPPORTED_IMAGE_MIME_TYPES[image_format]
 
@@ -128,8 +139,9 @@ def prepare_chart_image(
         and image_bytes
         and len(image_bytes) > max_output_bytes
     ):
-        raise ValueError(
-            f"Chart image exceeds the {max_output_bytes}-byte processing limit."
+        raise ChartImageError(
+            "too_large",
+            f"Chart image exceeds the {max_output_bytes}-byte processing limit.",
         )
 
     mime_type = validate_chart_image(image_bytes)
@@ -141,7 +153,7 @@ def prepare_chart_image(
             or not isinstance(orientation, int)
             or orientation not in range(1, 9)
         ):
-            raise ValueError("The chart image contains invalid EXIF orientation metadata.")
+            raise ChartImageError("invalid", "The chart image contains invalid EXIF orientation metadata.")
         if orientation == 1:
             return image_bytes, mime_type
 
@@ -161,7 +173,7 @@ def prepare_chart_image(
         elif image_format == "PNG":
             save_options["optimize"] = True
         else:
-            raise ValueError("Please send a JPEG, PNG or WEBP chart image.")
+            raise ChartImageError("unsupported", "Please send a JPEG, PNG or WEBP chart image.")
 
         # Check against the final encoded pixel mode, after any conversion.
         # For example, a grayscale/CMYK WebP may be expanded to RGB by Pillow;
@@ -175,9 +187,10 @@ def prepare_chart_image(
         normalized_bytes = output.getvalue()
 
     if max_output_bytes is not None and len(normalized_bytes) > max_output_bytes:
-        raise ValueError(
+        raise ChartImageError(
+            "too_large",
             "Orientation-corrected chart exceeds the "
-            f"{max_output_bytes}-byte processing limit. Resize or re-export the screenshot."
+            f"{max_output_bytes}-byte processing limit. Resize or re-export the screenshot.",
         )
 
     normalized_mime_type = validate_chart_image(normalized_bytes)
