@@ -7,6 +7,7 @@ from aiogram.types import BufferedInputFile
 from PIL import Image
 
 from stockmind_telegram_mvp.app import telegram_delivery
+from stockmind_telegram_mvp.app.overlay_engine import render_overlay
 from stockmind_telegram_mvp.app.telegram_delivery import (
     send_analysis_text,
     send_overlay_photo,
@@ -153,6 +154,51 @@ class OverlayDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(photo, BufferedInputFile)
         self.assertEqual(photo.filename, "stockmind-chart-zones.png")
         message.answer_document.assert_not_awaited()
+
+    async def test_transparent_png_render_reaches_telegram_upload_unchanged(self):
+        source = Image.new("RGBA", (64, 48), (0, 0, 0, 0))
+        source.putpixel((2, 2), (20, 40, 60, 255))
+        source_bytes = BytesIO()
+        source.save(source_bytes, format="PNG")
+        zone = {
+            "zone_type": "demand",
+            "draw_overlay": True,
+            "confidence": "high",
+            "x_start": 0.25,
+            "x_end": 0.75,
+            "y_top": 0.25,
+            "y_bottom": 0.65,
+        }
+
+        rendered, zone_count = render_overlay(source_bytes.getvalue(), [zone])
+        self.assertEqual(zone_count, 1)
+        self.assertIsNotNone(rendered)
+
+        with Image.open(BytesIO(rendered)) as output:
+            self.assertEqual(output.format, "PNG")
+            self.assertEqual(output.mode, "RGBA")
+            self.assertEqual(output.getpixel((5, 5))[3], 0)
+            self.assertEqual(output.getpixel((32, 24))[3], 60)
+
+        message = SimpleNamespace(
+            answer_photo=AsyncMock(),
+            answer_document=AsyncMock(),
+        )
+        delivered = await send_overlay_photo(
+            message, rendered, caption="Estimated overlay"
+        )
+
+        self.assertTrue(delivered)
+        message.answer_photo.assert_awaited_once()
+        message.answer_document.assert_not_awaited()
+        upload = message.answer_photo.await_args.args[0]
+        self.assertIsInstance(upload, BufferedInputFile)
+        self.assertEqual(upload.filename, "stockmind-chart-zones.png")
+        self.assertEqual(upload.data, rendered)
+        with Image.open(BytesIO(upload.data)) as uploaded_image:
+            self.assertEqual(uploaded_image.mode, "RGBA")
+            self.assertEqual(uploaded_image.getpixel((5, 5))[3], 0)
+            self.assertEqual(uploaded_image.getpixel((32, 24))[3], 60)
 
     async def test_photo_byte_limit_routes_exact_image_as_document(self):
         message = SimpleNamespace(
