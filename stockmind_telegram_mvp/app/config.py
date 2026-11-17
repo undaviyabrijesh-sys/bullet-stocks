@@ -49,9 +49,9 @@ MAX_CHART_IMAGE_BYTES = _positive_int_setting(
 MAX_CONCURRENT_CHART_ANALYSES = int(os.getenv("MAX_CONCURRENT_CHART_ANALYSES", "2"))
 if not 1 <= MAX_CONCURRENT_CHART_ANALYSES <= 10:
     raise RuntimeError("MAX_CONCURRENT_CHART_ANALYSES must be between 1 and 10.")
-DAILY_QUERY_LIMIT = int(os.getenv("DAILY_QUERY_LIMIT", "10"))
-BETA_USER_LIMIT = int(os.getenv("BETA_USER_LIMIT", "10"))
-MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "12"))
+DAILY_QUERY_LIMIT = _positive_int_setting("DAILY_QUERY_LIMIT", 10)
+BETA_USER_LIMIT = _positive_int_setting("BETA_USER_LIMIT", 10)
+MAX_HISTORY_MESSAGES = _positive_int_setting("MAX_HISTORY_MESSAGES", 12)
 MAX_HISTORY_BYTES = _positive_int_setting("MAX_HISTORY_BYTES", 24 * 1024)
 RESEARCH_TURN_TIMEOUT_SECONDS = _positive_finite_float_setting(
     "RESEARCH_TURN_TIMEOUT_SECONDS", 120.0
