@@ -1127,7 +1127,7 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
             predicted_zones=[_prediction(confidence="high")],
         )
         self._write(record)
-        with self.assertRaisesRegex(ValueError, r"predicted_zones\\[0\\].origin"):
+        with self.assertRaisesRegex(ValueError, r"predicted_zones\[0\].origin"):
             evaluate_benchmark_manifest(self.manifest)
 
     def test_v9_manifest_accepts_versioned_zone_evidence_contract(self):
