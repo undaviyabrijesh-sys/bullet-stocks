@@ -1,7 +1,10 @@
 import unittest
+from string import Formatter
 
 from stockmind_telegram_mvp.app.localization import (
     LANGUAGE_NAMES,
+    SUPPORTED_LANGUAGES,
+    _MESSAGES,
     normalize_language,
     resolve_language,
     translate,
@@ -38,7 +41,7 @@ class LocalizationTests(unittest.TestCase):
 
     def test_chart_image_error_codes_use_supported_translations_and_safe_fallback(self):
         codes = ("invalid", "unsupported", "too_many_pixels", "animated", "too_large")
-        for language in ("en", "hi", "gu"):
+        for language in SUPPORTED_LANGUAGES:
             for code in codes:
                 with self.subTest(language=language, code=code):
                     self.assertTrue(chart_image_error_message(language, code))
@@ -57,10 +60,29 @@ class LocalizationTests(unittest.TestCase):
             "progress_research", "research_incomplete", "reset_done", "reset_lock_unavailable",
             "request_busy", "chart_capacity_busy", "reset_lock_busy", "unsupported_message",
         )
-        for language in ("en", "hi", "gu"):
+        for language in SUPPORTED_LANGUAGES:
             for key in required:
                 with self.subTest(language=language, key=key):
                     self.assertTrue(translate(language, key, language_name=LANGUAGE_NAMES["en"]))
+
+    def test_every_ui_message_is_present_and_format_safe_in_each_language(self):
+        expected_keys = set(_MESSAGES["en"])
+        self.assertEqual(set(SUPPORTED_LANGUAGES), set(LANGUAGE_NAMES))
+        for language in SUPPORTED_LANGUAGES:
+            with self.subTest(language=language):
+                self.assertEqual(set(_MESSAGES[language]), expected_keys)
+                for key, template in _MESSAGES[language].items():
+                    placeholders = {
+                        field_name
+                        for _, field_name, _, _ in Formatter().parse(template)
+                        if field_name
+                    }
+                    values = {
+                        field_name: 12.5 if field_name == "seconds" else "test"
+                        for field_name in placeholders
+                    }
+                    with self.subTest(language=language, key=key):
+                        self.assertTrue(translate(language, key, **values))
 
 
 if __name__ == "__main__":
