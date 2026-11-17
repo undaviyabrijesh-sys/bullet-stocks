@@ -285,6 +285,64 @@ class OverlayDeliveryTests(unittest.IsolatedAsyncioTestCase):
         message.answer_photo.assert_not_awaited()
         message.answer_document.assert_not_awaited()
 
+    async def test_truncated_jpeg_pixel_data_is_rejected_before_upload(self):
+        message = SimpleNamespace(
+            answer_photo=AsyncMock(),
+            answer_document=AsyncMock(),
+        )
+        truncated = self.sample_image(image_format="JPEG")[:-10]
+
+        delivered = await send_overlay_photo(
+            message, truncated, caption="Estimated overlay"
+        )
+
+        self.assertFalse(delivered)
+        message.answer_photo.assert_not_awaited()
+        message.answer_document.assert_not_awaited()
+
+    async def test_animated_png_is_rejected_before_upload(self):
+        message = SimpleNamespace(
+            answer_photo=AsyncMock(),
+            answer_document=AsyncMock(),
+        )
+        output = BytesIO()
+        frames = [
+            Image.new("RGBA", (32, 32), color)
+            for color in ("red", "blue")
+        ]
+        frames[0].save(
+            output,
+            format="PNG",
+            save_all=True,
+            append_images=frames[1:],
+            duration=100,
+            loop=0,
+        )
+
+        delivered = await send_overlay_photo(
+            message, output.getvalue(), caption="Estimated overlay"
+        )
+
+        self.assertFalse(delivered)
+        message.answer_photo.assert_not_awaited()
+        message.answer_document.assert_not_awaited()
+
+    async def test_overlay_pixel_limit_is_checked_before_upload(self):
+        message = SimpleNamespace(
+            answer_photo=AsyncMock(),
+            answer_document=AsyncMock(),
+        )
+        png_bytes = self.sample_image(size=(11, 10), image_format="PNG")
+
+        with patch.object(telegram_delivery, "TELEGRAM_OVERLAY_MAX_PIXELS", 100):
+            delivered = await send_overlay_photo(
+                message, png_bytes, caption="Estimated overlay"
+            )
+
+        self.assertFalse(delivered)
+        message.answer_photo.assert_not_awaited()
+        message.answer_document.assert_not_awaited()
+
     async def test_telegram_photo_failure_returns_false_without_document_retry(self):
         message = SimpleNamespace(
             answer_photo=AsyncMock(side_effect=RuntimeError("Telegram unavailable")),

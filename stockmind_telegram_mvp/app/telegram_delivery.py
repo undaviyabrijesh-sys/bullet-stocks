@@ -6,6 +6,8 @@ TELEGRAM_TEXT_CHUNK_LIMIT = 4000
 # or unusually shaped overlays are sent as documents instead of being resized.
 TELEGRAM_PHOTO_MAX_BYTES = 9_000_000
 TELEGRAM_DOCUMENT_MAX_BYTES = 45_000_000
+# Match the screenshot validator's decoded-pixel ceiling, including direct callers.
+TELEGRAM_OVERLAY_MAX_PIXELS = 25_000_000
 TELEGRAM_PHOTO_MAX_DIMENSION_SUM = 10_000
 TELEGRAM_PHOTO_MAX_ASPECT_RATIO = 20
 
@@ -155,14 +157,28 @@ async def send_overlay_photo(message, image_bytes: bytes, *, caption: str) -> bo
         return False
 
     try:
-        with Image.open(BytesIO(image_bytes)) as image:
-            image_format = image.format
-            width, height = image.size
-            image.verify()
-    except Exception:
-        return False
+        # Verify the complete decoded image, not only its container header.
+        # Pillow's verify() alone can accept truncated JPEG pixel data. Decode
+        # one frame first, then verify the container on a fresh decoder.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(BytesIO(image_bytes)) as image:
+                image_format = image.format
+                width, height = image.size
+                frame_count = getattr(image, "n_frames", 1)
+                if image_format not in {"PNG", "JPEG"} or frame_count != 1:
+                    return False
+                if (
+                    width < 1
+                    or height < 1
+                    or width * height > TELEGRAM_OVERLAY_MAX_PIXELS
+                ):
+                    return False
+                image.load()
 
-    if image_format not in {"PNG", "JPEG"}:
+            with Image.open(BytesIO(image_bytes)) as verification_image:
+                verification_image.verify()
+    except Exception:
         return False
 
     filename = (
