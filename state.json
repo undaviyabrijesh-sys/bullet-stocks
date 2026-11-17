@@ -90,7 +90,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-17T13:30:00+05:30"
+   "last_processed_bar": "2026-11-17T14:27:00+05:30"
   },
   "KINGFA": {
    "entry": 6733.02,
@@ -112,7 +112,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-17T13:22:00+05:30"
+   "last_processed_bar": "2026-11-17T14:27:00+05:30"
   },
   "SONACOMS": {
    "entry": 853.74,
@@ -134,7 +134,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-17T13:30:00+05:30"
+   "last_processed_bar": "2026-11-17T14:27:00+05:30"
   },
   "KRISHANA": {
    "entry": 234.6,
@@ -156,7 +156,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-17T13:30:00+05:30"
+   "last_processed_bar": "2026-11-17T14:27:00+05:30"
   },
   "SHREEPUSHK": {
    "entry": 635.7999877929688,
@@ -178,7 +178,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-17T13:29:00+05:30"
+   "last_processed_bar": "2026-11-17T14:27:00+05:30"
   },
   "NITINSPIN": {
    "entry": 690.25,
@@ -200,7 +200,7 @@
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
    "migration_note": "Migrated from legacy single-target state; staged targets start from original entry.",
-   "last_processed_bar": "2026-11-17T13:30:00+05:30"
+   "last_processed_bar": "2026-11-17T14:27:00+05:30"
   },
   "PHOENIXLTD": {
    "entry": 2044.0,
@@ -221,7 +221,7 @@
    "trailing": false,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-17T13:30:00+05:30"
+   "last_processed_bar": "2026-11-17T14:27:00+05:30"
   },
   "ADANIPORTS": {
    "entry": 1915.0,
@@ -242,7 +242,7 @@
    "trailing": false,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-17T13:30:00+05:30"
+   "last_processed_bar": "2026-11-17T14:27:00+05:30"
   },
   "DIVISLAB": {
    "entry": 10074.5,
@@ -265,7 +265,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-17T13:30:00+05:30"
+   "last_processed_bar": "2026-11-17T14:27:00+05:30"
   },
   "ANANDRATHI": {
    "entry": 2347.0,
@@ -288,7 +288,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-17T13:30:00+05:30"
+   "last_processed_bar": "2026-11-17T14:27:00+05:30"
   },
   "ETERNAL": {
    "entry": 354.20001220703125,
@@ -311,7 +311,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-17T13:30:00+05:30"
+   "last_processed_bar": "2026-11-17T14:27:00+05:30"
   },
   "SHYAMMETL": {
    "entry": 1274.5999755859375,
@@ -334,7 +334,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-17T13:30:00+05:30"
+   "last_processed_bar": "2026-11-17T14:27:00+05:30"
   },
   "KOTAKBANK": {
    "entry": 473.75,
@@ -357,7 +357,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-17T13:30:00+05:30"
+   "last_processed_bar": "2026-11-17T14:27:00+05:30"
   },
   "SBC": {
    "entry": 68.72000122070312,
@@ -380,7 +380,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-17T13:30:00+05:30"
+   "last_processed_bar": "2026-11-17T14:27:00+05:30"
   },
   "NAVINFLUOR": {
    "entry": 9000.0,
@@ -403,7 +403,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-17T13:30:00+05:30"
+   "last_processed_bar": "2026-11-17T14:27:00+05:30"
   },
   "TFCILTD": {
    "entry": 169.61000061035156,
@@ -426,7 +426,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-17T13:30:00+05:30"
+   "last_processed_bar": "2026-11-17T14:27:00+05:30"
   },
   "SOUTHBANK": {
    "entry": 58.54999923706055,
@@ -449,7 +449,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-17T13:30:00+05:30"
+   "last_processed_bar": "2026-11-17T14:27:00+05:30"
   },
   "LAURUSLABS": {
    "entry": 2458.699951171875,
@@ -472,7 +472,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-17T13:30:00+05:30"
+   "last_processed_bar": "2026-11-17T14:27:00+05:30"
   },
   "CUPID": {
    "entry": 379.5,
@@ -495,7 +495,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-17T13:30:00+05:30"
+   "last_processed_bar": "2026-11-17T14:27:00+05:30"
   },
   "SSWL": {
    "entry": 571.7000122070312,
@@ -518,7 +518,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-17T13:30:00+05:30"
+   "last_processed_bar": "2026-11-17T14:27:00+05:30"
   },
   "NAZARA": {
    "entry": 428.6499938964844,
@@ -541,7 +541,7 @@
    "trail_activation_date": null,
    "remaining_fraction": 1.0,
    "realised_pnl_fraction": 0.0,
-   "last_processed_bar": "2026-11-17T13:30:00+05:30"
+   "last_processed_bar": "2026-11-17T14:27:00+05:30"
   }
  },
  "closed": [
