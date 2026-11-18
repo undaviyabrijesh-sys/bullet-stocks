@@ -4,10 +4,12 @@ from unittest.mock import patch
 from stockmind_telegram_mvp.app.zone_evaluation import (
     _finite_mean,
     _price_comparison,
+    evaluate_manual_annotation_agreement,
     evaluate_zone_predictions,
 )
 from stockmind_telegram_mvp.app.plot_evaluation import (
     aggregate_plot_boundary_accuracy,
+    build_plot_boundary_accuracy,
     compare_plot_boundary_accuracy,
 )
 
@@ -183,6 +185,35 @@ class ZoneEvaluationTests(unittest.TestCase):
                         image_width=width,
                         image_height=height,
                     )
+
+    def test_evaluators_enforce_the_chart_intake_pixel_budget(self):
+        width, height = 5001, 5000  # 25,005,000 pixels; intake allows 25,000,000.
+        with self.subTest(evaluator="AI zone scoring"):
+            with self.assertRaisesRegex(ValueError, "25000000-pixel chart limit"):
+                evaluate_zone_predictions(
+                    [], [], image_width=width, image_height=height
+                )
+
+        with self.subTest(evaluator="manual annotation agreement"):
+            with self.assertRaisesRegex(ValueError, "25000000-pixel chart limit"):
+                evaluate_manual_annotation_agreement(
+                    [], [], image_width=width, image_height=height
+                )
+
+        full_image = {
+            "x_start": 0.0, "x_end": 1.0, "y_top": 0.0, "y_bottom": 1.0
+        }
+        with self.subTest(evaluator="plot boundary scoring"):
+            with self.assertRaisesRegex(ValueError, "25000000-pixel chart limit"):
+                build_plot_boundary_accuracy(
+                    full_image, full_image, [], width, height
+                )
+
+        # The exact intake ceiling remains valid; only dimensions above it fail.
+        boundary_result = build_plot_boundary_accuracy(
+            full_image, full_image, [], 5000, 5000
+        )
+        self.assertEqual(boundary_result["status"], "scored")
 
     def test_supply_does_not_match_demand_at_same_coordinates(self):
         result = evaluate([prediction("supply")], [zone("demand")])
