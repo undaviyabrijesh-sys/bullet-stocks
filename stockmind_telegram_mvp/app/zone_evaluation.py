@@ -9,7 +9,7 @@ import math
 
 from .overlay_engine import normalized_plot_bounds_to_pixel_box, normalized_zone_to_pixel_box
 from .price_axis import calibrate_price_axis, parse_zone_price_bounds, zone_price_bounds
-from .plot_evaluation import build_plot_boundary_accuracy
+from .plot_evaluation import build_plot_boundary_accuracy, validate_evaluation_image_dimensions
 
 MAX_EVALUATED_ZONES = 8
 ZONE_TYPES = {"supply", "demand"}
@@ -368,9 +368,7 @@ def evaluate_zone_predictions(
     same screenshot. Price errors are reported only for matched zones wholly
     inside the calibrated y range. No OCR or price-axis extrapolation is done.
     """
-    for dimension, value in (("image_width", image_width), ("image_height", image_height)):
-        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-            raise ValueError(f"{dimension} must be a positive integer")
+    validate_evaluation_image_dimensions(image_width, image_height)
     if isinstance(iou_threshold, bool) or not isinstance(iou_threshold, (int, float)):
         raise ValueError("iou_threshold must be a number greater than 0 and at most 1")
     iou_threshold = float(iou_threshold)
@@ -593,9 +591,7 @@ def evaluate_manual_annotation_agreement(
     to demand. Matching maximizes qualifying one-to-one matches before total
     IoU, using the same deterministic assignment rule as model evaluation.
     """
-    for dimension, value in (("image_width", image_width), ("image_height", image_height)):
-        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-            raise ValueError(f"{dimension} must be a positive integer")
+    validate_evaluation_image_dimensions(image_width, image_height)
     if isinstance(iou_threshold, bool) or not isinstance(iou_threshold, (int, float)):
         raise ValueError("iou_threshold must be a number greater than 0 and at most 1")
     try:
