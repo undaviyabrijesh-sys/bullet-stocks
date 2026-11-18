@@ -4,10 +4,27 @@ These metrics compare the model's estimated plot rectangle with a separately
 reviewed manual rectangle. Right-margin and bottom-panel overlap are geometric
 proxies only; they do not identify the semantic contents of excluded regions.
 """
-from .overlay_engine import normalized_plot_bounds_to_pixel_box
+from .overlay_engine import MAX_CHART_IMAGE_PIXELS, normalized_plot_bounds_to_pixel_box
 
 
 _EDGE_NAMES = ("left", "right", "top", "bottom")
+
+
+def validate_evaluation_image_dimensions(image_width, image_height):
+    """Enforce the same decoded-pixel budget as chart-image intake.
+
+    Evaluation works on screenshot coordinates, so accepting dimensions that
+    the production image validator would reject can create impossible benchmark
+    fixtures and unnecessarily large integer geometry. Keep the offline scorer
+    on the same 25-megapixel envelope as the renderer.
+    """
+    for name, value in (("image_width", image_width), ("image_height", image_height)):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{name} must be a positive integer")
+    if image_width * image_height > MAX_CHART_IMAGE_PIXELS:
+        raise ValueError(
+            f"image dimensions exceed the {MAX_CHART_IMAGE_PIXELS}-pixel chart limit"
+        )
 
 
 def _area(box):
@@ -79,9 +96,7 @@ def build_plot_boundary_accuracy(
     image_height,
 ):
     """Measure estimated plot geometry and predicted-zone containment in pixels."""
-    for name, value in (("image_width", image_width), ("image_height", image_height)):
-        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-            raise ValueError(f"{name} must be a positive integer")
+    validate_evaluation_image_dimensions(image_width, image_height)
 
     reference_box = normalized_plot_bounds_to_pixel_box(
         reference_plot_bounds, image_width, image_height
