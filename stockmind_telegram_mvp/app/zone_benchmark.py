@@ -14,6 +14,7 @@ from pathlib import Path, PurePosixPath
 
 from PIL import Image
 
+from .annotation_intake import _strip_annotation_metadata
 from .overlay_engine import prepare_chart_image
 from .zone_evaluation import evaluate_zone_predictions, _finite_mean
 from .plot_evaluation import aggregate_plot_boundary_accuracy
@@ -511,6 +512,26 @@ def _load_and_verify_image(record, manifest_dir, line_number, max_image_bytes):
             f"line {line_number} ({fixture_id}): screenshot is not EXIF-normalized; "
             "run annotation_intake and use its canonical image"
         )
+
+    # Annotation intake also removes descriptive metadata and untrusted bytes
+    # outside the image container. Recheck that policy here: a hand-authored
+    # manifest must not bypass intake and introduce private EXIF/XMP/IPTC fields,
+    # non-allowlisted PNG/JPEG/WEBP chunks, or trailing payloads into a benchmark.
+    try:
+        metadata_clean_bytes = _strip_annotation_metadata(
+            image_bytes, max_image_bytes
+        )
+    except (OSError, SyntaxError, TypeError, ValueError) as exc:
+        raise ValueError(
+            f"line {line_number} ({fixture_id}): screenshot metadata could not be "
+            "safely validated; run annotation_intake and use its canonical image"
+        ) from exc
+    if metadata_clean_bytes != image_bytes:
+        raise ValueError(
+            f"line {line_number} ({fixture_id}): screenshot is not metadata-cleaned; "
+            "run annotation_intake and use its canonical image"
+        )
+
     # Inspect the same bounded bytes that were hashed and validated; do not
     # reopen a path that could have changed between those operations.
     with Image.open(BytesIO(image_bytes)) as image:
