@@ -80,6 +80,11 @@ async def send_analysis_text(message, status, text: str) -> bool:
     Telegram explicitly rejects that edit as impossible. For ambiguous network
     failures, do not send a second copy: Telegram may already have applied the edit.
     """
+    # Telegram rejects empty sendMessage text. Treat an empty model result as
+    # an undelivered response without issuing a doomed request or editing status.
+    if text == "":
+        return False
+
     chunks = split_telegram_text(text)
     first_chunk = chunks[0]
 
