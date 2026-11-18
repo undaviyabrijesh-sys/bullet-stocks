@@ -211,7 +211,12 @@ def _validate_versioned_prediction_origin(
                 f"{prefix}[{index}].origin must be user_marked or ai_inferred for {prediction_metadata['prompt_version']}"
             )
         zone_type = zone.get("zone_type")
-        if isinstance(zone_type, str) and zone_type in {"supply", "demand"} and "label" in zone:
+        if not isinstance(zone_type, str) or zone_type not in {"supply", "demand"}:
+            raise ValueError(
+                f"{prefix}[{index}].zone_type must be supply or demand for "
+                f"{prediction_metadata['prompt_version']}"
+            )
+        if "label" in zone:
             expected_label = f"{'USER' if origin == 'user_marked' else 'AI'} {zone_type.upper()}"
             if zone.get("label") != expected_label:
                 raise ValueError(
