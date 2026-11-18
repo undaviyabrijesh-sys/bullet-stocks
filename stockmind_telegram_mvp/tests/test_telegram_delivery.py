@@ -16,6 +16,24 @@ from stockmind_telegram_mvp.app.telegram_delivery import (
 
 
 class AnalysisDeliveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_empty_analysis_is_not_sent_or_used_to_edit_status(self):
+        message = SimpleNamespace(answer=AsyncMock())
+        status = SimpleNamespace(edit_text=AsyncMock())
+
+        delivered = await send_analysis_text(message, status, "")
+
+        self.assertFalse(delivered)
+        message.answer.assert_not_awaited()
+        status.edit_text.assert_not_awaited()
+
+    async def test_empty_analysis_without_status_does_not_send_empty_reply(self):
+        message = SimpleNamespace(answer=AsyncMock())
+
+        delivered = await send_analysis_text(message, None, "")
+
+        self.assertFalse(delivered)
+        message.answer.assert_not_awaited()
+
     async def test_successful_status_edit_returns_true(self):
         message = SimpleNamespace(answer=AsyncMock())
         status = SimpleNamespace(edit_text=AsyncMock())
