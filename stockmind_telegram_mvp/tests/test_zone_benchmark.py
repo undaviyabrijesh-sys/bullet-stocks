@@ -230,6 +230,44 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         )
 
 
+    def test_rejects_screenshots_with_embedded_descriptive_metadata(self):
+        from PIL.PngImagePlugin import PngInfo
+        from stockmind_telegram_mvp.app.annotation_intake import _strip_annotation_metadata
+
+        record = self._record("metadata-bearing")
+        image_path = self.root / record["image_file"]
+        pnginfo = PngInfo()
+        pnginfo.add_text("Author", "Private annotator metadata")
+        output = BytesIO()
+        Image.new("RGB", (40, 30), "white").save(
+            output, format="PNG", pnginfo=pnginfo
+        )
+        metadata_bearing_bytes = output.getvalue()
+        metadata_clean_bytes = _strip_annotation_metadata(
+            metadata_bearing_bytes, 5 * 1024 * 1024
+        )
+        self.assertNotEqual(metadata_clean_bytes, metadata_bearing_bytes)
+
+        image_path.write_bytes(metadata_bearing_bytes)
+        record["image_sha256"] = hashlib.sha256(
+            metadata_bearing_bytes
+        ).hexdigest()
+        self._refresh_adjudication_image_hash(record)
+        self._write(record)
+
+        with self.assertRaisesRegex(ValueError, "screenshot is not metadata-cleaned"):
+            evaluate_benchmark_manifest(self.manifest)
+
+        # The exact canonical bytes produced by annotation intake remain valid.
+        image_path.write_bytes(metadata_clean_bytes)
+        record["image_sha256"] = hashlib.sha256(
+            metadata_clean_bytes
+        ).hexdigest()
+        self._refresh_adjudication_image_hash(record)
+        self._write(record)
+        result = evaluate_benchmark_manifest(self.manifest)
+        self.assertEqual(result["fixture_count"], 1)
+
     def test_report_aggregates_confidence_strata_without_scoring_suppressed_low_zones(self):
         missing_confidence = _prediction()
         missing_confidence.pop("confidence")
