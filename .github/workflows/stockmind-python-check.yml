@@ -29,11 +29,13 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: stockmind_telegram_mvp/requirements.txt
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r stockmind_telegram_mvp/requirements.txt
       - name: Compile application modules
         run: python -m compileall -q stockmind_telegram_mvp/app
-      - name: Run overlay tests
+      - name: Run full StockMind test suite
         run: python -m unittest discover -s stockmind_telegram_mvp/tests -v
