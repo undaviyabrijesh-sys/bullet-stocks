@@ -1168,8 +1168,8 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r"predicted_zones\[0\].origin"):
             evaluate_benchmark_manifest(self.manifest)
 
-    def test_v9_manifest_rejects_unhashable_zone_type_as_validation_error(self):
-        for malformed_zone_type in ([], {}):
+    def test_v9_manifest_rejects_invalid_zone_types_as_validation_errors(self):
+        for malformed_zone_type in ([], {}, "other"):
             with self.subTest(zone_type=malformed_zone_type):
                 zone = _prediction(
                     zone_type=malformed_zone_type,
@@ -1182,7 +1182,7 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
                     predicted_zones=[zone],
                 )
                 self._write(record)
-                with self.assertRaisesRegex(ValueError, "invalid zone_type"):
+                with self.assertRaisesRegex(ValueError, "zone_type must be supply or demand"):
                     evaluate_benchmark_manifest(self.manifest)
 
     def test_v9_manifest_accepts_versioned_zone_evidence_contract(self):
