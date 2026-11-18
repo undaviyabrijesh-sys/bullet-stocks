@@ -197,7 +197,7 @@ def _validate_versioned_prediction_confidence(
 def _validate_versioned_prediction_origin(
     prediction_metadata, predicted_zones, line_number, fixture_id
 ):
-    """Require explicit origin provenance and consistent labels for v7/v8 predictions."""
+    """Require explicit origin provenance and consistent labels for v7/v8/v9 predictions."""
     if prediction_metadata.get("prompt_version") not in {"dns-chart-v7", "dns-chart-v8", "dns-chart-v9"}:
         return
 
@@ -211,7 +211,7 @@ def _validate_versioned_prediction_origin(
                 f"{prefix}[{index}].origin must be user_marked or ai_inferred for {prediction_metadata['prompt_version']}"
             )
         zone_type = zone.get("zone_type")
-        if zone_type in {"supply", "demand"} and "label" in zone:
+        if isinstance(zone_type, str) and zone_type in {"supply", "demand"} and "label" in zone:
             expected_label = f"{'USER' if origin == 'user_marked' else 'AI'} {zone_type.upper()}"
             if zone.get("label") != expected_label:
                 raise ValueError(
