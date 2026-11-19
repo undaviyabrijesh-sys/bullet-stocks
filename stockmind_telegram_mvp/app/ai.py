@@ -11,6 +11,7 @@ import httpx
 from openai import AsyncOpenAI
 
 from .tapetide import TapetideAPIError
+from .chart_limits import MAX_CHART_ZONES
 from .strict_json import loads as strict_json_loads
 from .price_axis import parse_zone_price_bounds
 from .unicode_utils import normalize_unicode_scalars
@@ -221,7 +222,7 @@ CHART_RESPONSE_FORMAT = {
                 },
                 "zones": {
                     "type": "array",
-                    "maxItems": 8,
+                    "maxItems": MAX_CHART_ZONES,
                     "items": {
                         "type": "object",
                         "additionalProperties": False,
@@ -264,7 +265,6 @@ CHART_PROMPT_SHA256 = hashlib.sha256(
     ).encode("utf-8")
 ).hexdigest()
 
-MAX_CHART_ZONES = 8
 
 # Bound both provider spend and the amount of market data copied into model context.
 OPENAI_REQUEST_TIMEOUT_SECONDS = 90.0

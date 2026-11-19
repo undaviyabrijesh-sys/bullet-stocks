@@ -4,9 +4,11 @@ from io import BytesIO
 
 from PIL import Image, ImageDraw, ImageOps, UnidentifiedImageError
 
+from .chart_limits import MAX_CHART_ZONES
+
 
 MAX_CHART_IMAGE_PIXELS = 25_000_000
-MAX_OVERLAY_ZONES = 8
+MAX_OVERLAY_ZONES = MAX_CHART_ZONES
 MAX_OVERLAY_PNG_BYTES = 9_000_000
 SUPPORTED_IMAGE_MIME_TYPES = {
     "JPEG": "image/jpeg",

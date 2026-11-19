@@ -7,11 +7,12 @@ Optional price-axis scoring requires manually verified axis anchors.
 from functools import lru_cache
 import math
 
+from .chart_limits import MAX_CHART_ZONES
 from .overlay_engine import normalized_plot_bounds_to_pixel_box, normalized_zone_to_pixel_box
 from .price_axis import calibrate_price_axis, parse_zone_price_bounds, zone_price_bounds
 from .plot_evaluation import build_plot_boundary_accuracy, validate_evaluation_image_dimensions
 
-MAX_EVALUATED_ZONES = 8
+MAX_EVALUATED_ZONES = MAX_CHART_ZONES
 ZONE_TYPES = {"supply", "demand"}
 
 

@@ -1,5 +1,8 @@
 import unittest
 
+from stockmind_telegram_mvp.app.chart_limits import MAX_CHART_ZONES
+from stockmind_telegram_mvp.app.overlay_engine import MAX_OVERLAY_ZONES
+from stockmind_telegram_mvp.app.zone_evaluation import MAX_EVALUATED_ZONES
 from stockmind_telegram_mvp.app.ai import (
     CHART_IMAGE_INSTRUCTIONS,
     CHART_IMAGE_PROMPT,
@@ -42,6 +45,12 @@ def zone(**overrides):
 
 
 class ChartResponseValidationTests(unittest.TestCase):
+    def test_model_renderer_and_evaluator_share_one_zone_limit(self):
+        self.assertEqual(MAX_OVERLAY_ZONES, MAX_CHART_ZONES)
+        self.assertEqual(MAX_EVALUATED_ZONES, MAX_CHART_ZONES)
+        schema = CHART_RESPONSE_FORMAT["json_schema"]["schema"]
+        self.assertEqual(schema["properties"]["zones"]["maxItems"], MAX_CHART_ZONES)
+
     def test_preserves_valid_zone_and_normalizes_analysis(self):
         result = sanitize_chart_analysis(payload(
             [zone()],
@@ -112,7 +121,7 @@ class ChartResponseValidationTests(unittest.TestCase):
 
         result = sanitize_chart_analysis(payload(invalid_zones, analysis="Zones are uncertain."))
 
-        self.assertEqual(len(result["zones"]), 8)
+        self.assertEqual(len(result["zones"]), MAX_CHART_ZONES)
         for item in result["zones"]:
             self.assertFalse(item["draw_overlay"])
             self.assertEqual(
@@ -278,7 +287,7 @@ class ChartResponseValidationTests(unittest.TestCase):
     def test_structured_schema_bounds_coordinates_and_zone_count(self):
         schema = CHART_RESPONSE_FORMAT["json_schema"]["schema"]
         zone_schema = schema["properties"]["zones"]
-        self.assertEqual(zone_schema["maxItems"], 8)
+        self.assertEqual(zone_schema["maxItems"], MAX_CHART_ZONES)
         properties = zone_schema["items"]["properties"]
         self.assertIn("confidence", zone_schema["items"]["required"])
         self.assertIn("origin", zone_schema["items"]["required"])
