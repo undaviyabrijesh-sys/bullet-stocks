@@ -9,7 +9,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 
 from .ai import ResearchAI, ResearchTurnDeadlineExceeded, ResearchResponseIncomplete
-from .annotation_intake import _strip_annotation_metadata
+from .annotation_intake import AnnotationImageTooLargeError, _strip_annotation_metadata
 from .crypto import BinanceMarketData
 from .overlay_engine import ChartImageError, prepare_chart_image, _render_overlay_prepared
 from .image_upload import BoundedBytesIO, UploadTooLargeError
@@ -64,12 +64,12 @@ def _prepare_chart_image_for_vision(image_bytes: bytes) -> tuple[bytes, str]:
         sanitized_bytes = _strip_annotation_metadata(
             canonical_bytes, MAX_CHART_IMAGE_BYTES
         )
+    except AnnotationImageTooLargeError as exc:
+        raise ChartImageError(
+            "too_large",
+            "The privacy-cleaned chart image exceeds the processing limit. Resize or re-export the screenshot.",
+        ) from exc
     except ValueError as exc:
-        if "exceeds max_image_bytes" in str(exc):
-            raise ChartImageError(
-                "too_large",
-                "The privacy-cleaned chart image exceeds the processing limit. Resize or re-export the screenshot.",
-            ) from exc
         raise ChartImageError(
             "invalid",
             "The chart image could not be safely sanitized. Please re-export it and try again.",
