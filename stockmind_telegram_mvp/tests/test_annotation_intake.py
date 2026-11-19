@@ -25,6 +25,14 @@ def _png_bytes(size=(64, 48)):
     return output.getvalue()
 
 
+def _synthetic_icc_profile(color_space=b"RGB "):
+    profile = bytearray(128)
+    profile[:4] = (128).to_bytes(4, "big")
+    profile[16:20] = color_space
+    profile[36:40] = b"acsp"
+    return bytes(profile)
+
+
 class AnnotationIntakeTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -36,6 +44,44 @@ class AnnotationIntakeTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_sanitizer_drops_malformed_and_mode_incompatible_icc_profiles(self):
+        for profile in (b"not-an-icc-profile", _synthetic_icc_profile(b"GRAY")):
+            with self.subTest(profile=profile[:8]):
+                output = BytesIO()
+                Image.new("RGB", (64, 48), (24, 80, 140)).save(
+                    output, format="PNG", icc_profile=profile
+                )
+                original = output.getvalue()
+
+                sanitized = _strip_annotation_metadata(
+                    original, 5 * 1024 * 1024
+                )
+
+                self.assertNotEqual(sanitized, original)
+                with Image.open(BytesIO(sanitized)) as image:
+                    self.assertNotIn("icc_profile", image.info)
+                    self.assertEqual(image.getpixel((10, 10)), (24, 80, 140))
+
+    def test_sanitizer_preserves_a_valid_icc_profile_when_reencoding(self):
+        from PIL.PngImagePlugin import PngInfo
+
+        profile = _synthetic_icc_profile()
+        pnginfo = PngInfo()
+        pnginfo.add_text("Author", "Private annotator name")
+        output = BytesIO()
+        Image.new("RGB", (64, 48), (24, 80, 140)).save(
+            output, format="PNG", pnginfo=pnginfo, icc_profile=profile
+        )
+
+        sanitized = _strip_annotation_metadata(
+            output.getvalue(), 5 * 1024 * 1024
+        )
+
+        with Image.open(BytesIO(sanitized)) as image:
+            self.assertEqual(image.info.get("icc_profile"), profile)
+            self.assertNotIn("Author", image.info)
+            self.assertEqual(image.getpixel((10, 10)), (24, 80, 140))
 
     def test_metadata_free_image_still_obeys_source_byte_budget(self):
         with self.assertRaises(AnnotationImageTooLargeError):
