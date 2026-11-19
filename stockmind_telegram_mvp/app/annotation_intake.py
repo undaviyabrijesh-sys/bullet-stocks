@@ -287,7 +287,7 @@ def _has_embedded_descriptive_metadata(image):
 
 
 class AnnotationImageTooLargeError(ValueError):
-    """Raised when metadata removal pushes a chart image over its byte budget."""
+    """Raised when a source or metadata-cleaned chart image exceeds its byte budget."""
 
 
 def _strip_annotation_metadata(image_bytes, max_image_bytes):

@@ -487,8 +487,22 @@ class AnnotationIntakeTests(unittest.TestCase):
         Image.new("RGB", (64, 48), "white").save(
             output, format="PNG", pnginfo=pnginfo
         )
-        with self.assertRaisesRegex(AnnotationImageTooLargeError, "Metadata-cleaned chart image exceeds"):
-            _strip_annotation_metadata(output.getvalue(), max_image_bytes=1)
+        original = output.getvalue()
+        # Keep the source within budget, then simulate a re-encoder whose output
+        # grows beyond it. This specifically exercises the post-sanitization cap.
+        max_image_bytes = len(original)
+
+        def oversized_reencode(_image, destination, **_kwargs):
+            destination.write(b"x" * (max_image_bytes + 1))
+
+        with patch.object(Image.Image, "save", new=oversized_reencode):
+            with self.assertRaisesRegex(
+                AnnotationImageTooLargeError,
+                "Metadata-cleaned chart image exceeds",
+            ):
+                _strip_annotation_metadata(
+                    original, max_image_bytes=max_image_bytes
+                )
         self.assertFalse(self.output.exists())
 
     def test_rejects_oversized_image_before_creating_outputs(self):
