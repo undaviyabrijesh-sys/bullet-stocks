@@ -280,7 +280,7 @@ def _has_embedded_descriptive_metadata(image):
     try:
         if image.getexif():
             return True
-    except (OSError, SyntaxError, TypeError, ValueError) as exc:
+    except (EOFError, OSError, SyntaxError, TypeError, ValueError) as exc:
         raise ValueError("could not safely inspect screenshot metadata") from exc
     if image.format == "JPEG" and _jpeg_contains_unexposed_metadata(image):
         return True
@@ -320,6 +320,8 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
         opened_image = Image.open(BytesIO(image_bytes))
     except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
         raise ValueError("chart image exceeds the supported pixel limit") from exc
+    except EOFError as exc:
+        raise ValueError("chart image is truncated or malformed") from exc
 
     with opened_image as image:
         image_format = image.format
@@ -350,6 +352,8 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
             image.load()
         except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
             raise ValueError("chart image exceeds the supported pixel limit") from exc
+        except EOFError as exc:
+            raise ValueError("chart image is truncated or malformed") from exc
 
         source_icc_profile = image.info.get("icc_profile")
         target_mode = image.mode
@@ -432,9 +436,10 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
             f"({max_image_bytes}); resize or re-export the screenshot."
         )
 
-    with Image.open(BytesIO(sanitized_bytes)) as sanitized:
-        sanitized.load()
-        remaining_metadata = _has_embedded_descriptive_metadata(sanitized)
+    try:
+        with Image.open(BytesIO(sanitized_bytes)) as sanitized:
+            sanitized.load()
+            remaining_metadata = _has_embedded_descriptive_metadata(sanitized)
         if sanitized.format == "JPEG":
             remaining_metadata = (
                 remaining_metadata
@@ -450,8 +455,10 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
                 remaining_metadata
                 or _webp_contains_unexposed_metadata(sanitized_bytes)
             )
-        if remaining_metadata:
-            raise ValueError("could not remove embedded screenshot metadata safely")
+            if remaining_metadata:
+                raise ValueError("could not remove embedded screenshot metadata safely")
+    except EOFError as exc:
+        raise ValueError("metadata-cleaned chart image could not be verified safely") from exc
 
     return sanitized_bytes
 
