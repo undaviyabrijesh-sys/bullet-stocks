@@ -8,7 +8,7 @@ from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
-from PIL import Image
+from PIL import Image, ImageCms
 
 from stockmind_telegram_mvp.app.annotation_intake import (
     AnnotationImageTooLargeError,
@@ -66,7 +66,7 @@ class AnnotationIntakeTests(unittest.TestCase):
     def test_sanitizer_preserves_a_valid_icc_profile_when_reencoding(self):
         from PIL.PngImagePlugin import PngInfo
 
-        profile = _synthetic_icc_profile()
+        profile = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
         pnginfo = PngInfo()
         pnginfo.add_text("Author", "Private annotator name")
         output = BytesIO()
