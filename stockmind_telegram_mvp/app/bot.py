@@ -9,6 +9,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 
 from .ai import ResearchAI, ResearchTurnDeadlineExceeded, ResearchResponseIncomplete
+from .annotation_intake import _strip_annotation_metadata
 from .crypto import BinanceMarketData
 from .overlay_engine import ChartImageError, prepare_chart_image, _render_overlay_prepared
 from .image_upload import BoundedBytesIO, UploadTooLargeError
@@ -52,6 +53,33 @@ logger = logging.getLogger(__name__)
 
 IST = ZoneInfo("Asia/Kolkata")
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+
+
+def _prepare_chart_image_for_vision(image_bytes: bytes) -> tuple[bytes, str]:
+    """Normalize orientation and remove descriptive metadata before provider upload."""
+    canonical_bytes, mime_type = prepare_chart_image(
+        image_bytes, max_output_bytes=MAX_CHART_IMAGE_BYTES
+    )
+    try:
+        sanitized_bytes = _strip_annotation_metadata(
+            canonical_bytes, MAX_CHART_IMAGE_BYTES
+        )
+    except ValueError as exc:
+        if "exceeds max_image_bytes" in str(exc):
+            raise ChartImageError(
+                "too_large",
+                "The privacy-cleaned chart image exceeds the processing limit. Resize or re-export the screenshot.",
+            ) from exc
+        raise ChartImageError(
+            "invalid",
+            "The chart image could not be safely sanitized. Please re-export it and try again.",
+        ) from exc
+    except (OSError, SyntaxError, TypeError) as exc:
+        raise ChartImageError(
+            "invalid",
+            "The chart image could not be safely sanitized. Please re-export it and try again.",
+        ) from exc
+    return sanitized_bytes, mime_type
 
 market = TapetideClient(TAPETIDE_TOKEN)
 crypto_market = BinanceMarketData()
@@ -375,11 +403,9 @@ async def _run_research_locked_impl(
 
     if image_bytes is not None:
         try:
-            # Inspect actual bytes and normalize EXIF orientation once. The exact
-            # same canonical bytes go to vision, hashing and Pillow overlay rendering.
-            image_bytes, image_mime_type = prepare_chart_image(
-                image_bytes, max_output_bytes=MAX_CHART_IMAGE_BYTES
-            )
+            # Normalize EXIF orientation and strip descriptive/container metadata.
+            # The exact same sanitized bytes go to vision, hashing and overlay rendering.
+            image_bytes, image_mime_type = _prepare_chart_image_for_vision(image_bytes)
         except ChartImageError as exc:
             await message.answer(chart_image_error_message(language, exc.code))
             return
