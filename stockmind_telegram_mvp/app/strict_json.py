@@ -24,6 +24,15 @@ def _finite_float(token):
         raise StrictJSONError(
             f"JSON number {token!r} is outside the supported finite numeric range"
         )
+    # float() can also silently underflow a non-zero JSON number to 0.0.
+    # That is dangerous for normalized chart coordinates and numeric tool
+    # arguments because a tiny but intentional value becomes an exact boundary.
+    if value == 0.0:
+        mantissa = token.lower().split("e", 1)[0]
+        if any(digit in "123456789" for digit in mantissa):
+            raise StrictJSONError(
+                f"JSON number {token!r} underflows the supported finite numeric range"
+            )
     return value
 
 

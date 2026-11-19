@@ -40,6 +40,29 @@ class StrictJSONTests(unittest.TestCase):
             {"large": 1000.0, "small": -0.0025},
         )
 
+    def test_rejects_nonzero_numbers_that_underflow_to_zero(self):
+        for token in ("1e-9999", "-1e-9999", "1.0e-9999", "1e-324"):
+            with self.subTest(token=token), self.assertRaisesRegex(
+                StrictJSONError, "underflows the supported finite numeric range"
+            ):
+                loads('{"coordinate":' + token + '}')
+
+    def test_accepts_exact_zero_with_extreme_exponent(self):
+        self.assertEqual(loads('{"zero":0e-9999}'), {"zero": 0.0})
+
+    def test_accepts_smallest_representable_subnormal_float(self):
+        self.assertGreater(loads('{"small":5e-324}')["small"], 0.0)
+
+    def test_model_tool_arguments_reject_underflow_before_dispatch(self):
+        for raw in (
+            '{"limit":1e-9999}',
+            '{"filters":{"threshold":-1e-9999}}',
+        ):
+            with self.subTest(raw=raw), self.assertRaisesRegex(
+                ValueError, "valid JSON"
+            ):
+                _parse_tool_arguments(raw)
+
     def test_model_tool_arguments_reject_exponent_overflow_before_dispatch(self):
         for raw in (
             '{"limit":1e999}',

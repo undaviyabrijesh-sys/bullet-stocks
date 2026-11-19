@@ -9,6 +9,8 @@ The decoder rejects:
 - The non-standard constants `NaN`, `Infinity` and `-Infinity`.
 - Exponent-form JSON numbers that Python would otherwise convert to a
   non-finite float (for example, `1e999`).
+- Non-zero JSON numbers that Python would silently underflow to `0.0`
+  (for example, `1e-9999`), which could collapse a chart coordinate or tool value.
 - JSON nesting that exceeds the decoder's supported recursion depth,
   normalized to the same controlled `StrictJSONError` used for other invalid input.
 
@@ -16,6 +18,13 @@ The last case matters because `1e999` is valid JSON number syntax, but Python's
 default float conversion produces positive infinity. Without an explicit
 finite-value check, an argument such as `{"limit":1e999}` could pass the
 strict parser and reach a market-data provider as an infinite numeric value.
+
+The reverse range boundary matters too: a non-zero value such as `1e-9999`
+is valid JSON, but Python's float conversion silently rounds it to `0.0`.
+For normalized chart coordinates or numeric tool arguments, that can turn a
+small non-zero value into an exact edge value. StockMind rejects only non-zero
+tokens that underflow all the way to zero; exact zero and representable
+subnormal floats remain supported.
 
 Finite exponent-form values remain supported. Ordinary strings containing
 words such as `"NaN"` or `"Infinity"` are also valid.
