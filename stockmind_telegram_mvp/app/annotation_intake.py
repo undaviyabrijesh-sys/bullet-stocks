@@ -401,6 +401,8 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
             if image.mode == "P" and "transparency" in image.info:
                 save_options["transparency"] = image.info["transparency"]
             save_options["optimize"] = True
+        else:
+            raise ValueError("Please use a JPEG, PNG or WEBP chart screenshot.")
 
         # Re-check after format-specific mode conversion. Never attach a
         # grayscale/CMYK profile to RGB output or pass a malformed ICC block
@@ -410,8 +412,6 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
         )
         if icc_profile is not None:
             save_options["icc_profile"] = icc_profile
-        else:
-            raise ValueError("Please use a JPEG, PNG or WEBP chart screenshot.")
 
         # Some Pillow format plugins copy metadata directly from image.info
         # even when it is not passed as a save option (notably WEBP EXIF/XMP).
