@@ -106,6 +106,7 @@ def validate_chart_image(image_bytes: bytes) -> str:
         SyntaxError,
         Image.DecompressionBombError,
         Image.DecompressionBombWarning,
+        EOFError,
     ) as exc:
         raise ChartImageError("invalid", "The upload is not a valid JPEG, PNG or WEBP image. Please resend the chart.") from exc
 
@@ -148,45 +149,67 @@ def prepare_chart_image(
 
     mime_type = validate_chart_image(image_bytes)
 
-    with Image.open(BytesIO(image_bytes)) as image:
-        orientation = image.getexif().get(274, 1)
-        if (
-            isinstance(orientation, bool)
-            or not isinstance(orientation, int)
-            or orientation not in range(1, 9)
-        ):
-            raise ChartImageError("invalid", "The chart image contains invalid EXIF orientation metadata.")
-        if orientation == 1:
-            return image_bytes, mime_type
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            orientation = image.getexif().get(274, 1)
+            if (
+                isinstance(orientation, bool)
+                or not isinstance(orientation, int)
+                or orientation not in range(1, 9)
+            ):
+                raise ChartImageError("invalid", "The chart image contains invalid EXIF orientation metadata.")
+            if orientation == 1:
+                return image_bytes, mime_type
 
-        image_format = image.format
-        oriented = ImageOps.exif_transpose(image)
-        save_options = {}
-        source_profile = image.info.get("icc_profile")
+            image_format = image.format
+            oriented = ImageOps.exif_transpose(image)
+            save_options = {}
+            source_profile = image.info.get("icc_profile")
 
-        if image_format == "JPEG":
-            if oriented.mode not in {"L", "RGB", "CMYK"}:
-                oriented = oriented.convert("RGB")
-            save_options.update({"quality": 95, "optimize": True})
-        elif image_format == "WEBP":
-            if oriented.mode not in {"L", "RGB", "RGBA"}:
-                oriented = oriented.convert("RGB")
-            save_options.update({"quality": 95, "method": 6})
-        elif image_format == "PNG":
-            save_options["optimize"] = True
-        else:
-            raise ChartImageError("unsupported", "Please send a JPEG, PNG or WEBP chart image.")
+            if image_format == "JPEG":
+                if oriented.mode not in {"L", "RGB", "CMYK"}:
+                    oriented = oriented.convert("RGB")
+                save_options.update({"quality": 95, "optimize": True})
+            elif image_format == "WEBP":
+                if oriented.mode not in {"L", "RGB", "RGBA"}:
+                    oriented = oriented.convert("RGB")
+                save_options.update({"quality": 95, "method": 6})
+            elif image_format == "PNG":
+                save_options["optimize"] = True
+            else:
+                raise ChartImageError("unsupported", "Please send a JPEG, PNG or WEBP chart image.")
 
-        # Check against the final encoded pixel mode, after any conversion.
-        # For example, a grayscale/CMYK WebP may be expanded to RGB by Pillow;
-        # its original non-RGB profile must not be attached to those RGB bytes.
-        icc_profile = _compatible_icc_profile(source_profile, oriented.mode)
-        if icc_profile:
-            save_options["icc_profile"] = icc_profile
+            # Check against the final encoded pixel mode, after any conversion.
+            # For example, a grayscale/CMYK WebP may be expanded to RGB by Pillow;
+            # its original non-RGB profile must not be attached to those RGB bytes.
+            icc_profile = _compatible_icc_profile(source_profile, oriented.mode)
+            if icc_profile:
+                save_options["icc_profile"] = icc_profile
 
-        output = BytesIO()
-        oriented.save(output, format=image_format, **save_options)
-        normalized_bytes = output.getvalue()
+            output = BytesIO()
+            oriented.save(output, format=image_format, **save_options)
+            normalized_bytes = output.getvalue()
+
+    except ChartImageError:
+        raise
+    except (
+        ValueError,
+        TypeError,
+        UnidentifiedImageError,
+        OSError,
+        EOFError,
+        SyntaxError,
+        Image.DecompressionBombError,
+        Image.DecompressionBombWarning,
+    ) as exc:
+        # EXIF parsing, transposition and re-encoding are separate Pillow
+        # operations from the initial integrity check. Malformed metadata can
+        # fail here too; normalize it before the bot reaches provider submission.
+        raise ChartImageError(
+            "invalid",
+            "The chart image could not be normalized safely. Please resend the screenshot.",
+        ) from exc
+
 
     if max_output_bytes is not None and len(normalized_bytes) > max_output_bytes:
         raise ChartImageError(

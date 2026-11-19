@@ -219,6 +219,39 @@ class OverlayRendererTests(unittest.TestCase):
         self.assertEqual(mime_type, "image/png")
         validate.assert_called_once_with(original)
 
+    def test_normalizes_eof_errors_from_image_integrity_checks(self):
+        with patch.object(
+            overlay_engine.Image,
+            "open",
+            side_effect=EOFError("truncated image container"),
+        ):
+            self._assert_error_code(
+                lambda: validate_chart_image(b"untrusted image bytes"),
+                "invalid",
+            )
+
+    def test_normalizes_exif_metadata_parse_errors_before_vision_request(self):
+        with patch.object(
+            overlay_engine.Image.Image,
+            "getexif",
+            side_effect=EOFError("truncated EXIF metadata"),
+        ):
+            self._assert_error_code(
+                lambda: prepare_chart_image(sample_image()),
+                "invalid",
+            )
+
+    def test_normalizes_exif_transpose_errors_before_vision_request(self):
+        with patch.object(
+            overlay_engine.ImageOps,
+            "exif_transpose",
+            side_effect=ValueError("malformed orientation metadata"),
+        ):
+            self._assert_error_code(
+                lambda: prepare_chart_image(oriented_sample_image()),
+                "invalid",
+            )
+
     def test_rejects_truncated_pixel_data_or_container_before_vision_request(self):
         # Pillow's verify() alone accepts this truncated JPEG; full pixel decoding
         # detects the missing image data before the bot sends it to the vision API.
