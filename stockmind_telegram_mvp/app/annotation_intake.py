@@ -15,7 +15,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from .overlay_engine import prepare_chart_image
+from .overlay_engine import MAX_CHART_IMAGE_PIXELS, prepare_chart_image
 
 DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024
 _FIXTURE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -293,9 +293,10 @@ class AnnotationImageTooLargeError(ValueError):
 def _strip_annotation_metadata(image_bytes, max_image_bytes):
     """Remove descriptive metadata while preserving the canonical visible image.
 
-    Only a single JPEG, PNG or WEBP frame is accepted, including for direct
-    callers that bypass the normal chart-image preparation path. Images without
-    descriptive metadata remain byte-for-byte unchanged. Metadata-bearing JPEGs
+    Only a single JPEG, PNG or WEBP frame within the shared 25-megapixel limit
+    is accepted, including for direct callers that bypass the normal chart-image
+    preparation path. The image is decoded before the metadata-free fast path.
+    Images without descriptive metadata remain byte-for-byte unchanged. Metadata-bearing JPEGs
     are re-encoded at maximum quality with 4:4:4 chroma; WEBP is re-encoded
     losslessly; PNG remains lossless. The resulting bytes—not the original
     upload—are the hash-bound image that must be used for prediction.
@@ -311,7 +312,12 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
             f"Source chart image exceeds max_image_bytes ({max_image_bytes})."
         )
 
-    with Image.open(BytesIO(image_bytes)) as image:
+    try:
+        opened_image = Image.open(BytesIO(image_bytes))
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
+        raise ValueError("chart image exceeds the supported pixel limit") from exc
+
+    with opened_image as image:
         image_format = image.format
         if image_format not in {"JPEG", "PNG", "WEBP"}:
             raise ValueError("Please use a JPEG, PNG or WEBP chart screenshot.")
@@ -319,6 +325,27 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
             raise ValueError(
                 "Animated images are not supported. Please send a single chart frame."
             )
+        width, height = image.size
+        if (
+            isinstance(width, bool)
+            or not isinstance(width, int)
+            or isinstance(height, bool)
+            or not isinstance(height, int)
+            or width < 1
+            or height < 1
+            or width * height > MAX_CHART_IMAGE_PIXELS
+        ):
+            raise ValueError(
+                f"chart image exceeds the {MAX_CHART_IMAGE_PIXELS:,}-pixel limit"
+            )
+        try:
+            # Decode even on the metadata-free fast path. The normal intake
+            # pipeline also performs full container verification in
+            # prepare_chart_image; this keeps direct sanitizer callers within
+            # the same pixel and decoder-safety boundary.
+            image.load()
+        except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
+            raise ValueError("chart image exceeds the supported pixel limit") from exc
 
         has_descriptive_metadata = _has_embedded_descriptive_metadata(image)
         if image_format == "JPEG":
@@ -339,7 +366,6 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
         if not has_descriptive_metadata:
             return image_bytes
 
-        image.load()
         save_options = {}
         icc_profile = image.info.get("icc_profile")
         if icc_profile:

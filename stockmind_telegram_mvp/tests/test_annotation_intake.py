@@ -54,6 +54,26 @@ class AnnotationIntakeTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "max_image_bytes"):
                     _strip_annotation_metadata(b"not-an-image", invalid_budget)
 
+    def test_sanitizer_enforces_shared_pixel_limit_for_direct_callers(self):
+        with patch(
+            "stockmind_telegram_mvp.app.annotation_intake.MAX_CHART_IMAGE_PIXELS",
+            64 * 48 - 1,
+        ):
+            with self.assertRaisesRegex(ValueError, "pixel limit"):
+                _strip_annotation_metadata(
+                    self.image_bytes, 5 * 1024 * 1024
+                )
+
+    def test_sanitizer_normalizes_pillow_decompression_bomb_errors(self):
+        with patch(
+            "stockmind_telegram_mvp.app.annotation_intake.Image.open",
+            side_effect=Image.DecompressionBombError("synthetic bomb"),
+        ):
+            with self.assertRaisesRegex(ValueError, "pixel limit"):
+                _strip_annotation_metadata(
+                    self.image_bytes, 5 * 1024 * 1024
+                )
+
     def test_sanitizer_rejects_unsupported_static_formats_before_fast_path(self):
         output = BytesIO()
         Image.new("RGB", (16, 16), "white").save(output, format="BMP")
