@@ -440,21 +440,21 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
         with Image.open(BytesIO(sanitized_bytes)) as sanitized:
             sanitized.load()
             remaining_metadata = _has_embedded_descriptive_metadata(sanitized)
-        if sanitized.format == "JPEG":
-            remaining_metadata = (
-                remaining_metadata
-                or _jpeg_has_untrusted_container_tail(sanitized_bytes)
-            )
-        elif sanitized.format == "PNG":
-            remaining_metadata = (
-                remaining_metadata
-                or _png_contains_unexposed_metadata(sanitized_bytes)
-            )
-        elif sanitized.format == "WEBP":
-            remaining_metadata = (
-                remaining_metadata
-                or _webp_contains_unexposed_metadata(sanitized_bytes)
-            )
+            if sanitized.format == "JPEG":
+                remaining_metadata = (
+                    remaining_metadata
+                    or _jpeg_has_untrusted_container_tail(sanitized_bytes)
+                )
+            elif sanitized.format == "PNG":
+                remaining_metadata = (
+                    remaining_metadata
+                    or _png_contains_unexposed_metadata(sanitized_bytes)
+                )
+            elif sanitized.format == "WEBP":
+                remaining_metadata = (
+                    remaining_metadata
+                    or _webp_contains_unexposed_metadata(sanitized_bytes)
+                )
             if remaining_metadata:
                 raise ValueError("could not remove embedded screenshot metadata safely")
     except EOFError as exc:
