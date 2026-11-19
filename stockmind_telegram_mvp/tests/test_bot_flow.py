@@ -8,10 +8,14 @@ import importlib
 import os
 import unittest
 from datetime import datetime
+from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from unittest.mock import patch as environment_patch
+
+from PIL import Image
+from PIL.PngImagePlugin import PngInfo
 
 
 from stockmind_telegram_mvp.app.ai import ResearchTurnDeadlineExceeded, ResearchResponseIncomplete
@@ -34,6 +38,68 @@ _TEST_ENV = {
 }
 with environment_patch.dict(os.environ, _TEST_ENV):
     bot_module = importlib.import_module("stockmind_telegram_mvp.app.bot")
+
+
+class ChartImagePrivacyPreparationTests(unittest.TestCase):
+    def _metadata_png(self):
+        exif = Image.Exif()
+        exif[274] = 1
+        exif[315] = "Private annotator name"
+        pnginfo = PngInfo()
+        pnginfo.add_text("Comment", "Private screenshot note")
+        output = BytesIO()
+        Image.new("RGB", (64, 48), (24, 80, 140)).save(
+            output, format="PNG", exif=exif, pnginfo=pnginfo
+        )
+        return output.getvalue()
+
+    def test_strips_exif_and_png_text_before_vision_receives_image(self):
+        original = self._metadata_png()
+
+        prepared, mime_type = bot_module._prepare_chart_image_for_vision(original)
+
+        self.assertEqual(mime_type, "image/png")
+        self.assertNotEqual(prepared, original)
+        with Image.open(BytesIO(prepared)) as image:
+            self.assertEqual(image.size, (64, 48))
+            self.assertEqual(image.getpixel((10, 10)), (24, 80, 140))
+            self.assertFalse(image.getexif())
+            self.assertNotIn("Comment", image.info)
+
+    def test_metadata_free_screenshot_keeps_exact_original_bytes(self):
+        output = BytesIO()
+        Image.new("RGB", (64, 48), "white").save(output, format="PNG")
+        original = output.getvalue()
+
+        prepared, mime_type = bot_module._prepare_chart_image_for_vision(original)
+
+        self.assertEqual(mime_type, "image/png")
+        self.assertEqual(prepared, original)
+
+    def test_sanitization_size_overflow_uses_stable_too_large_error(self):
+        original = self._metadata_png()
+        with patch.object(
+            bot_module,
+            "_strip_annotation_metadata",
+            side_effect=ValueError("Metadata-cleaned chart image exceeds max_image_bytes (5242880)"),
+        ):
+            with self.assertRaises(ChartImageError) as raised:
+                bot_module._prepare_chart_image_for_vision(original)
+
+        self.assertEqual(raised.exception.code, "too_large")
+
+    def test_sanitization_failure_hides_internal_error_details(self):
+        original = self._metadata_png()
+        with patch.object(
+            bot_module,
+            "_strip_annotation_metadata",
+            side_effect=ValueError("private decoder detail"),
+        ):
+            with self.assertRaises(ChartImageError) as raised:
+                bot_module._prepare_chart_image_for_vision(original)
+
+        self.assertEqual(raised.exception.code, "invalid")
+        self.assertNotIn("private decoder detail", str(raised.exception))
 
 
 class OverlayOutcomeMessageTests(unittest.TestCase):
@@ -671,7 +737,7 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(
             bot_module,
-            "prepare_chart_image",
+            "_prepare_chart_image_for_vision",
             return_value=(b"normalized-chart", "image/png"),
         ):
             await bot_module.run_research(
@@ -720,7 +786,7 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
         }
         research = self.use_research(analyze_chart_image=AsyncMock(return_value=result))
         with patch.object(
-            bot_module, "prepare_chart_image",
+            bot_module, "_prepare_chart_image_for_vision",
             return_value=(b"normalized-chart", "image/png"),
         ) as prepare, patch.object(
             bot_module, "_render_overlay_prepared", return_value=(b"overlay-jpeg", 1)
@@ -729,9 +795,7 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
         ) as send_overlay:
             await bot_module.run_research(self.message, "Map BTC 1H DNS", b"chart-bytes", "image/png")
 
-        prepare.assert_called_once_with(
-            b"chart-bytes", max_output_bytes=bot_module.MAX_CHART_IMAGE_BYTES
-        )
+        prepare.assert_called_once_with(b"chart-bytes")
         research.analyze_chart_image.assert_awaited_once()
         self.assertEqual(research.analyze_chart_image.await_args.args[2], b"normalized-chart")
         self.assertEqual(research.analyze_chart_image.await_args.args[3], "image/png")
@@ -754,7 +818,7 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
         research = self.use_research(analyze_chart_image=AsyncMock(return_value=result))
 
         with patch.object(
-            bot_module, "prepare_chart_image",
+            bot_module, "_prepare_chart_image_for_vision",
             return_value=(b"normalized-chart", "image/png"),
         ), patch.object(
             bot_module, "_render_overlay_prepared",
@@ -780,7 +844,7 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
         research = self.use_research(analyze_chart_image=AsyncMock(return_value=result))
 
         with patch.object(
-            bot_module, "prepare_chart_image",
+            bot_module, "_prepare_chart_image_for_vision",
             return_value=(b"normalized-chart", "image/png"),
         ), patch.object(
             bot_module, "_render_overlay_prepared", return_value=(None, 0)
