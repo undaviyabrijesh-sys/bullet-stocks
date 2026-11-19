@@ -37,10 +37,15 @@ def _unique_object(pairs):
 
 
 def loads(value):
-    """Decode JSON, rejecting duplicate keys and non-finite numeric values."""
-    return json.loads(
-        value,
-        object_pairs_hook=_unique_object,
-        parse_constant=_reject_constant,
-        parse_float=_finite_float,
-    )
+    """Decode strict JSON and normalize excessive decoder nesting."""
+    try:
+        return json.loads(
+            value,
+            object_pairs_hook=_unique_object,
+            parse_constant=_reject_constant,
+            parse_float=_finite_float,
+        )
+    except RecursionError as exc:
+        raise StrictJSONError(
+            "JSON nesting exceeds the supported parser depth"
+        ) from exc

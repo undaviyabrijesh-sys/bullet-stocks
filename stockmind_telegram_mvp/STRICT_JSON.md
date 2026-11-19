@@ -9,6 +9,8 @@ The decoder rejects:
 - The non-standard constants `NaN`, `Infinity` and `-Infinity`.
 - Exponent-form JSON numbers that Python would otherwise convert to a
   non-finite float (for example, `1e999`).
+- JSON nesting that exceeds the decoder's supported recursion depth,
+  normalized to the same controlled `StrictJSONError` used for other invalid input.
 
 The last case matters because `1e999` is valid JSON number syntax, but Python's
 default float conversion produces positive infinity. Without an explicit

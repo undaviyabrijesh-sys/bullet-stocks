@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from stockmind_telegram_mvp.app.strict_json import StrictJSONError, loads
 from stockmind_telegram_mvp.app.ai import _parse_tool_arguments
@@ -48,6 +49,24 @@ class StrictJSONTests(unittest.TestCase):
                 ValueError, "valid JSON"
             ):
                 _parse_tool_arguments(raw)
+
+    def test_normalizes_decoder_recursion_errors(self):
+        with patch(
+            "stockmind_telegram_mvp.app.strict_json.json.loads",
+            side_effect=RecursionError("decoder nesting limit"),
+        ):
+            with self.assertRaisesRegex(
+                StrictJSONError, "JSON nesting exceeds the supported parser depth"
+            ):
+                loads("{}")
+
+    def test_model_tool_arguments_reject_decoder_recursion_errors_before_dispatch(self):
+        with patch(
+            "stockmind_telegram_mvp.app.strict_json.json.loads",
+            side_effect=RecursionError("decoder nesting limit"),
+        ):
+            with self.assertRaisesRegex(ValueError, "valid JSON"):
+                _parse_tool_arguments('{"limit":10}')
 
     def test_rejects_duplicate_keys_even_when_first_value_is_null(self):
         with self.assertRaisesRegex(StrictJSONError, "duplicate JSON object key 'prediction'"):
