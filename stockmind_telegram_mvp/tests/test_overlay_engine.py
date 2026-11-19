@@ -504,6 +504,36 @@ class OverlayRendererTests(unittest.TestCase):
         self.assertGreaterEqual(label_y, 36)
         self.assertLess(label_y, 324)
 
+    def test_label_bounding_box_offsets_are_accounted_for_inside_plot(self):
+        zone = {
+            "zone_type": "supply", "origin": "ai_inferred",
+            "draw_overlay": True, "confidence": "high",
+            "x_start": 0.2, "x_end": 0.8, "y_top": 0.3, "y_bottom": 0.5,
+        }
+        bounds = {"x_start": 0.05, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9}
+        # Simulate a font whose glyph box starts left and above its text origin.
+        with patch.object(
+            overlay_engine.ImageDraw.ImageDraw,
+            "textbbox",
+            autospec=True,
+            return_value=(-3, -4, 47, 12),
+        ), patch.object(
+            overlay_engine.ImageDraw.ImageDraw, "text", autospec=True
+        ) as text_draw:
+            result, count = render_overlay(
+                sample_image(), [zone], plot_bounds=bounds, require_plot_bounds=True
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(count, 1)
+        origin_x, origin_y = text_draw.call_args.args[1]
+        actual_bbox = (origin_x - 3, origin_y - 4, origin_x + 47, origin_y + 12)
+        self.assertEqual(actual_bbox, (133, 90, 183, 106))
+        self.assertGreaterEqual(actual_bbox[0], 32)
+        self.assertGreaterEqual(actual_bbox[1], 36)
+        self.assertLessEqual(actual_bbox[2], 576)
+        self.assertLessEqual(actual_bbox[3], 324)
+
     def test_derived_label_is_omitted_when_it_cannot_fit_inside_plot(self):
         zone = {
             "zone_type": "demand", "origin": "ai_inferred",

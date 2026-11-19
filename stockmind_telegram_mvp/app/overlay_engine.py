@@ -429,15 +429,25 @@ def _render_overlay_prepared(
         draw.rectangle(_pillow_rectangle_bounds((left, top, right, bottom)), fill=color, outline=edge, width=max(2, width // 600))
         title = _zone_overlay_label(zone, zone_type)
         text_box = draw.textbbox((0, 0), title)
-        text_width = text_box[2] - text_box[0]
-        text_height = text_box[3] - text_box[1]
+        text_left, text_top, text_right, text_bottom = text_box
+        text_width = text_right - text_left
+        text_height = text_bottom - text_top
         if (
-            text_width <= plot_right - plot_left - 4
+            text_width > 0
+            and text_height > 0
+            and text_width <= plot_right - plot_left - 4
             and text_height <= plot_bottom - plot_top - 4
         ):
+            # Position the measured glyph bounding box, not the text origin.
+            # Fonts may have non-zero or negative left/top bearings; accounting
+            # for those offsets keeps every rendered glyph inside the price plot.
             label_x = min(left + 5, max(plot_left + 2, plot_right - text_width - 2))
             label_y = min(max(plot_top, top - 18), plot_bottom - text_height - 2)
-            draw.text((label_x, label_y), title, fill=edge[:3] + (255,))
+            draw.text(
+                (label_x - text_left, label_y - text_top),
+                title,
+                fill=edge[:3] + (255,),
+            )
         count += 1
 
     if not count:
