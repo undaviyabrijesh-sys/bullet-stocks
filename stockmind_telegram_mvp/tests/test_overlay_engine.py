@@ -225,10 +225,9 @@ class OverlayRendererTests(unittest.TestCase):
             "open",
             side_effect=EOFError("truncated image container"),
         ):
-            self._assert_error_code(
-                lambda: validate_chart_image(b"untrusted image bytes"),
-                "invalid",
-            )
+            with self.assertRaises(overlay_engine.ChartImageError) as caught:
+                validate_chart_image(b"untrusted image bytes")
+        self.assertEqual(caught.exception.code, "invalid")
 
     def test_normalizes_exif_metadata_parse_errors_before_vision_request(self):
         with patch.object(
@@ -236,10 +235,9 @@ class OverlayRendererTests(unittest.TestCase):
             "getexif",
             side_effect=EOFError("truncated EXIF metadata"),
         ):
-            self._assert_error_code(
-                lambda: prepare_chart_image(sample_image()),
-                "invalid",
-            )
+            with self.assertRaises(overlay_engine.ChartImageError) as caught:
+                prepare_chart_image(sample_image())
+        self.assertEqual(caught.exception.code, "invalid")
 
     def test_normalizes_exif_transpose_errors_before_vision_request(self):
         with patch.object(
@@ -247,10 +245,9 @@ class OverlayRendererTests(unittest.TestCase):
             "exif_transpose",
             side_effect=ValueError("malformed orientation metadata"),
         ):
-            self._assert_error_code(
-                lambda: prepare_chart_image(oriented_sample_image()),
-                "invalid",
-            )
+            with self.assertRaises(overlay_engine.ChartImageError) as caught:
+                prepare_chart_image(oriented_sample_image())
+        self.assertEqual(caught.exception.code, "invalid")
 
     def test_rejects_truncated_pixel_data_or_container_before_vision_request(self):
         # Pillow's verify() alone accepts this truncated JPEG; full pixel decoding
