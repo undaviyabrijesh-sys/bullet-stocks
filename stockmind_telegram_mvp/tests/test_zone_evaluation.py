@@ -227,6 +227,37 @@ class ZoneEvaluationTests(unittest.TestCase):
         self.assertEqual(result["overall"]["false_positive"], 1)
         self.assertEqual(result["overall"]["false_negative"], 0)
 
+    def test_matching_maximizes_cardinality_before_total_iou(self):
+        # A greedy highest-IoU-first assignment would pair prediction 0 with
+        # reference 0 (IoU 1.0), leaving prediction 1 unmatched. The global
+        # assignment must instead use the threshold-edge match for prediction
+        # 0 and preserve the only qualifying match for prediction 1.
+        predictions = [
+            prediction(x_start=0.7, x_end=1.0),
+            prediction(x_start=0.8, x_end=1.0),
+        ]
+        references = [
+            zone(x_start=0.7, x_end=1.0),
+            zone(x_start=0.4, x_end=1.0),
+        ]
+
+        result = evaluate(
+            predictions,
+            references,
+            iou_threshold=0.5,
+        )
+
+        self.assertEqual(result["overall"]["true_positive"], 2)
+        self.assertEqual(result["overall"]["false_positive"], 0)
+        self.assertEqual(result["overall"]["false_negative"], 0)
+        self.assertEqual(
+            {
+                (match["prediction_index"], match["reference_index"])
+                for match in result["matches"]
+            },
+            {(0, 1), (1, 0)},
+        )
+
     def test_iou_threshold_rejects_weak_overlap(self):
         result = evaluate(
             [prediction(x_start=0.5, x_end=0.9)], [zone()], iou_threshold=0.5
