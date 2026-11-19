@@ -81,12 +81,24 @@ class ChartImagePrivacyPreparationTests(unittest.TestCase):
         with patch.object(
             bot_module,
             "_strip_annotation_metadata",
-            side_effect=ValueError("Metadata-cleaned chart image exceeds max_image_bytes (5242880)"),
+            side_effect=bot_module.AnnotationImageTooLargeError("Metadata-cleaned chart image exceeds max_image_bytes (5242880)"),
         ):
             with self.assertRaises(ChartImageError) as raised:
                 bot_module._prepare_chart_image_for_vision(original)
 
         self.assertEqual(raised.exception.code, "too_large")
+
+    def test_generic_value_error_cannot_claim_the_size_limit_was_exceeded(self):
+        original = self._metadata_png()
+        with patch.object(
+            bot_module,
+            "_strip_annotation_metadata",
+            side_effect=ValueError("decoder note: exceeds max_image_bytes in another context"),
+        ):
+            with self.assertRaises(ChartImageError) as raised:
+                bot_module._prepare_chart_image_for_vision(original)
+
+        self.assertEqual(raised.exception.code, "invalid")
 
     def test_sanitization_failure_hides_internal_error_details(self):
         original = self._metadata_png()
