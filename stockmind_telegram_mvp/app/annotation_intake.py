@@ -286,6 +286,10 @@ def _has_embedded_descriptive_metadata(image):
     )
 
 
+class AnnotationImageTooLargeError(ValueError):
+    """Raised when metadata removal pushes a chart image over its byte budget."""
+
+
 def _strip_annotation_metadata(image_bytes, max_image_bytes):
     """Remove descriptive metadata while preserving the canonical visible image.
 
@@ -351,7 +355,7 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
         sanitized_bytes = output.getvalue()
 
     if len(sanitized_bytes) > max_image_bytes:
-        raise ValueError(
+        raise AnnotationImageTooLargeError(
             "Metadata-cleaned chart image exceeds max_image_bytes "
             f"({max_image_bytes}); resize or re-export the screenshot."
         )
