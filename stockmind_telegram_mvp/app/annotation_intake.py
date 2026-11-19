@@ -15,7 +15,11 @@ from pathlib import Path
 
 from PIL import Image
 
-from .overlay_engine import MAX_CHART_IMAGE_PIXELS, prepare_chart_image
+from .overlay_engine import (
+    MAX_CHART_IMAGE_PIXELS,
+    _compatible_icc_profile,
+    prepare_chart_image,
+)
 
 DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024
 _FIXTURE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -347,6 +351,15 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
         except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
             raise ValueError("chart image exceeds the supported pixel limit") from exc
 
+        source_icc_profile = image.info.get("icc_profile")
+        target_mode = image.mode
+        if image_format == "JPEG" and target_mode not in {"L", "RGB", "CMYK"}:
+            target_mode = "RGB"
+        elif image_format == "WEBP" and target_mode not in {"L", "RGB", "RGBA"}:
+            target_mode = "RGB"
+        compatible_icc_profile = _compatible_icc_profile(
+            source_icc_profile, target_mode
+        )
         has_descriptive_metadata = _has_embedded_descriptive_metadata(image)
         if image_format == "JPEG":
             has_descriptive_metadata = (
@@ -363,14 +376,15 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
                 has_descriptive_metadata
                 or _webp_contains_unexposed_metadata(image_bytes)
             )
-        if not has_descriptive_metadata:
+        # A malformed or mode-incompatible ICC profile is not safe color
+        # metadata. Re-encode even when it is the only noncanonical field, and
+        # preserve only profiles whose declared color space matches output pixels.
+        if not has_descriptive_metadata and (
+            source_icc_profile is None or compatible_icc_profile is not None
+        ):
             return image_bytes
 
         save_options = {}
-        icc_profile = image.info.get("icc_profile")
-        if icc_profile:
-            save_options["icc_profile"] = icc_profile
-
         if image_format == "JPEG":
             if image.mode not in {"L", "RGB", "CMYK"}:
                 image = image.convert("RGB")
@@ -387,6 +401,15 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
             if image.mode == "P" and "transparency" in image.info:
                 save_options["transparency"] = image.info["transparency"]
             save_options["optimize"] = True
+
+        # Re-check after format-specific mode conversion. Never attach a
+        # grayscale/CMYK profile to RGB output or pass a malformed ICC block
+        # through to a downstream image decoder.
+        icc_profile = _compatible_icc_profile(
+            source_icc_profile, image.mode
+        )
+        if icc_profile is not None:
+            save_options["icc_profile"] = icc_profile
         else:
             raise ValueError("Please use a JPEG, PNG or WEBP chart screenshot.")
 
