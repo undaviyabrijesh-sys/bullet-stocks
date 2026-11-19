@@ -114,6 +114,29 @@ class AnalysisDeliveryTests(unittest.IsolatedAsyncioTestCase):
         ))
         self.assertEqual("".join(chunks), text)
 
+    def test_split_scans_large_responses_linearly(self):
+        text = "X" * 400_000
+        original_counter = telegram_delivery._telegram_text_units
+        scanned_characters = 0
+
+        def count_scanned(value):
+            nonlocal scanned_characters
+            scanned_characters += len(value)
+            return original_counter(value)
+
+        with patch.object(
+            telegram_delivery,
+            "_telegram_text_units",
+            side_effect=count_scanned,
+        ):
+            chunks = split_telegram_text(text)
+
+        self.assertEqual(len(chunks), 100)
+        self.assertEqual("".join(chunks), text)
+        # One full-input count plus one count per emitted chunk is linear.
+        # The old implementation repeatedly counted every remaining suffix.
+        self.assertLessEqual(scanned_characters, 2 * len(text))
+
     def test_split_rejects_invalid_limits_and_non_text(self):
         with self.assertRaises(ValueError):
             split_telegram_text("text", limit=0)

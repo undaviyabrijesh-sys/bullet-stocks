@@ -42,12 +42,13 @@ def split_telegram_text(text: str, *, limit: int = TELEGRAM_TEXT_CHUNK_LIMIT) ->
         raise TypeError("text must be a string")
     if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
         raise ValueError("limit must be a positive integer")
-    if _telegram_text_units(text) <= limit:
+    remaining_units = _telegram_text_units(text)
+    if remaining_units <= limit:
         return [text]
 
     chunks = []
     remaining = text
-    while _telegram_text_units(remaining) > limit:
+    while remaining_units > limit:
         max_end = _prefix_end_within_limit(remaining, limit)
         if max_end == 0:
             raise ValueError("limit is too small for the next Unicode character")
@@ -66,7 +67,11 @@ def split_telegram_text(text: str, *, limit: int = TELEGRAM_TEXT_CHUNK_LIMIT) ->
             separator_length = 0
 
         end = boundary + separator_length
-        chunks.append(remaining[:end])
+        chunk = remaining[:end]
+        # Keep a running UTF-16 budget. Recounting the entire remaining suffix
+        # on every iteration makes many-chunk responses quadratic in length.
+        remaining_units -= _telegram_text_units(chunk)
+        chunks.append(chunk)
         remaining = remaining[end:]
 
     if remaining:
