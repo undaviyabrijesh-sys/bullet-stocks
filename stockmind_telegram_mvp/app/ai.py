@@ -13,6 +13,7 @@ from openai import AsyncOpenAI
 from .tapetide import TapetideAPIError
 from .strict_json import loads as strict_json_loads
 from .price_axis import parse_zone_price_bounds
+from .unicode_utils import normalize_unicode_scalars
 
 SYSTEM_PROMPT = """
 You are StockMind AI, a multilingual market research assistant for Indian equities and crypto.
@@ -416,13 +417,13 @@ def _serialize_tool_result(result, tool_name: str, max_bytes: int = MAX_TOOL_RES
     """Serialize provider output within a byte cap and mark any sampled data rows."""
     max_bytes = max(MIN_TOOL_RESULT_BUDGET_BYTES, int(max_bytes))
     try:
-        serialized = json.dumps(
+        serialized = normalize_unicode_scalars(json.dumps(
             result,
             ensure_ascii=False,
             separators=(",", ":"),
             default=str,
             allow_nan=False,
-        )
+        ))
     except (TypeError, ValueError, OverflowError):
         result = {
             "error": "The market-data result could not be serialized safely.",
@@ -461,13 +462,13 @@ def _serialize_tool_result(result, tool_name: str, max_bytes: int = MAX_TOOL_RES
                     "Do not treat it as a complete dataset."
                 ),
             }
-            candidate_json = json.dumps(
+            candidate_json = normalize_unicode_scalars(json.dumps(
                 candidate,
                 ensure_ascii=False,
                 separators=(",", ":"),
                 default=str,
                 allow_nan=False,
-            )
+            ))
             if len(candidate_json.encode("utf-8")) <= max_bytes:
                 best = candidate_json
                 low = keep + 1

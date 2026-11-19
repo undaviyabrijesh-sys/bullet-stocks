@@ -296,7 +296,10 @@ supplementary Unicode characters (including emoji) cannot exceed Telegram's
 entity-length accounting or be split in the middle of a code point. Valid
 surrogate pairs are combined and unpaired surrogate escapes are replaced with
 U+FFFD before delivery, preventing malformed model Unicode from breaking UTF-8
-request encoding.
+request encoding. The same Unicode-scalar normalization is applied to serialized
+market-data tool results (including sampled/re-serialized rows and object keys)
+before UTF-8 byte budgeting, so malformed provider text cannot abort a research
+turn during context preparation.
 
 ## Multilingual Binance evidence notes
 

@@ -2,6 +2,8 @@
 
 import warnings
 
+from .unicode_utils import normalize_unicode_scalars
+
 TELEGRAM_TEXT_CHUNK_LIMIT = 4000
 
 # Keep a margin below Telegram's documented 10 MB photo ceiling. Oversized
@@ -12,34 +14,6 @@ TELEGRAM_DOCUMENT_MAX_BYTES = 45_000_000
 TELEGRAM_OVERLAY_MAX_PIXELS = 25_000_000
 TELEGRAM_PHOTO_MAX_DIMENSION_SUM = 10_000
 TELEGRAM_PHOTO_MAX_ASPECT_RATIO = 20
-
-
-def _normalize_unicode_scalars(text: str) -> str:
-    """Combine valid surrogate pairs and replace unpaired surrogate code points.
-
-    JSON permits escaped surrogate code units that some producers emit without
-    a matching pair. They are not valid UTF-8 scalar values and can make the
-    Telegram HTTP client fail while encoding an otherwise valid response.
-    """
-    normalized = []
-    index = 0
-    while index < len(text):
-        codepoint = ord(text[index])
-        if 0xD800 <= codepoint <= 0xDBFF:
-            if index + 1 < len(text):
-                low = ord(text[index + 1])
-                if 0xDC00 <= low <= 0xDFFF:
-                    scalar = 0x10000 + ((codepoint - 0xD800) << 10) + (low - 0xDC00)
-                    normalized.append(chr(scalar))
-                    index += 2
-                    continue
-            normalized.append("�")
-        elif 0xDC00 <= codepoint <= 0xDFFF:
-            normalized.append("�")
-        else:
-            normalized.append(text[index])
-        index += 1
-    return "".join(normalized)
 
 
 def _telegram_text_units(text: str) -> int:
@@ -72,7 +46,7 @@ def split_telegram_text(text: str, *, limit: int = TELEGRAM_TEXT_CHUNK_LIMIT) ->
         raise TypeError("text must be a string")
     # Normalize malformed UTF-16 escapes before counting or passing text to
     # aiogram, whose UTF-8 request encoding cannot represent lone surrogates.
-    text = _normalize_unicode_scalars(text)
+    text = normalize_unicode_scalars(text)
     if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
         raise ValueError("limit must be a positive integer")
     remaining_units = _telegram_text_units(text)

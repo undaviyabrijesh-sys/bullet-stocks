@@ -736,6 +736,38 @@ class ToolResultSerializationTests(unittest.TestCase):
         result = strict_json_loads(serialized)
         self.assertEqual(result["data"][0]["value"], 1e200)
 
+    def test_provider_result_normalizes_surrogates_in_nested_values_and_keys(self):
+        malformed = {
+            "data": [{
+                "label": "zone-" + chr(0xD800),
+                "emoji": chr(0xD83D) + chr(0xDE00),
+            }],
+            "source-" + chr(0xDC00): "provider",
+        }
+
+        serialized = _serialize_tool_result(malformed, "get_quote")
+        result = strict_json_loads(serialized)
+
+        self.assertEqual(result["data"][0]["label"], "zone-�")
+        self.assertEqual(result["data"][0]["emoji"], "😀")
+        self.assertEqual(result["source-�"], "provider")
+        self.assertEqual(serialized.encode("utf-8").decode("utf-8"), serialized)
+
+    def test_sampled_provider_result_normalizes_surrogates_after_reserialization(self):
+        rows = [
+            {"label": "discarded"},
+            {"label": "tail-" + chr(0xD800)},
+        ]
+        with patch("stockmind_telegram_mvp.app.ai.MAX_TOOL_DATA_ITEMS", 1):
+            serialized = _serialize_tool_result(
+                {"data": rows}, "get_crypto_klines", max_bytes=4096
+            )
+
+        result = strict_json_loads(serialized)
+        self.assertEqual(result["data"], [{"label": "tail-�"}])
+        self.assertEqual(result["truncation"]["data_items_total"], 2)
+        self.assertEqual(serialized.encode("utf-8").decode("utf-8"), serialized)
+
     def test_oversized_non_list_payload_is_withheld_not_partially_forwarded(self):
         sensitive_value = "x" * 2048
         serialized = _serialize_tool_result(
