@@ -37,6 +37,23 @@ class AnnotationIntakeTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_metadata_free_image_still_obeys_source_byte_budget(self):
+        with self.assertRaises(AnnotationImageTooLargeError):
+            _strip_annotation_metadata(
+                self.image_bytes, len(self.image_bytes) - 1
+            )
+
+        self.assertEqual(
+            _strip_annotation_metadata(self.image_bytes, len(self.image_bytes)),
+            self.image_bytes,
+        )
+
+    def test_sanitizer_rejects_invalid_byte_budgets_before_decoding(self):
+        for invalid_budget in (True, 0, -1, 1.5, "1024", None):
+            with self.subTest(invalid_budget=invalid_budget):
+                with self.assertRaisesRegex(ValueError, "max_image_bytes"):
+                    _strip_annotation_metadata(b"not-an-image", invalid_budget)
+
     def test_copies_original_and_records_hash_dimensions_without_fabricating_labels(self):
         result = prepare_annotation_draft(
             self.source,

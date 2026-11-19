@@ -298,6 +298,17 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
     re-encoded losslessly; PNG remains lossless. The resulting bytes—not the
     original upload—are the hash-bound image that must be used for prediction.
     """
+    max_image_bytes = _positive_integer(max_image_bytes, "max_image_bytes")
+    if not isinstance(image_bytes, bytes):
+        raise ValueError("image_bytes must be bytes")
+    # Enforce the budget before decoding, including the metadata-free fast path.
+    # Callers also validate at intake boundaries; this keeps the sanitizer's
+    # own contract safe for direct use and future callers.
+    if len(image_bytes) > max_image_bytes:
+        raise AnnotationImageTooLargeError(
+            f"Source chart image exceeds max_image_bytes ({max_image_bytes})."
+        )
+
     with Image.open(BytesIO(image_bytes)) as image:
         has_descriptive_metadata = _has_embedded_descriptive_metadata(image)
         if image.format == "JPEG":
