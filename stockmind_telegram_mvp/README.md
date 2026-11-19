@@ -293,7 +293,10 @@ because the platform may already have accepted the message.
 
 The 4,000-character chunk budget is measured in UTF-16 code units so
 supplementary Unicode characters (including emoji) cannot exceed Telegram's
-entity-length accounting or be split in the middle of a code point.
+entity-length accounting or be split in the middle of a code point. Valid
+surrogate pairs are combined and unpaired surrogate escapes are replaced with
+U+FFFD before delivery, preventing malformed model Unicode from breaking UTF-8
+request encoding.
 
 ## Multilingual Binance evidence notes
 

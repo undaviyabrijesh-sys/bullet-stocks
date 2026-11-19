@@ -14,6 +14,34 @@ TELEGRAM_PHOTO_MAX_DIMENSION_SUM = 10_000
 TELEGRAM_PHOTO_MAX_ASPECT_RATIO = 20
 
 
+def _normalize_unicode_scalars(text: str) -> str:
+    """Combine valid surrogate pairs and replace unpaired surrogate code points.
+
+    JSON permits escaped surrogate code units that some producers emit without
+    a matching pair. They are not valid UTF-8 scalar values and can make the
+    Telegram HTTP client fail while encoding an otherwise valid response.
+    """
+    normalized = []
+    index = 0
+    while index < len(text):
+        codepoint = ord(text[index])
+        if 0xD800 <= codepoint <= 0xDBFF:
+            if index + 1 < len(text):
+                low = ord(text[index + 1])
+                if 0xDC00 <= low <= 0xDFFF:
+                    scalar = 0x10000 + ((codepoint - 0xD800) << 10) + (low - 0xDC00)
+                    normalized.append(chr(scalar))
+                    index += 2
+                    continue
+            normalized.append("�")
+        elif 0xDC00 <= codepoint <= 0xDFFF:
+            normalized.append("�")
+        else:
+            normalized.append(text[index])
+        index += 1
+    return "".join(normalized)
+
+
 def _telegram_text_units(text: str) -> int:
     """Count UTF-16 code units, the coordinate unit used by Telegram entities."""
     return sum(2 if ord(character) > 0xFFFF else 1 for character in text)
@@ -33,13 +61,18 @@ def split_telegram_text(text: str, *, limit: int = TELEGRAM_TEXT_CHUNK_LIMIT) ->
     """Split text below Telegram's message limit without dropping any characters.
 
     Telegram entity offsets use UTF-16 code units, so supplementary Unicode
-    characters (including many emoji) count as two. Prefer paragraph, line and
-    word boundaries. Long unbroken tokens fall back to a hard split without
-    cutting a Unicode code point. A 4,000-unit default leaves headroom below
-    Telegram's 4,096-character text limit.
+    characters (including many emoji) count as two. Valid explicit surrogate
+    pairs are combined and unpaired surrogate code units are replaced with
+    U+FFFD so every chunk is valid UTF-8. Prefer paragraph, line and word
+    boundaries. Long unbroken tokens fall back to a hard split without cutting
+    a Unicode code point. A 4,000-unit default leaves headroom below Telegram's
+    4,096-character text limit.
     """
     if not isinstance(text, str):
         raise TypeError("text must be a string")
+    # Normalize malformed UTF-16 escapes before counting or passing text to
+    # aiogram, whose UTF-8 request encoding cannot represent lone surrogates.
+    text = _normalize_unicode_scalars(text)
     if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
         raise ValueError("limit must be a positive integer")
     remaining_units = _telegram_text_units(text)

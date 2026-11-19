@@ -114,6 +114,33 @@ class AnalysisDeliveryTests(unittest.IsolatedAsyncioTestCase):
         ))
         self.assertEqual("".join(chunks), text)
 
+    def test_split_combines_surrogate_pairs_and_replaces_unpaired_surrogates(self):
+        text = (
+            "A"
+            + chr(0xD83D)
+            + chr(0xDE00)
+            + "B"
+            + chr(0xD800)
+            + "C"
+            + chr(0xDC00)
+        )
+
+        chunks = split_telegram_text(text)
+
+        expected = "A😀B�C�"
+        self.assertEqual(chunks, [expected])
+        self.assertEqual("".join(chunks), expected)
+        self.assertEqual(chunks[0].encode("utf-8").decode("utf-8"), expected)
+
+    async def test_delivery_normalizes_malformed_surrogates_before_telegram_encoding(self):
+        message = SimpleNamespace(answer=AsyncMock())
+        malformed = "Chart" + chr(0xD800) + " zone"
+
+        delivered = await send_analysis_text(message, None, malformed)
+
+        self.assertTrue(delivered)
+        message.answer.assert_awaited_once_with("Chart� zone")
+
     def test_split_scans_large_responses_linearly(self):
         text = "X" * 400_000
         original_counter = telegram_delivery._telegram_text_units
