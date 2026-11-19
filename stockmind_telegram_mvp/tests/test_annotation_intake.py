@@ -11,6 +11,7 @@ from unittest.mock import patch
 from PIL import Image
 
 from stockmind_telegram_mvp.app.annotation_intake import (
+    AnnotationImageTooLargeError,
     _jpeg_has_untrusted_container_tail,
     _strip_annotation_metadata,
     _webp_contains_unexposed_metadata,
@@ -469,7 +470,7 @@ class AnnotationIntakeTests(unittest.TestCase):
         Image.new("RGB", (64, 48), "white").save(
             output, format="PNG", pnginfo=pnginfo
         )
-        with self.assertRaisesRegex(ValueError, "Metadata-cleaned chart image exceeds"):
+        with self.assertRaisesRegex(AnnotationImageTooLargeError, "Metadata-cleaned chart image exceeds"):
             _strip_annotation_metadata(output.getvalue(), max_image_bytes=1)
         self.assertFalse(self.output.exists())
 
