@@ -120,6 +120,32 @@ class AnnotationIntakeTests(unittest.TestCase):
                     self.image_bytes, 5 * 1024 * 1024
                 )
 
+    def test_sanitizer_normalizes_eof_from_source_pixel_decoder(self):
+        with patch.object(
+            Image.Image,
+            "load",
+            side_effect=EOFError("truncated source pixel stream"),
+        ):
+            with self.assertRaisesRegex(
+                ValueError, "chart image is truncated or malformed"
+            ):
+                _strip_annotation_metadata(
+                    self.image_bytes, 5 * 1024 * 1024
+                )
+
+    def test_sanitizer_normalizes_eof_from_exif_metadata_inspection(self):
+        with patch.object(
+            Image.Image,
+            "getexif",
+            side_effect=EOFError("truncated EXIF metadata"),
+        ):
+            with self.assertRaisesRegex(
+                ValueError, "could not safely inspect screenshot metadata"
+            ):
+                _strip_annotation_metadata(
+                    self.image_bytes, 5 * 1024 * 1024
+                )
+
     def test_sanitizer_rejects_unsupported_static_formats_before_fast_path(self):
         output = BytesIO()
         Image.new("RGB", (16, 16), "white").save(output, format="BMP")
