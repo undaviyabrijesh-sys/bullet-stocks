@@ -559,6 +559,19 @@ class AnnotationGeometryTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     validate_manual_geometry(bad, [])
 
+    def test_rejects_unrepresentable_integer_coordinates_as_value_error(self):
+        huge_integer = 10 ** 400
+        for field in ("x_start", "x_end", "y_top", "y_bottom"):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(ValueError, "must be a finite number"):
+                    validate_manual_geometry(dict(PLOT, **{field: huge_integer}), [])
+
+    def test_rejects_unhashable_zone_types_as_value_error(self):
+        for zone_type in ([], {}, {"unexpected": "value"}):
+            with self.subTest(zone_type=zone_type):
+                with self.assertRaisesRegex(ValueError, "zone_type must be"):
+                    validate_manual_geometry(PLOT, [dict(ZONE, zone_type=zone_type)])
+
     def test_rejects_zero_or_negative_width_and_height(self):
         with self.assertRaisesRegex(ValueError, "positive width"):
             validate_manual_geometry(dict(PLOT, x_end=PLOT["x_start"]), [])

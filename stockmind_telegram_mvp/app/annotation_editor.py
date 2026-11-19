@@ -204,7 +204,10 @@ def _validate_box(box, field):
         value = box[key]
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError(f"{field}.{key} must be a finite number")
-        value = float(value)
+        try:
+            value = float(value)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise ValueError(f"{field}.{key} must be a finite number") from exc
         if not math.isfinite(value) or not 0.0 <= value <= 1.0:
             raise ValueError(f"{field}.{key} must be between 0 and 1")
         values[key] = value
@@ -278,7 +281,7 @@ def validate_manual_geometry(plot_bounds, zones):
         if not isinstance(zone, dict) or set(zone) != _BOX_FIELDS | {"zone_type"}:
             raise ValueError(f"{field} must contain zone_type and exactly four normalized coordinates")
         zone_type = zone["zone_type"]
-        if zone_type not in {"supply", "demand"}:
+        if not isinstance(zone_type, str) or zone_type not in {"supply", "demand"}:
             raise ValueError(f"{field}.zone_type must be 'supply' or 'demand'")
         bounds = _validate_box({key: zone[key] for key in _BOX_FIELDS}, field)
         if (
