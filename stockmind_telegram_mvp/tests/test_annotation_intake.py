@@ -120,6 +120,19 @@ class AnnotationIntakeTests(unittest.TestCase):
                     self.image_bytes, 5 * 1024 * 1024
                 )
 
+    def test_sanitizer_normalizes_eof_while_opening_source_image(self):
+        with patch.object(
+            Image,
+            "open",
+            side_effect=EOFError("truncated image header"),
+        ):
+            with self.assertRaisesRegex(
+                ValueError, "chart image is truncated or malformed"
+            ):
+                _strip_annotation_metadata(
+                    self.image_bytes, 5 * 1024 * 1024
+                )
+
     def test_sanitizer_normalizes_eof_from_source_pixel_decoder(self):
         with patch.object(
             Image.Image,
