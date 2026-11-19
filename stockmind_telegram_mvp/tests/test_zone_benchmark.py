@@ -944,7 +944,9 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not EXIF-normalized"):
             evaluate_benchmark_manifest(self.manifest)
 
-    def test_accepts_exif_orientation_one_without_reencoding(self):
+    def test_rejects_exif_orientation_one_until_metadata_is_sanitized(self):
+        from stockmind_telegram_mvp.app.annotation_intake import _strip_annotation_metadata
+
         record = self._record("exif-normal")
         image_file = self.root / record["image_file"].replace(".png", ".jpg")
         exif = Image.Exif()
@@ -957,6 +959,20 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         image_file.write_bytes(image_bytes)
         record["image_file"] = image_file.name
         record["image_sha256"] = hashlib.sha256(image_bytes).hexdigest()
+        self._refresh_adjudication_image_hash(record)
+        self._write(record)
+
+        # Orientation 1 needs no pixel rotation, but the EXIF block is still
+        # descriptive metadata and must be removed by annotation intake.
+        with self.assertRaisesRegex(ValueError, "not metadata-cleaned"):
+            evaluate_benchmark_manifest(self.manifest)
+
+        canonical_bytes = _strip_annotation_metadata(
+            image_bytes, 5 * 1024 * 1024
+        )
+        self.assertNotEqual(canonical_bytes, image_bytes)
+        image_file.write_bytes(canonical_bytes)
+        record["image_sha256"] = hashlib.sha256(canonical_bytes).hexdigest()
         self._refresh_adjudication_image_hash(record)
         self._write(record)
 
