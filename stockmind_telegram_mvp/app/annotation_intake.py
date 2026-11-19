@@ -293,10 +293,12 @@ class AnnotationImageTooLargeError(ValueError):
 def _strip_annotation_metadata(image_bytes, max_image_bytes):
     """Remove descriptive metadata while preserving the canonical visible image.
 
-    Images without descriptive metadata remain byte-for-byte unchanged. Metadata-
-    bearing JPEGs are re-encoded at maximum quality with 4:4:4 chroma; WEBP is
-    re-encoded losslessly; PNG remains lossless. The resulting bytes—not the
-    original upload—are the hash-bound image that must be used for prediction.
+    Only a single JPEG, PNG or WEBP frame is accepted, including for direct
+    callers that bypass the normal chart-image preparation path. Images without
+    descriptive metadata remain byte-for-byte unchanged. Metadata-bearing JPEGs
+    are re-encoded at maximum quality with 4:4:4 chroma; WEBP is re-encoded
+    losslessly; PNG remains lossless. The resulting bytes—not the original
+    upload—are the hash-bound image that must be used for prediction.
     """
     max_image_bytes = _positive_integer(max_image_bytes, "max_image_bytes")
     if not isinstance(image_bytes, bytes):
@@ -310,18 +312,26 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
         )
 
     with Image.open(BytesIO(image_bytes)) as image:
+        image_format = image.format
+        if image_format not in {"JPEG", "PNG", "WEBP"}:
+            raise ValueError("Please use a JPEG, PNG or WEBP chart screenshot.")
+        if getattr(image, "n_frames", 1) != 1:
+            raise ValueError(
+                "Animated images are not supported. Please send a single chart frame."
+            )
+
         has_descriptive_metadata = _has_embedded_descriptive_metadata(image)
-        if image.format == "JPEG":
+        if image_format == "JPEG":
             has_descriptive_metadata = (
                 has_descriptive_metadata
                 or _jpeg_has_untrusted_container_tail(image_bytes)
             )
-        elif image.format == "PNG":
+        elif image_format == "PNG":
             has_descriptive_metadata = (
                 has_descriptive_metadata
                 or _png_contains_unexposed_metadata(image_bytes)
             )
-        elif image.format == "WEBP":
+        elif image_format == "WEBP":
             has_descriptive_metadata = (
                 has_descriptive_metadata
                 or _webp_contains_unexposed_metadata(image_bytes)
@@ -330,7 +340,6 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
             return image_bytes
 
         image.load()
-        image_format = image.format
         save_options = {}
         icc_profile = image.info.get("icc_profile")
         if icc_profile:

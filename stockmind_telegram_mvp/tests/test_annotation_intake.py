@@ -54,6 +54,33 @@ class AnnotationIntakeTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "max_image_bytes"):
                     _strip_annotation_metadata(b"not-an-image", invalid_budget)
 
+    def test_sanitizer_rejects_unsupported_static_formats_before_fast_path(self):
+        output = BytesIO()
+        Image.new("RGB", (16, 16), "white").save(output, format="BMP")
+
+        with self.assertRaisesRegex(ValueError, "JPEG, PNG or WEBP"):
+            _strip_annotation_metadata(output.getvalue(), 5 * 1024 * 1024)
+
+    def test_sanitizer_rejects_animated_webp_before_fast_path(self):
+        output = BytesIO()
+        first = Image.new("RGB", (16, 16), "white")
+        second = Image.new("RGB", (16, 16), "black")
+        first.save(
+            output,
+            format="WEBP",
+            save_all=True,
+            append_images=[second],
+            duration=100,
+            loop=0,
+            lossless=True,
+        )
+        animated = output.getvalue()
+        with Image.open(BytesIO(animated)) as image:
+            self.assertGreater(image.n_frames, 1)
+
+        with self.assertRaisesRegex(ValueError, "Animated images are not supported"):
+            _strip_annotation_metadata(animated, 5 * 1024 * 1024)
+
     def test_copies_original_and_records_hash_dimensions_without_fabricating_labels(self):
         result = prepare_annotation_draft(
             self.source,
