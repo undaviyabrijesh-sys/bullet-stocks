@@ -412,6 +412,9 @@ def _strip_annotation_metadata(image_bytes, max_image_bytes):
         )
         if icc_profile is not None:
             save_options["icc_profile"] = icc_profile
+        else:
+            # Do not let a format plugin copy a rejected profile from image.info.
+            image.info.pop("icc_profile", None)
 
         # Some Pillow format plugins copy metadata directly from image.info
         # even when it is not passed as a save option (notably WEBP EXIF/XMP).
