@@ -80,5 +80,70 @@ class PipelineOutcomeLatencyTests(unittest.TestCase):
         )
 
 
+    def test_duplicate_handler_completion_events_are_excluded_from_outcome_latency(self):
+        request_id = "e" * 32
+        report = aggregate_timing_lines(
+            [
+                f"StockMind Telegram photo request_id={request_id} "
+                "outcome=completed handler_total_ms=100",
+                f"StockMind Telegram photo request_id={request_id} "
+                "outcome=completed handler_total_ms=200",
+            ]
+        )
+
+        self.assertEqual(report["correlation_summary"]["conflicted_request_id_count"], 1)
+        self.assertEqual(
+            report["correlation_summary"]["conflicted_handler_outcome_request_id_count"],
+            1,
+        )
+        self.assertEqual(report["correlation_summary"]["handler_outcome_event_count"], 0)
+        self.assertEqual(report["telegram_handler_outcomes"], {})
+        self.assertEqual(report["telegram_handler_outcome_latency"], [])
+
+    def test_duplicate_download_does_not_discard_unique_handler_outcome_latency(self):
+        request_id = "f" * 32
+        report = aggregate_timing_lines(
+            [
+                f"StockMind Telegram photo request_id={request_id} download_ms=5",
+                f"StockMind Telegram photo request_id={request_id} download_ms=6",
+                f"StockMind Telegram photo request_id={request_id} "
+                "outcome=completed handler_total_ms=60",
+            ]
+        )
+
+        self.assertEqual(report["correlation_summary"]["conflicted_request_id_count"], 1)
+        self.assertEqual(
+            report["correlation_summary"]["conflicted_handler_outcome_request_id_count"],
+            0,
+        )
+        self.assertEqual(report["correlation_summary"]["handler_outcome_event_count"], 1)
+        group = report["telegram_handler_outcome_latency"][0]
+        self.assertEqual(group["outcome"], "completed")
+        self.assertEqual(group["handler_total_ms"]["sample_count"], 1)
+        self.assertEqual(group["handler_total_ms"]["p50_ms"], 60)
+        self.assertEqual(group["correlated_download_sample_count"], 0)
+        self.assertEqual(group["download_not_correlated_count"], 1)
+        self.assertNotIn("download_ms", group)
+
+    def test_upload_kind_conflict_excludes_correlated_handler_outcome(self):
+        request_id = "g" * 32
+        report = aggregate_timing_lines(
+            [
+                f"StockMind Telegram photo request_id={request_id} download_ms=5",
+                f"StockMind Telegram document request_id={request_id} "
+                "outcome=completed handler_total_ms=60",
+            ]
+        )
+
+        self.assertEqual(report["correlation_summary"]["conflicted_request_id_count"], 1)
+        self.assertEqual(
+            report["correlation_summary"]["conflicted_handler_outcome_request_id_count"],
+            1,
+        )
+        self.assertEqual(report["correlation_summary"]["handler_outcome_event_count"], 0)
+        self.assertEqual(report["telegram_handler_outcomes"], {})
+        self.assertEqual(report["telegram_handler_outcome_latency"], [])
+
+
 if __name__ == "__main__":
     unittest.main()
