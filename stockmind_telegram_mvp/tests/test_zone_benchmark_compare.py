@@ -9,7 +9,9 @@ from PIL import Image
 
 from stockmind_telegram_mvp.app.zone_benchmark import evaluate_benchmark_manifest
 from stockmind_telegram_mvp.app.zone_benchmark_compare import (
+    _paired_telemetry_delta,
     _read_report,
+    _telemetry_stat,
     _validate_price_accuracy,
     _validate_report,
     compare_benchmark_reports,
@@ -866,6 +868,47 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         self.assertIsNone(
             telemetry["paired_deltas"]["request_latency_ms"]["mean_delta"]
         )
+
+    def test_telemetry_summary_reports_median_and_nearest_rank_p95(self):
+        summary = _telemetry_stat([100, 200, 300, 400, 500], 6)
+
+        self.assertEqual(summary["reported_fixture_count"], 5)
+        self.assertEqual(summary["missing_fixture_count"], 1)
+        self.assertEqual(summary["median"], 300)
+        self.assertEqual(summary["p95"], 500)
+
+        empty = _telemetry_stat([], 2)
+        self.assertIsNone(empty["median"])
+        self.assertIsNone(empty["p95"])
+        self.assertEqual(empty["missing_fixture_count"], 2)
+
+    def test_paired_telemetry_delta_reports_median_and_p95(self):
+        baseline_values = [100, 200, 300, 400, 500]
+        candidate_values = [150, 180, 450, 350, 700]
+        baseline = [
+            {
+                "fixture_id": f"fixture-{index}",
+                "prediction_metadata": {"request_latency_ms": value},
+            }
+            for index, value in enumerate(baseline_values)
+        ]
+        candidate = [
+            {
+                "fixture_id": f"fixture-{index}",
+                "prediction_metadata": {"request_latency_ms": value},
+            }
+            for index, value in enumerate(candidate_values)
+        ]
+
+        result = _paired_telemetry_delta(
+            baseline, candidate, "request_latency_ms"
+        )
+
+        self.assertEqual(result["paired_fixture_count"], 5)
+        self.assertEqual(result["missing_pair_count"], 0)
+        self.assertEqual(result["median_delta"], 50)
+        self.assertEqual(result["p95_delta"], 200)
+
 
 if __name__ == "__main__":
     unittest.main()
