@@ -148,6 +148,7 @@ def aggregate_timing_lines(lines: Iterable[str]) -> dict:
     handler_samples: dict[str, list[int]] = defaultdict(list)
     correlations: dict[str, dict] = {}
     conflicted_request_ids: set[str] = set()
+    conflicted_handler_outcome_ids: set[str] = set()
     parsed_requests = 0
     parsed_handlers = 0
     legacy_request_events = 0
@@ -194,7 +195,9 @@ def aggregate_timing_lines(lines: Iterable[str]) -> dict:
             if metric == "handler_total_ms":
                 if outcome is None:
                     legacy_handler_outcome_events += 1
-                else:
+                elif request_id is None:
+                    # Legacy events have no join key, so each parsed completion
+                    # remains an independent sample.
                     handler_outcome_counts[outcome] += 1
                     handler_outcome_total_samples[
                         (event["upload_kind"], outcome)
@@ -211,16 +214,34 @@ def aggregate_timing_lines(lines: Iterable[str]) -> dict:
                     and record["upload_kind"] != event["upload_kind"]
                 ):
                     conflicted_request_ids.add(request_id)
+                    conflicted_handler_outcome_ids.add(request_id)
                 record["upload_kind"] = event["upload_kind"]
                 if outcome is not None:
                     if record["outcome"] is not None:
                         conflicted_request_ids.add(request_id)
+                        conflicted_handler_outcome_ids.add(request_id)
                     else:
                         record["outcome"] = outcome
                 if metric in record["handler_metrics"]:
                     conflicted_request_ids.add(request_id)
+                    if metric == "handler_total_ms":
+                        conflicted_handler_outcome_ids.add(request_id)
                 else:
                     record["handler_metrics"][metric] = event["duration_ms"]
+
+    # Only count one unambiguous completion event per correlated request.
+    # A duplicate download makes download pairing unsafe, but does not by
+    # itself invalidate a unique handler-total/outcome measurement.
+    for request_id, record in correlations.items():
+        if request_id in conflicted_handler_outcome_ids:
+            continue
+        outcome = record["outcome"]
+        upload_kind = record["upload_kind"]
+        handler_total = record["handler_metrics"].get("handler_total_ms")
+        if outcome is None or upload_kind is None or handler_total is None:
+            continue
+        handler_outcome_counts[outcome] += 1
+        handler_outcome_total_samples[(upload_kind, outcome)].append(handler_total)
 
     groups = []
     for (mode, outcome), events in sorted(request_groups.items()):
@@ -336,6 +357,7 @@ def aggregate_timing_lines(lines: Iterable[str]) -> dict:
             "correlated_request_count": len(correlated_requests),
             "complete_upload_request_count": complete_upload_requests,
             "conflicted_request_id_count": len(conflicted_request_ids),
+            "conflicted_handler_outcome_request_id_count": len(conflicted_handler_outcome_ids),
             "legacy_request_event_count": legacy_request_events,
             "legacy_handler_event_count": legacy_handler_events,
             "handler_outcome_event_count": sum(handler_outcome_counts.values()),
