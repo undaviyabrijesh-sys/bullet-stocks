@@ -69,35 +69,36 @@ def _active_request_id() -> str:
     return request_id
 
 
-def _request_scoped(upload_kind: str):
-    """Scope an upload request ID and log handler duration on every exit path."""
-    if upload_kind not in {"photo", "document"}:
+def _request_scoped(handler=None, *, upload_kind: str | None = None):
+    """Scope a request ID; optionally time photo/document handlers on every exit."""
+    if upload_kind is not None and upload_kind not in {"photo", "document"}:
         raise ValueError("upload_kind must be photo or document")
 
-    def decorate(handler):
-        @wraps(handler)
+    def decorate(target):
+        @wraps(target)
         async def wrapped(*args, **kwargs):
             token = None
             if _request_id_context.get() is None:
                 token = _request_id_context.set(uuid4().hex)
-            started_at = time.perf_counter()
+            started_at = time.perf_counter() if upload_kind is not None else None
             try:
-                return await handler(*args, **kwargs)
+                return await target(*args, **kwargs)
             finally:
                 try:
-                    logger.info(
-                        "StockMind Telegram %s request_id=%s handler_total_ms=%d",
-                        upload_kind,
-                        _active_request_id(),
-                        _elapsed_ms(started_at),
-                    )
+                    if upload_kind is not None:
+                        logger.info(
+                            "StockMind Telegram %s request_id=%s handler_total_ms=%d",
+                            upload_kind,
+                            _active_request_id(),
+                            _elapsed_ms(started_at),
+                        )
                 finally:
                     if token is not None:
                         _request_id_context.reset(token)
 
         return wrapped
 
-    return decorate
+    return decorate(handler) if handler is not None else decorate
 
 
 def _elapsed_ms(started_at: float) -> int:
@@ -736,7 +737,7 @@ async def reset(message: Message):
 
 
 @dp.message(F.photo)
-@_request_scoped("photo")
+@_request_scoped(upload_kind="photo")
 async def handle_chart_photo(message: Message):
     photo = message.photo[-1]
     if photo.file_size and photo.file_size > MAX_CHART_IMAGE_BYTES:
@@ -778,7 +779,7 @@ async def handle_chart_photo(message: Message):
 
 
 @dp.message(F.document)
-@_request_scoped("document")
+@_request_scoped(upload_kind="document")
 async def handle_chart_document(message: Message):
     document = message.document
     mime_type = document.mime_type or ""
