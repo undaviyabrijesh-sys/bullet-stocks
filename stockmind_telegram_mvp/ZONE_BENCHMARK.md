@@ -565,6 +565,9 @@ bytes retain their separate 5 MiB default limit. Blank lines are allowed, but
 they are subject to the same per-line byte ceiling.
 
 The CLI exposes `--max-manifest-line-bytes` for controlled local datasets.
-Increasing this limit should be intentional: model metadata and zone geometry
-normally fit comfortably below the default. This is a per-record bound, not a
-total manifest-size or total fixture-count limit.
+The default is 1 MiB and the hard maximum is 16 MiB. The hard cap prevents an
+unrepresentably large `readline()` size from escaping as an `OverflowError` and
+keeps an override from silently disabling the per-record memory bound. Increasing
+the limit should be intentional: model metadata and zone geometry normally fit
+comfortably below the default. This is a per-record bound, not a total
+manifest-size or total fixture-count limit.

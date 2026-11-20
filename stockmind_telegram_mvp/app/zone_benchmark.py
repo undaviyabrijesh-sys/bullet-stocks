@@ -40,6 +40,7 @@ _ADJUDICATOR_ID_RE = re.compile(r"^adj-[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 _GUIDELINE_VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024
 DEFAULT_MAX_MANIFEST_LINE_BYTES = 1024 * 1024
+MAX_MANIFEST_LINE_BYTES = 16 * 1024 * 1024
 _MARKET_CONTEXT_FIELDS = ("asset_class", "symbol", "exchange", "timeframe")
 
 
@@ -933,6 +934,10 @@ def evaluate_benchmark_manifest(
     max_manifest_line_bytes = _positive_integer(
         max_manifest_line_bytes, "max_manifest_line_bytes"
     )
+    if max_manifest_line_bytes > MAX_MANIFEST_LINE_BYTES:
+        raise ValueError(
+            f"max_manifest_line_bytes must not exceed {MAX_MANIFEST_LINE_BYTES}"
+        )
     manifest_path = Path(manifest_path).resolve()
     if not manifest_path.is_file():
         raise ValueError(f"benchmark manifest does not exist: {manifest_path}")
@@ -1068,7 +1073,7 @@ def main(argv=None):
         "--max-manifest-line-bytes",
         type=int,
         default=DEFAULT_MAX_MANIFEST_LINE_BYTES,
-        help="maximum UTF-8 bytes per JSONL record including its newline (default: 1 MiB)",
+        help="maximum UTF-8 bytes per JSONL record including its newline (default: 1 MiB; maximum: 16 MiB)",
     )
     args = parser.parse_args(argv)
     try:

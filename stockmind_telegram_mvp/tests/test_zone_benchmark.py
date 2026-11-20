@@ -9,6 +9,7 @@ from PIL import Image
 
 from stockmind_telegram_mvp.app.zone_benchmark import (
     DEFAULT_MAX_MANIFEST_LINE_BYTES,
+    MAX_MANIFEST_LINE_BYTES,
     _aggregate_price_accuracy,
     evaluate_benchmark_manifest,
 )
@@ -1332,6 +1333,24 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
 
     def test_default_manifest_line_limit_is_one_mibibyte(self):
         self.assertEqual(DEFAULT_MAX_MANIFEST_LINE_BYTES, 1024 * 1024)
+
+    def test_rejects_manifest_line_limit_above_hard_cap(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            f"max_manifest_line_bytes must not exceed {MAX_MANIFEST_LINE_BYTES}",
+        ):
+            evaluate_benchmark_manifest(
+                self.manifest, max_manifest_line_bytes=MAX_MANIFEST_LINE_BYTES + 1
+            )
+
+    def test_rejects_unrepresentably_large_manifest_line_limit(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            f"max_manifest_line_bytes must not exceed {MAX_MANIFEST_LINE_BYTES}",
+        ):
+            evaluate_benchmark_manifest(
+                self.manifest, max_manifest_line_bytes=10 ** 400
+            )
 
     def test_rejects_duplicate_object_keys_in_jsonl_manifest(self):
         record = self._record("duplicate-json-key")
