@@ -145,5 +145,23 @@ class PipelineOutcomeLatencyTests(unittest.TestCase):
         self.assertEqual(report["telegram_handler_outcome_latency"], [])
 
 
+    def test_upload_kind_conflict_without_outcome_does_not_count_as_outcome_conflict(self):
+        request_id = "h" * 32
+        report = aggregate_timing_lines(
+            [
+                f"StockMind Telegram photo request_id={request_id} download_ms=5",
+                f"StockMind Telegram document request_id={request_id} download_ms=6",
+            ]
+        )
+
+        self.assertEqual(report["correlation_summary"]["conflicted_request_id_count"], 1)
+        self.assertEqual(
+            report["correlation_summary"]["conflicted_handler_outcome_request_id_count"],
+            0,
+        )
+        self.assertEqual(report["correlation_summary"]["handler_outcome_event_count"], 0)
+        self.assertEqual(report["telegram_handler_outcome_latency"], [])
+
+
 if __name__ == "__main__":
     unittest.main()
