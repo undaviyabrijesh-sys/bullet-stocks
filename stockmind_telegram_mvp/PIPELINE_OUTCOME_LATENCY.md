@@ -25,7 +25,8 @@ The handler-total distribution includes each legacy completion event
 with an explicit supported outcome and one unambiguous completion per
 correlated request ID. A request ID is excluded from outcome counts and
 handler-total distributions when it contains duplicate handler-total/outcome
-events or inconsistent upload kinds. The report exposes this count as
+events or inconsistent upload kinds that affect a recorded outcome. The report
+exposes this count as
 `conflicted_handler_outcome_request_id_count`; it is narrower than
 `conflicted_request_id_count`, which also includes conflicts that
 affect only request or download correlation.
