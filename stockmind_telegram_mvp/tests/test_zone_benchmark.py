@@ -1305,7 +1305,7 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
 
 
     def test_rejects_manifest_record_over_byte_limit_before_json_parsing(self):
-        self.manifest.write_bytes(b"\\n" + (b" " * 129))
+        self.manifest.write_bytes(b"\n" + (b" " * 129))
 
         with self.assertRaisesRegex(
             ValueError, r"line 2: exceeds the 128-byte JSONL record limit"
@@ -1316,7 +1316,7 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
 
     def test_manifest_record_exactly_at_byte_limit_is_accepted(self):
         record = self._record("exact-line-limit")
-        raw_line = json.dumps(record, separators=(",", ":")).encode("utf-8") + b"\\n"
+        raw_line = json.dumps(record, separators=(",", ":")).encode("utf-8") + b"\n"
         self.manifest.write_bytes(raw_line)
 
         result = evaluate_benchmark_manifest(
@@ -1325,7 +1325,7 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         self.assertEqual(result["fixture_count"], 1)
 
     def test_rejects_non_utf8_manifest_bytes_with_controlled_error(self):
-        self.manifest.write_bytes(b"\\xff\\n")
+        self.manifest.write_bytes(b"\xff\n")
 
         with self.assertRaisesRegex(ValueError, "manifest must be UTF-8 JSONL"):
             evaluate_benchmark_manifest(self.manifest)
