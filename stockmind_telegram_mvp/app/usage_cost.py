@@ -10,7 +10,7 @@ _RATE_FIELDS = {
     "cached_input_usd_per_million_tokens",
     "output_usd_per_million_tokens",
 }
-_RATE_RE = re.compile(r"^(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,12})?$")
+_RATE_RE = re.compile(r"^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,12})?$")
 _MONEY_QUANTUM = Decimal("0.000000000001")
 
 

@@ -992,6 +992,63 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "decimal string"):
             compare_benchmark_reports(report, candidate, pricing_card=card)
 
+    def test_pricing_card_accepts_decimal_string_rates(self):
+        baseline = self._report("baseline-model", [{**_zone(), "draw_overlay": True}])
+        candidate = self._report("candidate-model", [{**_zone(), "draw_overlay": True}])
+        card = {
+            "schema": "stockmind.usage-pricing.v1",
+            "version": "decimal-rate-test",
+            "currency": "USD",
+            "effective_from": "2026-11-01",
+            "effective_until": None,
+            "source": "Synthetic unit-test rates; not provider pricing",
+            "models": {
+                model: {
+                    "input_usd_per_million_tokens": "10.25",
+                    "cached_input_usd_per_million_tokens": "2.5",
+                    "output_usd_per_million_tokens": "20.75",
+                }
+                for model in ("baseline-model", "candidate-model")
+            },
+        }
+        result = compare_benchmark_reports(baseline, candidate, pricing_card=card)
+        self.assertEqual(
+            result["currency_cost_estimate"]["pricing_card"]["version"],
+            "decimal-rate-test",
+        )
+
+    def test_cost_is_not_estimated_outside_rate_card_effective_dates(self):
+        usage = {"prompt_tokens": 1000, "completion_tokens": 250, "total_tokens": 1250}
+        baseline = self._report(
+            "baseline-model", [{**_zone(), "draw_overlay": True}], usage=usage
+        )
+        candidate = self._report(
+            "candidate-model", [{**_zone(), "draw_overlay": True}], usage=usage
+        )
+        card = {
+            "schema": "stockmind.usage-pricing.v1",
+            "version": "future-rate-card",
+            "currency": "USD",
+            "effective_from": "2026-11-07",
+            "effective_until": None,
+            "source": "Synthetic unit-test rates; not provider pricing",
+            "models": {
+                model: {
+                    "input_usd_per_million_tokens": "10",
+                    "output_usd_per_million_tokens": "20",
+                }
+                for model in ("baseline-model", "candidate-model")
+            },
+        }
+        result = compare_benchmark_reports(baseline, candidate, pricing_card=card)
+        self.assertEqual(
+            result["currency_cost_estimate"]["baseline"]["unpriced_reasons"],
+            {"outside_pricing_effective_period": 1},
+        )
+        self.assertIsNone(
+            result["currency_cost_estimate"]["paired_deltas"]["total_delta_usd"]
+        )
+
     def test_paired_telemetry_delta_reports_median_and_p95(self):
         baseline_values = [100, 200, 300, 400, 500]
         candidate_values = [150, 180, 450, 350, 700]
