@@ -1221,7 +1221,7 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
 
         get_file.assert_not_awaited()
         document_message.answer.assert_awaited_once_with(
-            "That screenshot is too large. Please resize it and try again."
+            "That image is too large. Please send an image under 5 MB."
         )
         total_calls = [
             call for call in info.call_args_list
