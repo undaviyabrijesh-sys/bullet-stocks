@@ -656,7 +656,10 @@ per one million tokens. The card is versioned and date-bounded; a fixture is
 left unpriced when its actual model is absent, its provider timestamp falls
 outside the card's effective dates, usage is missing, or a discounted cached
 input rate is supplied without the cached-token count needed to calculate it.
-Missing values are never treated as zero.
+Missing values are never treated as zero. The cost-comparison helper also
+rejects duplicate, missing or extra fixture IDs before aggregation; it never
+silently overwrites a duplicate fixture or reports a partial baseline/candidate
+pair as if it were complete.
 
 Provider-reported `image_tokens` are a subset of prompt/input tokens and are
 not charged a second time. `reasoning_tokens` are a subset of completion/output

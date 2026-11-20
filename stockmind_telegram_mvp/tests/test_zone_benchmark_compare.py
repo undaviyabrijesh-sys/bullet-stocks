@@ -8,6 +8,7 @@ from pathlib import Path
 from PIL import Image
 
 from stockmind_telegram_mvp.app.zone_benchmark import evaluate_benchmark_manifest
+from stockmind_telegram_mvp.app.usage_cost import compare_fixture_costs
 from stockmind_telegram_mvp.app.zone_benchmark_compare import (
     _paired_telemetry_delta,
     _read_report,
@@ -1174,6 +1175,67 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
             cost["paired_deltas"]["mean_delta_usd"],
             "0.000001000000000000",
         )
+
+
+
+class InferenceCostFixturePairingTests(unittest.TestCase):
+    def setUp(self):
+        self.pricing_card = {
+            "schema": "stockmind.usage-pricing.v1",
+            "version": "fixture-pairing-test",
+            "currency": "USD",
+            "effective_from": "2026-11-01",
+            "effective_until": None,
+            "source": "Synthetic unit-test rates; not provider pricing",
+            "models": {
+                "model": {
+                    "input_usd_per_million_tokens": "1",
+                    "output_usd_per_million_tokens": "1",
+                }
+            },
+        }
+
+    def test_rejects_duplicate_baseline_fixture_ids_instead_of_overwriting(self):
+        with self.assertRaisesRegex(ValueError, "baseline contains duplicate fixture_id"):
+            compare_fixture_costs(
+                [{"fixture_id": "btc-1h-001"}, {"fixture_id": "btc-1h-001"}],
+                [{"fixture_id": "btc-1h-001"}],
+                self.pricing_card,
+            )
+
+    def test_rejects_duplicate_candidate_fixture_ids_instead_of_overwriting(self):
+        with self.assertRaisesRegex(ValueError, "candidate contains duplicate fixture_id"):
+            compare_fixture_costs(
+                [{"fixture_id": "btc-1h-001"}],
+                [{"fixture_id": "btc-1h-001"}, {"fixture_id": "btc-1h-001"}],
+                self.pricing_card,
+            )
+
+    def test_reports_missing_candidate_fixture_without_key_error(self):
+        with self.assertRaisesRegex(ValueError, "missing from candidate"):
+            compare_fixture_costs(
+                [{"fixture_id": "btc-1h-001"}, {"fixture_id": "eth-1h-001"}],
+                [{"fixture_id": "btc-1h-001"}],
+                self.pricing_card,
+            )
+
+    def test_reports_extra_candidate_fixture_without_silently_ignoring_it(self):
+        with self.assertRaisesRegex(ValueError, "extra in candidate"):
+            compare_fixture_costs(
+                [{"fixture_id": "btc-1h-001"}],
+                [{"fixture_id": "btc-1h-001"}, {"fixture_id": "eth-1h-001"}],
+                self.pricing_card,
+            )
+
+    def test_rejects_untrimmed_or_non_string_fixture_ids(self):
+        for fixture_id in (" btc-1h-001", "", 7, None):
+            with self.subTest(fixture_id=fixture_id):
+                with self.assertRaisesRegex(ValueError, "fixture_id"):
+                    compare_fixture_costs(
+                        [{"fixture_id": fixture_id}],
+                        [{"fixture_id": fixture_id}],
+                        self.pricing_card,
+                    )
 
 
 if __name__ == "__main__":

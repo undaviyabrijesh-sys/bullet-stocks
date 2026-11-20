@@ -305,17 +305,44 @@ def _paired_cost_delta(baseline, candidate):
     }
 
 
+def _index_fixture_costs(fixtures, label, pricing_card):
+    """Index one side of a paired cost run without silently overwriting IDs."""
+    if not isinstance(fixtures, (list, tuple)):
+        raise ValueError(f"{label}_fixtures must be a list or tuple")
+    indexed = {}
+    for index, fixture in enumerate(fixtures):
+        if not isinstance(fixture, dict):
+            raise ValueError(f"{label}_fixtures[{index}] must be an object")
+        fixture_id = fixture.get("fixture_id")
+        if (
+            not isinstance(fixture_id, str)
+            or not fixture_id.strip()
+            or fixture_id != fixture_id.strip()
+        ):
+            raise ValueError(
+                f"{label}_fixtures[{index}].fixture_id must be a non-empty trimmed string"
+            )
+        if fixture_id in indexed:
+            raise ValueError(
+                f"{label} contains duplicate fixture_id {fixture_id!r}"
+            )
+        indexed[fixture_id] = estimate_fixture_cost(fixture, pricing_card)
+    return indexed
+
+
 def compare_fixture_costs(baseline_fixtures, candidate_fixtures, raw_pricing_card):
-    """Return date-bound cost summaries and per-fixture estimates for a paired run."""
+    """Return date-bound cost summaries for exactly paired, uniquely identified fixtures."""
     card = validate_pricing_card(raw_pricing_card)
-    baseline = {
-        fixture["fixture_id"]: estimate_fixture_cost(fixture, card)
-        for fixture in baseline_fixtures
-    }
-    candidate = {
-        fixture["fixture_id"]: estimate_fixture_cost(fixture, card)
-        for fixture in candidate_fixtures
-    }
+    baseline = _index_fixture_costs(baseline_fixtures, "baseline", card)
+    candidate = _index_fixture_costs(candidate_fixtures, "candidate", card)
+    if baseline.keys() != candidate.keys():
+        missing = sorted(baseline.keys() - candidate.keys())
+        extra = sorted(candidate.keys() - baseline.keys())
+        raise ValueError(
+            "paired cost fixtures must contain exactly the same fixture IDs "
+            f"(missing from candidate: {missing}; extra in candidate: {extra})"
+        )
+
     fixture_details = {}
     for fixture_id in sorted(baseline):
         left, right = baseline[fixture_id], candidate[fixture_id]
