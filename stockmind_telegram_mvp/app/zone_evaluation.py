@@ -4,6 +4,7 @@ Coordinates are normalized to the full screenshot (0..1). This module does not
 infer or repair geometry; it scores only boxes that would actually be rendered.
 Optional price-axis scoring requires manually verified axis anchors.
 """
+from fractions import Fraction
 from functools import lru_cache
 import math
 
@@ -47,44 +48,64 @@ def _valid_box(zone, *, prediction, image_width, image_height):
     return normalized_box, pixel_aligned_zone
 
 
-def _iou(a, b):
+def _pixel_iou_fraction(a, b):
+    """Return exact intersection-over-union from half-open integer pixel boxes."""
     left = max(a[0], b[0])
     top = max(a[1], b[1])
     right = min(a[2], b[2])
     bottom = min(a[3], b[3])
-    intersection = max(0.0, right - left) * max(0.0, bottom - top)
+    intersection = max(0, right - left) * max(0, bottom - top)
     area_a = (a[2] - a[0]) * (a[3] - a[1])
     area_b = (b[2] - b[0]) * (b[3] - b[1])
     union = area_a + area_b - intersection
-    return intersection / union if union > 0 else 0.0
+    return Fraction(intersection, union) if union > 0 else Fraction(0, 1)
 
 
 def _match(predictions, references, threshold):
-    """Find maximum-cardinality, then maximum-IoU one-to-one matches."""
-    scores = tuple(tuple(_iou(p["box"], r["box"]) for r in references) for p in predictions)
+    """Find maximum-cardinality, then exact maximum-IoU one-to-one matches.
+
+    Eligibility and assignment use exact fractions from renderer-quantized
+    integer pixel boxes. This prevents a mathematically threshold-equal match
+    from being dropped because normalized floating-point coordinates round
+    its IoU a few ulps below the configured threshold.
+    """
+    threshold_fraction = Fraction(*threshold.as_integer_ratio())
+    scores = tuple(
+        tuple(_pixel_iou_fraction(p["box_px"], r["box_px"]) for r in references)
+        for p in predictions
+    )
 
     @lru_cache(maxsize=None)
     def solve(pred_index, used_reference_mask):
         if pred_index >= len(predictions):
-            return (0, 0.0, ())
+            return (0, Fraction(0, 1), ())
 
         best = solve(pred_index + 1, used_reference_mask)
         for ref_index, score in enumerate(scores[pred_index]):
-            if used_reference_mask & (1 << ref_index) or score < threshold or score <= 0:
+            if (
+                used_reference_mask & (1 << ref_index)
+                or score < threshold_fraction
+                or score <= 0
+            ):
                 continue
-            sub_count, sub_iou, sub_pairs = solve(pred_index + 1, used_reference_mask | (1 << ref_index))
+            sub_count, sub_iou, sub_pairs = solve(
+                pred_index + 1, used_reference_mask | (1 << ref_index)
+            )
             candidate = (
                 sub_count + 1,
                 sub_iou + score,
                 ((pred_index, ref_index, score),) + sub_pairs,
             )
             if candidate[0] > best[0] or (
-                candidate[0] == best[0] and candidate[1] > best[1] + 1e-12
+                candidate[0] == best[0] and candidate[1] > best[1]
             ):
                 best = candidate
         return best
 
-    return solve(0, 0)[2]
+    return tuple(
+        (prediction_index, reference_index, float(score))
+        for prediction_index, reference_index, score in solve(0, 0)[2]
+    )
 
 
 def _metrics(predictions, references, matches):
@@ -626,6 +647,12 @@ def evaluate_manual_annotation_agreement(
                 "index": index,
                 "zone_type": zone["zone_type"],
                 "box": box,
+                "box_px": [
+                    round(box[0] * image_width),
+                    round(box[1] * image_height),
+                    round(box[2] * image_width),
+                    round(box[3] * image_height),
+                ],
                 "zone": pixel_aligned_zone,
             })
         normalized_sets.append(records)
