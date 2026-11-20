@@ -18,20 +18,6 @@
    "symbol": "ALIVUS"
   },
   {
-   "level": 2061.800048828125,
-   "trigger": 2103.0360498046875,
-   "monthly_sma20": 1633.4419982910156,
-   "monthly_sma10": 1553.810009765625,
-   "monthly_sma20_undercut": true,
-   "monthly_sma20_undercut_month": "Jun'26",
-   "static_score": 35.0,
-   "vol_ratio": 0.7771133391805244,
-   "rs": 0.4178770543913919,
-   "base_range": 0.6901077932180597,
-   "setup_month": "Oct'26",
-   "symbol": "COFORGE"
-  },
-  {
    "level": 1647.0,
    "trigger": 1679.94,
    "monthly_sma20": 1207.4225036621094,
