@@ -661,11 +661,14 @@ Missing values are never treated as zero.
 Provider-reported `image_tokens` are a subset of prompt/input tokens and are
 not charged a second time. `reasoning_tokens` are a subset of completion/output
 tokens and are not charged a second time. If no cached-input rate is supplied,
-all prompt tokens use the standard input rate. Cost outputs are rounded to
-18 decimal places in USD. This preserves the full per-token precision allowed by
-rate cards (12 fractional places per million tokens, divided by 1,000,000) and
-prevents very small per-fixture costs from rounding to zero before aggregation. and are estimates based only on the supplied card;
-they exclude taxes, discounts, credits, retries not represented in the fixture,
-and any non-token charges. Keep the original rate-card source with exported
-reports. These estimates are not invoices and are not evidence of lower
-production spend.
+all prompt tokens use the standard input rate. Cost outputs are rounded to 18 decimal places in USD. The
+estimator uses an expanded local Decimal context for token-rate multiplication,
+aggregation and paired differences, so large provider token counts do not lose
+precision or fail during fixed-point formatting. This preserves the full
+per-token precision allowed by rate cards (12 fractional places per million
+tokens, divided by 1,000,000) and prevents very small per-fixture costs from
+rounding to zero before aggregation. Estimates are based only on the supplied
+card; they exclude taxes, discounts, credits, retries not represented in the
+fixture, and any non-token charges. Keep the original rate-card source with
+exported reports. These estimates are not invoices and are not evidence of
+lower production spend.
