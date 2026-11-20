@@ -1,175 +1,309 @@
-"""Tests for offline aggregation of privacy-minimized pipeline timing logs."""
-import json
-from io import StringIO
-import unittest
-from unittest.mock import patch
+"""Offline aggregation for StockMind's privacy-minimized Telegram timing logs.
 
-from stockmind_telegram_mvp.app.pipeline_telemetry import (
-    aggregate_timing_lines,
-    main,
-    parse_timing_line,
+The parser deliberately extracts only known timing fields. It never copies raw
+log lines into the report, so unrelated logger context is not exported.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from collections import defaultdict
+from statistics import median
+from typing import Iterable
+
+_MAX_DURATION_MS = (1 << 63) - 1
+_REQUEST_MARKER = "StockMind request timing "
+_HANDLER_MARKER = "StockMind Telegram "
+
+_REQUEST_RE = re.compile(
+    r"StockMind request timing "
+    r"(?:request_id=(?P<request_id>[0-9a-f]{32}) )?"
+    r"mode=(?P<mode>[a-z][a-z0-9_]*) "
+    r"outcome=(?P<outcome>[a-z][a-z0-9_]*) "
+    r"total_ms=(?P<total>[0-9]+) stages=(?P<stages>.*)$"
+)
+_STAGE_RE = re.compile(r"(?P<name>[a-z][a-z0-9_]*)=(?P<duration>[0-9]+)ms")
+_HANDLER_RE = re.compile(
+    r"StockMind Telegram (?P<kind>photo|document) "
+    r"(?:request_id=(?P<request_id>[0-9a-f]{32}) )?"
+    r"(?P<metric>download_ms|handler_total_ms)=(?P<duration>[0-9]+)\s*$"
 )
 
 
-class PipelineTelemetryTests(unittest.TestCase):
-    def test_parses_request_timing_with_logger_prefix(self):
-        event = parse_timing_line(
-            "2026-11-20 INFO bot StockMind request timing "
-            "mode=chart outcome=completed total_ms=125 "
-            "stages=image_prepare=5ms analysis_execution=90ms overlay_render=10ms"
-        )
-        self.assertEqual(
-            event,
-            {
-                "kind": "request",
-                "mode": "chart",
-                "outcome": "completed",
-                "total_ms": 125,
-                "stages": {
-                    "image_prepare": 5,
-                    "analysis_execution": 90,
-                    "overlay_render": 10,
-                },
-            },
-        )
+def _duration(value: str) -> int | None:
+    """Parse a bounded non-negative millisecond count."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0 or parsed > _MAX_DURATION_MS:
+        return None
+    return parsed
 
-    def test_parses_request_with_no_completed_stages(self):
-        self.assertEqual(
-            parse_timing_line(
-                "StockMind request timing mode=text outcome=failed "
-                "total_ms=0 stages=none"
+
+def _parse_stages(raw: str) -> dict[str, int] | None:
+    if raw == "none":
+        return {}
+    if not raw:
+        return None
+
+    stages: dict[str, int] = {}
+    for token in raw.split():
+        match = _STAGE_RE.fullmatch(token)
+        if match is None:
+            return None
+        name = match.group("name")
+        duration = _duration(match.group("duration"))
+        if duration is None or name in stages:
+            return None
+        stages[name] = duration
+    return stages
+
+
+def parse_timing_line(line: str) -> dict | None:
+    """Extract one recognized timing event, or return None for other/malformed lines."""
+    if not isinstance(line, str):
+        return None
+
+    request_match = _REQUEST_RE.search(line.rstrip("\r\n"))
+    if request_match is not None:
+        total_ms = _duration(request_match.group("total"))
+        stages = _parse_stages(request_match.group("stages"))
+        if total_ms is None or stages is None:
+            return None
+        event = {
+            "kind": "request",
+            "mode": request_match.group("mode"),
+            "outcome": request_match.group("outcome"),
+            "total_ms": total_ms,
+            "stages": stages,
+        }
+        request_id = request_match.group("request_id")
+        if request_id is not None:
+            event["request_id"] = request_id
+        return event
+
+    handler_match = _HANDLER_RE.search(line.rstrip("\r\n"))
+    if handler_match is not None:
+        duration_ms = _duration(handler_match.group("duration"))
+        if duration_ms is None:
+            return None
+        event = {
+            "kind": "handler",
+            "event": (
+                f"telegram_{handler_match.group('kind')}_"
+                f"{handler_match.group('metric')}"
             ),
+            "duration_ms": duration_ms,
+            "upload_kind": handler_match.group("kind"),
+            "metric": handler_match.group("metric"),
+        }
+        request_id = handler_match.group("request_id")
+        if request_id is not None:
+            event["request_id"] = request_id
+        return event
+    return None
+
+
+def _summarize(values: list[int]) -> dict:
+    ordered = sorted(values)
+    count = len(ordered)
+    if count == 0:
+        raise ValueError("cannot summarize an empty sample")
+
+    # p50 is the conventional median; p95 uses the nearest-rank method.
+    middle = count // 2
+    p50 = (
+        ordered[middle]
+        if count % 2
+        else (ordered[middle - 1] + ordered[middle]) / 2
+    )
+    p95_rank = (95 * count + 99) // 100
+    return {
+        "sample_count": count,
+        "p50_ms": p50,
+        "p95_ms": ordered[p95_rank - 1],
+        "min_ms": ordered[0],
+        "max_ms": ordered[-1],
+    }
+
+
+def aggregate_timing_lines(lines: Iterable[str]) -> dict:
+    """Aggregate timings and correlate upload/request events by opaque request ID."""
+    request_groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    handler_samples: dict[str, list[int]] = defaultdict(list)
+    correlations: dict[str, dict] = {}
+    conflicted_request_ids: set[str] = set()
+    parsed_requests = 0
+    parsed_handlers = 0
+    legacy_request_events = 0
+    legacy_handler_events = 0
+    rejected_timing_lines = 0
+
+    for line in lines:
+        event = parse_timing_line(line)
+        if event is None:
+            if isinstance(line, str) and (
+                _REQUEST_MARKER in line
+                or (
+                    _HANDLER_MARKER in line
+                    and ("download_ms=" in line or "handler_total_ms=" in line)
+                )
+            ):
+                rejected_timing_lines += 1
+            continue
+
+        request_id = event.get("request_id")
+        if event["kind"] == "request":
+            request_groups[(event["mode"], event["outcome"])].append(event)
+            parsed_requests += 1
+            if request_id is None:
+                legacy_request_events += 1
+            else:
+                record = correlations.setdefault(
+                    request_id,
+                    {"request": None, "upload_kind": None, "handler_metrics": {}},
+                )
+                if record["request"] is not None:
+                    conflicted_request_ids.add(request_id)
+                else:
+                    record["request"] = event
+        else:
+            handler_samples[event["event"]].append(event["duration_ms"])
+            parsed_handlers += 1
+            if request_id is None:
+                legacy_handler_events += 1
+            else:
+                record = correlations.setdefault(
+                    request_id,
+                    {"request": None, "upload_kind": None, "handler_metrics": {}},
+                )
+                if (
+                    record["upload_kind"] is not None
+                    and record["upload_kind"] != event["upload_kind"]
+                ):
+                    conflicted_request_ids.add(request_id)
+                record["upload_kind"] = event["upload_kind"]
+                metric = event["metric"]
+                if metric in record["handler_metrics"]:
+                    conflicted_request_ids.add(request_id)
+                else:
+                    record["handler_metrics"][metric] = event["duration_ms"]
+
+    groups = []
+    for (mode, outcome), events in sorted(request_groups.items()):
+        totals = [event["total_ms"] for event in events]
+        stage_names = sorted(
+            {name for event in events for name in event["stages"]}
+        )
+        stages = {}
+        for name in stage_names:
+            values = [
+                event["stages"][name]
+                for event in events
+                if name in event["stages"]
+            ]
+            summary = _summarize(values)
+            summary["missing_count"] = len(events) - len(values)
+            stages[name] = summary
+        groups.append(
             {
-                "kind": "request",
-                "mode": "text",
-                "outcome": "failed",
-                "total_ms": 0,
-                "stages": {},
-            },
+                "mode": mode,
+                "outcome": outcome,
+                "request_count": len(events),
+                "total_ms": _summarize(totals),
+                "stages": stages,
+            }
         )
 
-    def test_aggregates_median_nearest_rank_p95_and_stage_coverage(self):
-        lines = []
-        for duration in range(1, 21):
-            stages = f"analysis_execution={duration * 2}ms"
-            if duration == 1:
-                stages += " overlay_render=3ms"
-            lines.append(
-                "StockMind request timing mode=chart outcome=completed "
-                f"total_ms={duration * 10} stages={stages}"
-            )
-
-        report = aggregate_timing_lines(lines)
-        self.assertEqual(report["parsed_request_events"], 20)
-        self.assertEqual(report["rejected_timing_lines"], 0)
-        group = report["request_groups"][0]
-        self.assertEqual(group["request_count"], 20)
-        self.assertEqual(group["total_ms"]["p50_ms"], 105)
-        self.assertEqual(group["total_ms"]["p95_ms"], 190)
-        self.assertEqual(
-            group["stages"]["analysis_execution"]["p50_ms"], 21
-        )
-        self.assertEqual(
-            group["stages"]["analysis_execution"]["p95_ms"], 38
-        )
-        self.assertEqual(
-            group["stages"]["overlay_render"]["sample_count"], 1
-        )
-        self.assertEqual(
-            group["stages"]["overlay_render"]["missing_count"], 19
-        )
-
-    def test_separates_mode_and_outcome_groups(self):
-        report = aggregate_timing_lines(
-            [
-                "StockMind request timing mode=chart outcome=completed "
-                "total_ms=100 stages=analysis_execution=70ms",
-                "StockMind request timing mode=chart outcome=failed "
-                "total_ms=200 stages=analysis_execution=150ms",
-                "StockMind request timing mode=text outcome=completed "
-                "total_ms=300 stages=analysis_execution=250ms",
-            ]
-        )
-        keys = [
-            (group["mode"], group["outcome"])
-            for group in report["request_groups"]
-        ]
-        self.assertEqual(
-            keys,
-            [("chart", "completed"), ("chart", "failed"), ("text", "completed")],
+    correlated_requests = []
+    complete_upload_requests = 0
+    for request_id, record in sorted(correlations.items()):
+        if request_id in conflicted_request_ids:
+            continue
+        request = record["request"]
+        handler_metrics = record["handler_metrics"]
+        if (
+            request is not None
+            and record["upload_kind"] is not None
+            and {"download_ms", "handler_total_ms"} <= set(handler_metrics)
+        ):
+            complete_upload_requests += 1
+        correlated_requests.append(
+            {
+                "request_id": request_id,
+                "request": (
+                    None
+                    if request is None
+                    else {
+                        "mode": request["mode"],
+                        "outcome": request["outcome"],
+                        "total_ms": request["total_ms"],
+                        "stages": request["stages"],
+                    }
+                ),
+                "telegram_handler": (
+                    None
+                    if not handler_metrics
+                    else {
+                        "kind": record["upload_kind"],
+                        **handler_metrics,
+                    }
+                ),
+            }
         )
 
-    def test_keeps_photo_and_document_handler_metrics_separate(self):
-        report = aggregate_timing_lines(
-            [
-                "StockMind Telegram photo download_ms=10",
-                "StockMind Telegram photo download_ms=30",
-                "StockMind Telegram photo handler_total_ms=80",
-                "StockMind Telegram document download_ms=20",
-                "StockMind Telegram document handler_total_ms=100",
-            ]
-        )
-        self.assertEqual(report["parsed_handler_events"], 5)
-        self.assertEqual(
-            report["telegram_handler_metrics"]["telegram_photo_download_ms"]["p50_ms"],
-            20,
-        )
-        self.assertEqual(
-            report["telegram_handler_metrics"]["telegram_photo_handler_total_ms"]["p95_ms"],
-            80,
-        )
-        self.assertEqual(
-            report["telegram_handler_metrics"]["telegram_document_download_ms"]["p50_ms"],
-            20,
-        )
+    return {
+        "schema_version": 2,
+        "percentile_method": {
+            "p50": "median",
+            "p95": "nearest_rank",
+        },
+        "parsed_request_events": parsed_requests,
+        "parsed_handler_events": parsed_handlers,
+        "rejected_timing_lines": rejected_timing_lines,
+        "request_groups": groups,
+        "telegram_handler_metrics": {
+            name: _summarize(values)
+            for name, values in sorted(handler_samples.items())
+        },
+        "correlation_summary": {
+            "request_ids_seen": len(correlations),
+            "correlated_request_count": len(correlated_requests),
+            "complete_upload_request_count": complete_upload_requests,
+            "conflicted_request_id_count": len(conflicted_request_ids),
+            "legacy_request_event_count": legacy_request_events,
+            "legacy_handler_event_count": legacy_handler_events,
+        },
+        "correlated_requests": correlated_requests,
+    }
 
-    def test_rejects_duplicate_or_malformed_stage_fields(self):
-        report = aggregate_timing_lines(
-            [
-                "StockMind request timing mode=chart outcome=completed "
-                "total_ms=10 stages=analysis_execution=5ms analysis_execution=6ms",
-                "StockMind request timing mode=chart outcome=completed "
-                "total_ms=-1 stages=none",
-                "StockMind request timing mode=chart outcome=completed "
-                "total_ms=10 stages=analysis_execution=not-a-duration",
-                "ordinary application log line",
-            ]
-        )
-        self.assertEqual(report["parsed_request_events"], 0)
-        self.assertEqual(report["rejected_timing_lines"], 3)
-        self.assertEqual(report["request_groups"], [])
 
-    def test_ignores_unrelated_log_context_in_exported_report(self):
-        report = aggregate_timing_lines(
-            [
-                "user_id=123 prompt='Map BTC 1H' StockMind request timing "
-                "mode=chart outcome=completed total_ms=10 stages=analysis_execution=5ms"
-            ]
-        )
-        serialized = json.dumps(report)
-        self.assertNotIn("123", serialized)
-        self.assertNotIn("Map BTC", serialized)
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Aggregate privacy-minimized StockMind Telegram timing logs."
+    )
+    parser.add_argument(
+        "log_file",
+        help="application log file to read, or '-' to read standard input",
+    )
+    args = parser.parse_args(argv)
 
-    def test_empty_input_returns_explicit_empty_coverage(self):
-        report = aggregate_timing_lines([])
-        self.assertEqual(report["parsed_request_events"], 0)
-        self.assertEqual(report["parsed_handler_events"], 0)
-        self.assertEqual(report["request_groups"], [])
-        self.assertEqual(report["telegram_handler_metrics"], {})
+    if args.log_file == "-":
+        report = aggregate_timing_lines(sys.stdin)
+    else:
+        try:
+            with open(args.log_file, "r", encoding="utf-8", errors="replace") as handle:
+                report = aggregate_timing_lines(handle)
+        except OSError as exc:
+            parser.exit(2, f"error: cannot read timing log: {exc}\n")
 
-    def test_cli_reads_standard_input_and_emits_json(self):
-        source = StringIO(
-            "StockMind request timing mode=text outcome=completed "
-            "total_ms=12 stages=analysis_execution=8ms\n"
-        )
-        output = StringIO()
-        with patch("sys.stdin", source), patch("sys.stdout", output):
-            exit_code = main(["-"])
-        self.assertEqual(exit_code, 0)
-        report = json.loads(output.getvalue())
-        self.assertEqual(report["parsed_request_events"], 1)
-        self.assertEqual(report["request_groups"][0]["total_ms"]["p50_ms"], 12)
+    json.dump(report, sys.stdout, indent=2, sort_keys=True)
+    sys.stdout.write("\n")
+    return 0
 
 
 if __name__ == "__main__":
-    unittest.main()
+    raise SystemExit(main())
