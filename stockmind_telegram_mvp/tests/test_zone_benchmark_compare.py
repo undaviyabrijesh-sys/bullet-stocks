@@ -97,13 +97,18 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
 
     def _report(self, model, predicted, *, fixture_id="btc-1h-001",
                 reference=None, context=None, anchors=None, threshold=0.5,
-                reference_plot_bounds=None, predicted_plot_bounds=None):
+                reference_plot_bounds=None, predicted_plot_bounds=None,
+                usage=None, request_latency_ms=None):
         metadata = {
             "provider": "openai", "model": model, "requested_model": model,
             "prompt_version": "dns-chart-v1", "prompt_sha256": "a" * 64,
             "generated_at": "2026-11-06T03:00:00Z", "system_fingerprint": "fp-test",
             "settings": {"temperature": 0.1, "image_detail": "high"}
         }
+        if usage is not None:
+            metadata["usage"] = usage
+        if request_latency_ms is not None:
+            metadata["request_latency_ms"] = request_latency_ms
         axis_bounds = {
             "x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9
         }
@@ -763,6 +768,104 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         report_path.write_text('{"score":NaN}', encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "non-standard JSON constant 'NaN'"):
             _read_report(report_path, "candidate")
+
+
+    def test_compares_inference_usage_and_latency_with_paired_deltas(self):
+        baseline_usage = {
+            "prompt_tokens": 1200,
+            "completion_tokens": 300,
+            "total_tokens": 1500,
+            "image_tokens": 850,
+            "cached_prompt_tokens": 0,
+            "reasoning_tokens": 40,
+        }
+        candidate_usage = {
+            "prompt_tokens": 1000,
+            "completion_tokens": 250,
+            "total_tokens": 1250,
+            "image_tokens": 700,
+            "cached_prompt_tokens": 100,
+            "reasoning_tokens": 25,
+        }
+        baseline = self._report(
+            "same-model", [{**_zone(), "draw_overlay": True}],
+            usage=baseline_usage, request_latency_ms=1250,
+        )
+        candidate = self._report(
+            "same-model", [{**_zone(), "draw_overlay": True}],
+            usage=candidate_usage, request_latency_ms=900,
+        )
+
+        result = compare_benchmark_reports(baseline, candidate)
+        telemetry = result["inference_telemetry"]
+
+        self.assertTrue(result["same_prediction_profile"])
+        self.assertEqual(
+            telemetry["baseline"]["usage"]["total_tokens"]["total"], 1500
+        )
+        self.assertEqual(
+            telemetry["candidate"]["usage"]["total_tokens"]["total"], 1250
+        )
+        self.assertEqual(
+            telemetry["baseline"]["request_latency_ms"]["mean"], 1250.0
+        )
+        self.assertEqual(
+            telemetry["paired_deltas"]["total_tokens"]["total_delta"], -250
+        )
+        self.assertEqual(
+            telemetry["paired_deltas"]["total_tokens"]["paired_fixture_count"], 1
+        )
+        self.assertEqual(
+            telemetry["paired_deltas"]["request_latency_ms"]["mean_delta"], -350.0
+        )
+        self.assertEqual(
+            result["fixtures"][0]["inference_telemetry"]["baseline"]["usage"],
+            baseline_usage,
+        )
+        self.assertEqual(
+            result["fixtures"][0]["inference_telemetry"]["candidate"]["request_latency_ms"],
+            900,
+        )
+
+    def test_missing_inference_telemetry_is_not_treated_as_zero(self):
+        baseline = self._report(
+            "same-model", [{**_zone(), "draw_overlay": True}]
+        )
+        candidate = self._report(
+            "same-model", [{**_zone(), "draw_overlay": True}],
+            usage={
+                "prompt_tokens": 1000,
+                "completion_tokens": 250,
+                "total_tokens": 1250,
+            },
+            request_latency_ms=900,
+        )
+
+        telemetry = compare_benchmark_reports(
+            baseline, candidate
+        )["inference_telemetry"]
+
+        self.assertEqual(
+            telemetry["baseline"]["usage"]["reported_fixture_count"], 0
+        )
+        self.assertEqual(
+            telemetry["baseline"]["usage"]["missing_fixture_count"], 1
+        )
+        self.assertIsNone(
+            telemetry["baseline"]["usage"]["total_tokens"]["total"]
+        )
+        self.assertEqual(
+            telemetry["paired_deltas"]["total_tokens"]["paired_fixture_count"], 0
+        )
+        self.assertEqual(
+            telemetry["paired_deltas"]["total_tokens"]["missing_pair_count"], 1
+        )
+        self.assertIsNone(
+            telemetry["paired_deltas"]["total_tokens"]["total_delta"]
+        )
+        self.assertIsNone(
+            telemetry["paired_deltas"]["request_latency_ms"]["mean_delta"]
+        )
 
 if __name__ == "__main__":
     unittest.main()
