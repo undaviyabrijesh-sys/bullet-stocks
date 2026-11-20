@@ -857,6 +857,7 @@ async def handle_chart_document(message: Message):
         await message.answer(_ui(message, "unsupported_document"))
         return
     if document.file_size and document.file_size > MAX_CHART_IMAGE_BYTES:
+        _set_upload_outcome("rejected")
         await message.answer(_ui(message, "upload_too_large"))
         return
 

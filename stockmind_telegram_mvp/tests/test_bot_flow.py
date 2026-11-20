@@ -1202,6 +1202,37 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(total_calls[0].args[2], "rejected")
 
 
+    async def test_oversized_document_metadata_is_recorded_as_rejected(self):
+        document_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=self.user_id),
+            document=SimpleNamespace(
+                mime_type="image/png",
+                file_size=5,
+                file_id="telegram-file-id",
+            ),
+            caption="BTC 1H",
+            answer=AsyncMock(),
+        )
+
+        with patch.object(bot_module, "MAX_CHART_IMAGE_BYTES", 4), patch.object(
+            bot_module.bot, "get_file", new=AsyncMock()
+        ) as get_file, patch.object(bot_module.logger, "info") as info:
+            await bot_module.handle_chart_document(document_message)
+
+        get_file.assert_not_awaited()
+        document_message.answer.assert_awaited_once_with(
+            "That screenshot is too large. Please resize it and try again."
+        )
+        total_calls = [
+            call for call in info.call_args_list
+            if call.args and call.args[0]
+            == "StockMind Telegram document request_id=%s outcome=%s handler_total_ms=%d"
+        ]
+        self.assertEqual(len(total_calls), 1)
+        self.assertEqual(len(total_calls[0].args[1]), 32)
+        self.assertEqual(total_calls[0].args[2], "rejected")
+
+
     async def test_photo_download_and_research_timing_share_opaque_request_id(self):
         result = {
             "analysis": "Chart structure reviewed.",
