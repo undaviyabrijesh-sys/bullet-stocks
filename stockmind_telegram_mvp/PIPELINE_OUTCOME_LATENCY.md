@@ -1,5 +1,9 @@
 # Telegram upload latency by outcome
 
+The current report schema is version 4. Consumers should check `schema_version`
+when reading generated JSON because outcome-conflict accounting is explicit in
+this version.
+
 The offline pipeline report includes `telegram_handler_outcome_latency`,
 grouped by upload kind (`photo` or `document`) and the bounded final handler
 outcome. Each group reports p50, nearest-rank p95, minimum, maximum and sample
