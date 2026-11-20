@@ -69,20 +69,35 @@ def _active_request_id() -> str:
     return request_id
 
 
-def _request_scoped(handler):
-    """Give one Telegram update a random ID and preserve it through nested calls."""
-    @wraps(handler)
-    async def wrapped(*args, **kwargs):
-        token = None
-        if _request_id_context.get() is None:
-            token = _request_id_context.set(uuid4().hex)
-        try:
-            return await handler(*args, **kwargs)
-        finally:
-            if token is not None:
-                _request_id_context.reset(token)
+def _request_scoped(upload_kind: str):
+    """Scope an upload request ID and log handler duration on every exit path."""
+    if upload_kind not in {"photo", "document"}:
+        raise ValueError("upload_kind must be photo or document")
 
-    return wrapped
+    def decorate(handler):
+        @wraps(handler)
+        async def wrapped(*args, **kwargs):
+            token = None
+            if _request_id_context.get() is None:
+                token = _request_id_context.set(uuid4().hex)
+            started_at = time.perf_counter()
+            try:
+                return await handler(*args, **kwargs)
+            finally:
+                try:
+                    logger.info(
+                        "StockMind Telegram %s request_id=%s handler_total_ms=%d",
+                        upload_kind,
+                        _active_request_id(),
+                        _elapsed_ms(started_at),
+                    )
+                finally:
+                    if token is not None:
+                        _request_id_context.reset(token)
+
+        return wrapped
+
+    return decorate
 
 
 def _elapsed_ms(started_at: float) -> int:
@@ -721,7 +736,7 @@ async def reset(message: Message):
 
 
 @dp.message(F.photo)
-@_request_scoped
+@_request_scoped("photo")
 async def handle_chart_photo(message: Message):
     photo = message.photo[-1]
     if photo.file_size and photo.file_size > MAX_CHART_IMAGE_BYTES:
@@ -734,7 +749,6 @@ async def handle_chart_photo(message: Message):
             await message.answer(admission_error)
             return
 
-    handler_started = time.perf_counter()
     download_started = time.perf_counter()
     try:
         telegram_file = await bot.get_file(photo.file_id)
@@ -760,18 +774,11 @@ async def handle_chart_photo(message: Message):
         )
 
     caption = message.caption or _ui(message, "chart_caption_default")
-    try:
-        await run_research(message, caption, image_bytes, "image/jpeg")
-    finally:
-        logger.info(
-            "StockMind Telegram photo request_id=%s handler_total_ms=%d",
-            _active_request_id(),
-            _elapsed_ms(handler_started),
-        )
+    await run_research(message, caption, image_bytes, "image/jpeg")
 
 
 @dp.message(F.document)
-@_request_scoped
+@_request_scoped("document")
 async def handle_chart_document(message: Message):
     document = message.document
     mime_type = document.mime_type or ""
@@ -788,7 +795,6 @@ async def handle_chart_document(message: Message):
             await message.answer(admission_error)
             return
 
-    handler_started = time.perf_counter()
     download_started = time.perf_counter()
     try:
         telegram_file = await bot.get_file(document.file_id)
@@ -814,14 +820,7 @@ async def handle_chart_document(message: Message):
         )
 
     caption = message.caption or _ui(message, "chart_caption_default")
-    try:
-        await run_research(message, caption, image_bytes, mime_type)
-    finally:
-        logger.info(
-            "StockMind Telegram document request_id=%s handler_total_ms=%d",
-            _active_request_id(),
-            _elapsed_ms(handler_started),
-        )
+    await run_research(message, caption, image_bytes, mime_type)
 
 
 @dp.message(F.text)

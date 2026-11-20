@@ -1133,13 +1133,20 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(bot_module, "BETA_USER_LIMIT", 1), patch.object(
             bot_module.bot, "get_file", new=AsyncMock()
-        ) as get_file:
+        ) as get_file, patch.object(bot_module.logger, "info") as info:
             await bot_module.handle_chart_photo(photo_message)
 
         get_file.assert_not_awaited()
         photo_message.answer.assert_awaited_once_with(
             "The 10-person beta is currently full. Please try again later."
         )
+        total_calls = [
+            call for call in info.call_args_list
+            if call.args and call.args[0]
+            == "StockMind Telegram photo request_id=%s handler_total_ms=%d"
+        ]
+        self.assertEqual(len(total_calls), 1)
+        self.assertEqual(len(total_calls[0].args[1]), 32)
 
     async def test_photo_preflight_uses_telegram_language_for_beta_rejection(self):
         bot_module.beta_users.add(self.user_id + 1)
@@ -1177,13 +1184,20 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(bot_module, "DAILY_QUERY_LIMIT", 1), patch.object(
             bot_module.bot, "get_file", new=AsyncMock()
-        ) as get_file:
+        ) as get_file, patch.object(bot_module.logger, "info") as info:
             await bot_module.handle_chart_document(document_message)
 
         get_file.assert_not_awaited()
         document_message.answer.assert_awaited_once_with(
             "You've reached today's beta research limit. It resets at midnight IST."
         )
+        total_calls = [
+            call for call in info.call_args_list
+            if call.args and call.args[0]
+            == "StockMind Telegram document request_id=%s handler_total_ms=%d"
+        ]
+        self.assertEqual(len(total_calls), 1)
+        self.assertEqual(len(total_calls[0].args[1]), 32)
 
 
     async def test_photo_download_and_research_timing_share_opaque_request_id(self):

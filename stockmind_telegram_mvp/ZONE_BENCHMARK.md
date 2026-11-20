@@ -695,10 +695,12 @@ total pipeline milliseconds, and whichever stage measurements were reached:
 - `telegram_text_delivery`: final analysis/error text delivery.
 - `telegram_overlay_delivery`: optional overlay photo/document delivery.
 
-Photo and image-document handlers also log the Telegram file retrieval/download
-duration and a handler total. The handler total starts after the upload
-preflight checks and includes Telegram file retrieval, bounded download, lock
-and chart-capacity waits, analysis, and final delivery. It does not include
+Photo and image-document handlers log Telegram file retrieval/download
+duration when a download is attempted, plus a handler total on every handler
+exit. This includes unsupported-file, oversized-upload, quota/preflight and
+download-error paths. The handler total starts at handler entry and includes
+preflight checks, Telegram file retrieval, bounded download, lock and
+chart-capacity waits, analysis, and final delivery. It does not include
 Telegram update ingress delay before the handler begins.
 
 These measurements are process logs, not persisted per-user analytics. They

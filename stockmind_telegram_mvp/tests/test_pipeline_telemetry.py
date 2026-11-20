@@ -196,6 +196,32 @@ class PipelineTelemetryTests(unittest.TestCase):
         self.assertEqual(rows[document_id]["request"]["total_ms"], 200)
         self.assertEqual(rows[document_id]["telegram_handler"]["kind"], "document")
 
+    def test_preflight_rejection_keeps_handler_total_without_claiming_complete_upload(self):
+        request_id = "d" * 32
+        report = aggregate_timing_lines(
+            [
+                f"StockMind Telegram photo request_id={request_id} handler_total_ms=7",
+            ]
+        )
+
+        self.assertEqual(report["parsed_handler_events"], 1)
+        self.assertEqual(
+            report["correlation_summary"]["complete_upload_request_count"], 0
+        )
+        self.assertEqual(
+            report["correlated_requests"],
+            [
+                {
+                    "request_id": request_id,
+                    "request": None,
+                    "telegram_handler": {
+                        "kind": "photo",
+                        "handler_total_ms": 7,
+                    },
+                }
+            ],
+        )
+
     def test_duplicate_events_for_one_request_id_are_not_silently_joined(self):
         request_id = "c" * 32
         report = aggregate_timing_lines(
