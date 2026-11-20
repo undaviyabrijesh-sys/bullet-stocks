@@ -339,7 +339,7 @@ def aggregate_timing_lines(lines: Iterable[str]) -> dict:
         outcome_latency_groups.append(group)
 
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "percentile_method": {
             "p50": "median",
             "p95": "nearest_rank",
