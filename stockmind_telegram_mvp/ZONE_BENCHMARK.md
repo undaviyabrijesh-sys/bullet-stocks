@@ -702,3 +702,36 @@ intentionally omit user IDs, prompts, symbols, image hashes, and image bytes.
 Aggregate them offline before drawing latency conclusions; a single request
 does not establish p50/p95 performance. The model-provider request latency
 already captured by the AI client remains a separate, narrower measurement.
+
+
+## Offline pipeline latency report
+
+The `pipeline_telemetry` module aggregates the existing application log events
+without requiring a database or changing bot runtime behavior. From the
+repository root, run:
+
+```bash
+python -m stockmind_telegram_mvp.app.pipeline_telemetry /path/to/stockmind.log > latency-report.json
+```
+
+It also accepts `-` as the input path to read standard input. The report groups
+request totals and stage timings by request `mode` and `outcome`, and reports
+sample count, median (p50), nearest-rank p95, minimum and maximum. Each stage
+includes a `missing_count`; stages not reached on an error path are not treated
+as zero. Photo/document download and handler-total events are summarized as
+separate distributions.
+
+Upload-handler metrics are intentionally not joined to request events: the
+current log format has no request correlation identifier, so joining nearby
+lines could pair different concurrent uploads. Likewise, stage percentiles are
+independent distributions, not additive components of a synthetic end-to-end
+percentile. `analysis_execution` is a complete tool-enabled loop for text
+requests and a vision call for chart requests; it is not a provider-only timing
+for every mode. The provider request timer remains a narrower separate metric.
+
+The parser exports only recognized timing fields and never copies raw log
+lines or unrelated logger context into the JSON report. Keep source log files
+under the same access and retention controls as other application logs. A
+report with zero parsed events or non-zero `rejected_timing_lines` should be
+investigated before using its percentiles. Small samples, especially p95, are
+descriptive only and are not latency guarantees.
