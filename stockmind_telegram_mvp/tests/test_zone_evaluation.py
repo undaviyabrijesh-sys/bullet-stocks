@@ -308,6 +308,56 @@ class ZoneEvaluationTests(unittest.TestCase):
         self.assertEqual(result["agreement_f1"], 1.0)
         self.assertEqual(result["mean_matched_iou"], 0.5)
 
+    def test_decimal_iou_threshold_is_inclusive_for_ai_zone_predictions(self):
+        width, height = 640, 361
+        full_image = {
+            "x_start": 0.0, "x_end": 1.0, "y_top": 0.0, "y_bottom": 1.0
+        }
+        predicted = prediction(
+            x_start=10 / width, x_end=20 / width,
+            y_top=0.0, y_bottom=10 / height,
+        )
+        reference = zone(
+            x_start=10 / width, x_end=20 / width,
+            y_top=0.0, y_bottom=3 / height,
+        )
+
+        result = evaluate_zone_predictions(
+            [predicted], [reference], iou_threshold=0.3,
+            predicted_plot_bounds=full_image,
+            reference_plot_bounds=full_image,
+            image_width=width, image_height=height,
+        )
+        self.assertEqual(result["overall"]["true_positive"], 1)
+        self.assertAlmostEqual(result["overall"]["mean_iou"], 0.3)
+
+        stricter_result = evaluate_zone_predictions(
+            [predicted], [reference], iou_threshold=0.30000000000000004,
+            predicted_plot_bounds=full_image,
+            reference_plot_bounds=full_image,
+            image_width=width, image_height=height,
+        )
+        self.assertEqual(stricter_result["overall"]["true_positive"], 0)
+
+    def test_decimal_iou_threshold_is_inclusive_for_manual_annotation_agreement(self):
+        width, height = 640, 361
+        first = zone(
+            x_start=10 / width, x_end=20 / width,
+            y_top=0.0, y_bottom=10 / height,
+        )
+        second = zone(
+            x_start=10 / width, x_end=20 / width,
+            y_top=0.0, y_bottom=3 / height,
+        )
+
+        result = evaluate_manual_annotation_agreement(
+            [first], [second], iou_threshold=0.3,
+            image_width=width, image_height=height,
+        )
+        self.assertEqual(result["matched_zone_count"], 1)
+        self.assertEqual(result["agreement_f1"], 1.0)
+        self.assertAlmostEqual(result["mean_matched_iou"], 0.3)
+
     def test_iou_threshold_rejects_weak_overlap(self):
         result = evaluate(
             [prediction(x_start=0.5, x_end=0.9)], [zone()], iou_threshold=0.5
