@@ -17,11 +17,20 @@ kind/outcome group. It can include early rejections that never attempted a
 download, legacy logs without request IDs, and requests excluded because of
 duplicate or conflicting timing events. It is not a count of failed downloads.
 
-The handler-total distribution includes all parsed handler completion events
-with an explicit supported outcome, including legacy records without request
-IDs. Download distributions include only non-conflicted request IDs that have
-both a final handler outcome and exactly one parsed download event. This
-deliberately favors trustworthy pairing over sample coverage.
+The handler-total distribution includes each legacy completion event
+with an explicit supported outcome and one unambiguous completion per
+correlated request ID. A request ID is excluded from outcome counts and
+handler-total distributions when it contains duplicate handler-total/outcome
+events or inconsistent upload kinds. The report exposes this count as
+`conflicted_handler_outcome_request_id_count`; it is narrower than
+`conflicted_request_id_count`, which also includes conflicts that
+affect only request or download correlation.
+
+A duplicate or conflicting download event makes download pairing ambiguous,
+but does not discard a unique handler-total/outcome sample. Download
+distributions include only request IDs with one unambiguous upload kind, one
+final handler outcome, one handler-total event and exactly one parsed download
+event. This deliberately favors trustworthy pairing over sample coverage.
 
 Run the report with:
 
