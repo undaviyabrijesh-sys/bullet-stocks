@@ -1,6 +1,6 @@
 """Explicit, date-bound currency estimates for provider-reported chart token usage."""
 from datetime import date, datetime
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, localcontext
 import re
 
 
@@ -98,9 +98,42 @@ def _unpriced(reason, model=None):
     return {"status": "unpriced", "reason": reason, "model": model}
 
 
+def _decimal_integer_digits(value):
+    """Return the number of integer digits needed to represent a Decimal magnitude."""
+    value = abs(value)
+    return max(1, value.adjusted() + 1) if value else 1
+
+
+def _money_precision(values, term_count=1):
+    """Choose enough precision for fixed-point sums, means and paired deltas."""
+    integer_digits = max(
+        (_decimal_integer_digits(value) for value in values),
+        default=1,
+    )
+    count_digits = _decimal_integer_digits(Decimal(term_count))
+    return max(50, integer_digits + 18 + count_digits + 16)
+
+
+def _estimate_precision(token_rate_pairs):
+    """Preserve exact token-rate products before the documented 18-place rounding."""
+    product_digits = []
+    for token_count, rate in token_rate_pairs:
+        token_digits = _decimal_integer_digits(Decimal(token_count))
+        product_digits.append(token_digits + len(rate.as_tuple().digits))
+    return max(50, max(product_digits, default=1) + 32)
+
+
 def _money(value):
-    rounded = value.quantize(_MONEY_QUANTUM, rounding=ROUND_HALF_UP)
+    with localcontext() as context:
+        context.prec = max(context.prec, _decimal_integer_digits(value) + 26)
+        rounded = value.quantize(_MONEY_QUANTUM, rounding=ROUND_HALF_UP)
     return format(rounded, "f")
+
+
+def _money_difference(candidate, baseline):
+    with localcontext() as context:
+        context.prec = _money_precision([candidate, baseline], term_count=2)
+        return _money(candidate - baseline)
 
 
 def estimate_fixture_cost(fixture, pricing_card):
@@ -158,17 +191,30 @@ def estimate_fixture_cost(fixture, pricing_card):
     if split_cached and cached_tokens is None:
         return _unpriced("cached_token_usage_missing", model)
 
-    if split_cached:
-        standard_input_tokens = prompt - cached_tokens
-        input_cost = Decimal(standard_input_tokens) * input_rate / Decimal(1_000_000)
-        cached_cost = Decimal(cached_tokens) * cached_rate / Decimal(1_000_000)
-    else:
-        standard_input_tokens = prompt
-        input_cost = Decimal(prompt) * input_rate / Decimal(1_000_000)
-        cached_cost = Decimal(0)
+    output_rate = rates["output_usd_per_million_tokens"]
+    effective_cached_rate = cached_rate if split_cached else input_rate
+    with localcontext() as context:
+        context.prec = _estimate_precision([
+            (prompt, input_rate),
+            (cached_tokens or 0, effective_cached_rate),
+            (completion, output_rate),
+        ])
+        if split_cached:
+            standard_input_tokens = prompt - cached_tokens
+            input_cost = Decimal(standard_input_tokens) * input_rate / Decimal(1_000_000)
+            cached_cost = Decimal(cached_tokens) * cached_rate / Decimal(1_000_000)
+        else:
+            standard_input_tokens = prompt
+            input_cost = Decimal(prompt) * input_rate / Decimal(1_000_000)
+            cached_cost = Decimal(0)
 
-    output_cost = Decimal(completion) * rates["output_usd_per_million_tokens"] / Decimal(1_000_000)
-    total_cost = input_cost + cached_cost + output_cost
+        output_cost = Decimal(completion) * output_rate / Decimal(1_000_000)
+        total_cost = input_cost + cached_cost + output_cost
+        input_cost_usd = _money(input_cost)
+        cached_input_cost_usd = _money(cached_cost)
+        output_cost_usd = _money(output_cost)
+        total_cost_usd = _money(total_cost)
+
     return {
         "status": "priced",
         "model": model,
@@ -178,10 +224,10 @@ def estimate_fixture_cost(fixture, pricing_card):
         "standard_input_tokens": standard_input_tokens,
         "cached_input_tokens": cached_tokens,
         "output_tokens": completion,
-        "input_cost_usd": _money(input_cost),
-        "cached_input_cost_usd": _money(cached_cost),
-        "output_cost_usd": _money(output_cost),
-        "total_cost_usd": _money(total_cost),
+        "input_cost_usd": input_cost_usd,
+        "cached_input_cost_usd": cached_input_cost_usd,
+        "output_cost_usd": output_cost_usd,
+        "total_cost_usd": total_cost_usd,
         "image_tokens_included_in_input": usage.get("image_tokens"),
         "reasoning_tokens_included_in_output": usage.get("reasoning_tokens"),
     }
@@ -193,28 +239,34 @@ def _aggregate_cost(estimates, fixture_count):
     for row in estimates:
         if row["status"] != "priced":
             reasons[row["reason"]] = reasons.get(row["reason"], 0) + 1
-    total = sum((Decimal(row["total_cost_usd"]) for row in priced), Decimal(0))
-    mean = total / len(priced) if priced else None
+    values = [Decimal(row["total_cost_usd"]) for row in priced]
+    with localcontext() as context:
+        context.prec = _money_precision(values, term_count=max(1, len(values)))
+        total = sum(values, Decimal(0))
+        mean = total / len(priced) if priced else None
+        total_cost_usd = _money(total) if priced else None
+        mean_cost_usd = _money(mean) if mean is not None else None
     return {
         "fixture_count": fixture_count,
         "priced_fixture_count": len(priced),
         "unpriced_fixture_count": fixture_count - len(priced),
         "unpriced_reasons": dict(sorted(reasons.items())),
-        "total_cost_usd": _money(total) if priced else None,
-        "mean_cost_usd_per_priced_fixture": _money(mean) if mean is not None else None,
+        "total_cost_usd": total_cost_usd,
+        "mean_cost_usd_per_priced_fixture": mean_cost_usd,
     }
 
 
 def _paired_cost_delta(baseline, candidate):
-    deltas = []
+    pairs = []
     for fixture_id in sorted(baseline):
         left = baseline[fixture_id]
         right = candidate[fixture_id]
         if left["status"] == "priced" and right["status"] == "priced":
-            deltas.append(
-                Decimal(right["total_cost_usd"]) - Decimal(left["total_cost_usd"])
-            )
-    if not deltas:
+            pairs.append((
+                Decimal(right["total_cost_usd"]),
+                Decimal(left["total_cost_usd"]),
+            ))
+    if not pairs:
         return {
             "paired_fixture_count": 0,
             "missing_pair_count": len(baseline),
@@ -224,21 +276,32 @@ def _paired_cost_delta(baseline, candidate):
             "min_delta_usd": None,
             "max_delta_usd": None,
         }
-    ordered = sorted(deltas)
-    middle = len(ordered) // 2
-    median = (
-        ordered[middle] if len(ordered) % 2
-        else (ordered[middle - 1] + ordered[middle]) / Decimal(2)
-    )
-    total = sum(deltas, Decimal(0))
+    with localcontext() as context:
+        context.prec = _money_precision(
+            [value for pair in pairs for value in pair],
+            term_count=len(pairs),
+        )
+        deltas = [right - left for right, left in pairs]
+        ordered = sorted(deltas)
+        middle = len(ordered) // 2
+        median = (
+            ordered[middle] if len(ordered) % 2
+            else (ordered[middle - 1] + ordered[middle]) / Decimal(2)
+        )
+        total = sum(deltas, Decimal(0))
+        total_delta_usd = _money(total)
+        mean_delta_usd = _money(total / len(deltas))
+        median_delta_usd = _money(median)
+        min_delta_usd = _money(min(deltas))
+        max_delta_usd = _money(max(deltas))
     return {
         "paired_fixture_count": len(deltas),
         "missing_pair_count": len(baseline) - len(deltas),
-        "total_delta_usd": _money(total),
-        "mean_delta_usd": _money(total / len(deltas)),
-        "median_delta_usd": _money(median),
-        "min_delta_usd": _money(min(deltas)),
-        "max_delta_usd": _money(max(deltas)),
+        "total_delta_usd": total_delta_usd,
+        "mean_delta_usd": mean_delta_usd,
+        "median_delta_usd": median_delta_usd,
+        "min_delta_usd": min_delta_usd,
+        "max_delta_usd": max_delta_usd,
     }
 
 
@@ -258,8 +321,8 @@ def compare_fixture_costs(baseline_fixtures, candidate_fixtures, raw_pricing_car
         left, right = baseline[fixture_id], candidate[fixture_id]
         delta = None
         if left["status"] == "priced" and right["status"] == "priced":
-            delta = _money(
-                Decimal(right["total_cost_usd"]) - Decimal(left["total_cost_usd"])
+            delta = _money_difference(
+                Decimal(right["total_cost_usd"]), Decimal(left["total_cost_usd"])
             )
         fixture_details[fixture_id] = {
             "baseline": left,
