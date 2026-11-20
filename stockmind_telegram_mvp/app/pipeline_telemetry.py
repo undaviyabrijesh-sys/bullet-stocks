@@ -214,7 +214,8 @@ def aggregate_timing_lines(lines: Iterable[str]) -> dict:
                     and record["upload_kind"] != event["upload_kind"]
                 ):
                     conflicted_request_ids.add(request_id)
-                    conflicted_handler_outcome_ids.add(request_id)
+                    if record["outcome"] is not None or outcome is not None:
+                        conflicted_handler_outcome_ids.add(request_id)
                 record["upload_kind"] = event["upload_kind"]
                 if outcome is not None:
                     if record["outcome"] is not None:
@@ -224,7 +225,10 @@ def aggregate_timing_lines(lines: Iterable[str]) -> dict:
                         record["outcome"] = outcome
                 if metric in record["handler_metrics"]:
                     conflicted_request_ids.add(request_id)
-                    if metric == "handler_total_ms":
+                    if (
+                        metric == "handler_total_ms"
+                        and (record["outcome"] is not None or outcome is not None)
+                    ):
                         conflicted_handler_outcome_ids.add(request_id)
                 else:
                     record["handler_metrics"][metric] = event["duration_ms"]
