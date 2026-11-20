@@ -1118,5 +1118,63 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         self.assertEqual(result["p95_delta"], 200)
 
 
+    def test_large_token_costs_preserve_precision_in_totals_and_paired_deltas(self):
+        baseline_tokens = 10**20
+        candidate_tokens = baseline_tokens + 1
+        baseline = self._report(
+            "baseline-model",
+            [{**_zone(), "draw_overlay": True}],
+            usage={
+                "prompt_tokens": baseline_tokens,
+                "completion_tokens": 0,
+                "total_tokens": baseline_tokens,
+            },
+        )
+        candidate = self._report(
+            "candidate-model",
+            [{**_zone(), "draw_overlay": True}],
+            usage={
+                "prompt_tokens": candidate_tokens,
+                "completion_tokens": 0,
+                "total_tokens": candidate_tokens,
+            },
+        )
+        card = {
+            "schema": "stockmind.usage-pricing.v1",
+            "version": "large-token-precision-test",
+            "currency": "USD",
+            "effective_from": "2026-11-01",
+            "effective_until": None,
+            "source": "Synthetic unit-test rates; not provider pricing",
+            "models": {
+                model: {
+                    "input_usd_per_million_tokens": "1",
+                    "output_usd_per_million_tokens": "0",
+                }
+                for model in ("baseline-model", "candidate-model")
+            },
+        }
+
+        result = compare_benchmark_reports(baseline, candidate, pricing_card=card)
+        cost = result["currency_cost_estimate"]
+
+        self.assertEqual(
+            cost["baseline"]["total_cost_usd"],
+            "100000000000000.000000000000000000",
+        )
+        self.assertEqual(
+            cost["candidate"]["total_cost_usd"],
+            "100000000000000.000001000000000000",
+        )
+        self.assertEqual(
+            cost["paired_deltas"]["total_delta_usd"],
+            "0.000001000000000000",
+        )
+        self.assertEqual(
+            cost["paired_deltas"]["mean_delta_usd"],
+            "0.000001000000000000",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
