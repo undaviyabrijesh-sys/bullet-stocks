@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import re
+import statistics
 from pathlib import Path
 
 from .strict_json import loads as strict_json_loads
@@ -796,6 +797,15 @@ _TELEMETRY_USAGE_FIELDS = (
 )
 
 
+def _nearest_rank_percentile(values, percentile):
+    """Return a deterministic nearest-rank percentile for observed values."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    rank = max(1, math.ceil(percentile * len(ordered)))
+    return ordered[rank - 1]
+
+
 def _telemetry_stat(values, fixture_count):
     """Summarize observed integer telemetry without treating missing data as zero."""
     return {
@@ -803,6 +813,8 @@ def _telemetry_stat(values, fixture_count):
         "missing_fixture_count": fixture_count - len(values),
         "total": sum(values) if values else None,
         "mean": _finite_mean(values),
+        "median": statistics.median(values) if values else None,
+        "p95": _nearest_rank_percentile(values, 0.95),
         "min": min(values) if values else None,
         "max": max(values) if values else None,
     }
@@ -880,6 +892,8 @@ def _paired_telemetry_delta(baseline_fixtures, candidate_fixtures, field, usage_
         "missing_pair_count": len(baseline_fixtures) - len(deltas),
         "total_delta": sum(deltas) if deltas else None,
         "mean_delta": _finite_mean(deltas),
+        "median_delta": statistics.median(deltas) if deltas else None,
+        "p95_delta": _nearest_rank_percentile(deltas, 0.95),
         "min_delta": min(deltas) if deltas else None,
         "max_delta": max(deltas) if deltas else None,
     }
