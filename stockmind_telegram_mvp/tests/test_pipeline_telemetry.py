@@ -191,7 +191,7 @@ class PipelineTelemetryTests(unittest.TestCase):
                 f"StockMind Telegram document request_id={document_id} handler_total_ms=120",
             ]
         )
-        self.assertEqual(report["schema_version"], 2)
+        self.assertEqual(report["schema_version"], 3)
         self.assertEqual(report["correlation_summary"]["request_ids_seen"], 2)
         self.assertEqual(report["correlation_summary"]["complete_upload_request_count"], 2)
         rows = {row["request_id"]: row for row in report["correlated_requests"]}
