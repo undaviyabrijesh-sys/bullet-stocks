@@ -611,9 +611,10 @@ def _validate_report(report, label):
         ):
             raise ValueError(f"{prefix} has an invalid price_axis_calibration_sha256")
         try:
-            _, _, fixture_profile_sha256 = _validate_prediction_metadata(
+            normalized_prediction_metadata, _, fixture_profile_sha256 = _validate_prediction_metadata(
                 fixture.get("prediction_metadata"), index + 1, fixture_id
             )
+            fixture["prediction_metadata"] = normalized_prediction_metadata
         except (TypeError, ValueError) as exc:
             raise ValueError(f"{prefix} has invalid prediction provenance: {exc}") from exc
         if fixture_profile_sha256 != profile_hash:
@@ -781,6 +782,123 @@ def _compare_metrics(baseline, candidate):
             "delta": _delta(baseline.get(field), candidate.get(field)),
         }
         for field in _METRIC_FIELDS
+    }
+
+
+
+_TELEMETRY_USAGE_FIELDS = (
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "image_tokens",
+    "cached_prompt_tokens",
+    "reasoning_tokens",
+)
+
+
+def _telemetry_stat(values, fixture_count):
+    """Summarize observed integer telemetry without treating missing data as zero."""
+    return {
+        "reported_fixture_count": len(values),
+        "missing_fixture_count": fixture_count - len(values),
+        "total": sum(values) if values else None,
+        "mean": _finite_mean(values),
+        "min": min(values) if values else None,
+        "max": max(values) if values else None,
+    }
+
+
+def _fixture_inference_telemetry(fixture):
+    metadata = fixture.get("prediction_metadata")
+    if not isinstance(metadata, dict):
+        return {"usage": None, "request_latency_ms": None}
+    return {
+        "usage": metadata.get("usage"),
+        "request_latency_ms": metadata.get("request_latency_ms"),
+    }
+
+
+def _aggregate_inference_telemetry(fixtures):
+    """Aggregate provider usage and model-call latency with explicit coverage."""
+    fixture_count = len(fixtures)
+    usage_rows = []
+    latency_values = []
+    for fixture in fixtures:
+        telemetry = _fixture_inference_telemetry(fixture)
+        usage = telemetry["usage"]
+        if isinstance(usage, dict):
+            usage_rows.append(usage)
+        latency = telemetry["request_latency_ms"]
+        if isinstance(latency, int) and not isinstance(latency, bool):
+            latency_values.append(latency)
+
+    usage_summary = {
+        "reported_fixture_count": len(usage_rows),
+        "missing_fixture_count": fixture_count - len(usage_rows),
+    }
+    for field in _TELEMETRY_USAGE_FIELDS:
+        values = [row[field] for row in usage_rows if field in row]
+        usage_summary[field] = _telemetry_stat(values, fixture_count)
+
+    return {
+        "fixture_count": fixture_count,
+        "usage": usage_summary,
+        "request_latency_ms": _telemetry_stat(latency_values, fixture_count),
+    }
+
+
+def _paired_telemetry_delta(baseline_fixtures, candidate_fixtures, field, usage_field=None):
+    """Return candidate-minus-baseline deltas only for fixtures with both values."""
+    baseline_by_id = {fixture["fixture_id"]: fixture for fixture in baseline_fixtures}
+    candidate_by_id = {fixture["fixture_id"]: fixture for fixture in candidate_fixtures}
+    deltas = []
+    for fixture_id in sorted(baseline_by_id):
+        baseline_telemetry = _fixture_inference_telemetry(baseline_by_id[fixture_id])
+        candidate_telemetry = _fixture_inference_telemetry(candidate_by_id[fixture_id])
+        if usage_field is None:
+            baseline_value = baseline_telemetry[field]
+            candidate_value = candidate_telemetry[field]
+        else:
+            baseline_usage = baseline_telemetry["usage"]
+            candidate_usage = candidate_telemetry["usage"]
+            baseline_value = (
+                baseline_usage.get(usage_field)
+                if isinstance(baseline_usage, dict) else None
+            )
+            candidate_value = (
+                candidate_usage.get(usage_field)
+                if isinstance(candidate_usage, dict) else None
+            )
+        if (
+            isinstance(baseline_value, int) and not isinstance(baseline_value, bool)
+            and isinstance(candidate_value, int) and not isinstance(candidate_value, bool)
+        ):
+            deltas.append(candidate_value - baseline_value)
+
+    return {
+        "paired_fixture_count": len(deltas),
+        "missing_pair_count": len(baseline_fixtures) - len(deltas),
+        "total_delta": sum(deltas) if deltas else None,
+        "mean_delta": _finite_mean(deltas),
+        "min_delta": min(deltas) if deltas else None,
+        "max_delta": max(deltas) if deltas else None,
+    }
+
+
+def _compare_inference_telemetry(baseline_fixtures, candidate_fixtures):
+    paired_deltas = {
+        field: _paired_telemetry_delta(
+            baseline_fixtures, candidate_fixtures, "usage", usage_field=field
+        )
+        for field in _TELEMETRY_USAGE_FIELDS
+    }
+    paired_deltas["request_latency_ms"] = _paired_telemetry_delta(
+        baseline_fixtures, candidate_fixtures, "request_latency_ms"
+    )
+    return {
+        "baseline": _aggregate_inference_telemetry(baseline_fixtures),
+        "candidate": _aggregate_inference_telemetry(candidate_fixtures),
+        "paired_deltas": paired_deltas,
     }
 
 
@@ -974,6 +1092,10 @@ def compare_benchmark_reports(baseline_report, candidate_report):
             "plot_boundary_accuracy": compare_plot_boundary_accuracy(
                 base["plot_boundary_accuracy"], cand["plot_boundary_accuracy"]
             ),
+            "inference_telemetry": {
+                "baseline": _fixture_inference_telemetry(base),
+                "candidate": _fixture_inference_telemetry(cand),
+            },
             **({
                 "confidence_stratified_results": _compare_confidence_stratified_results(
                     base["confidence_stratified_results"], cand["confidence_stratified_results"]
@@ -1012,6 +1134,9 @@ def compare_benchmark_reports(baseline_report, candidate_report):
         "plot_boundary_accuracy": compare_plot_boundary_accuracy(
             aggregate_plot_boundary_accuracy(base_fixtures),
             aggregate_plot_boundary_accuracy(candidate_fixtures),
+        ),
+        "inference_telemetry": _compare_inference_telemetry(
+            base_fixtures, candidate_fixtures
         ),
         **({
             "confidence_stratified_results": _compare_confidence_stratified_results(
