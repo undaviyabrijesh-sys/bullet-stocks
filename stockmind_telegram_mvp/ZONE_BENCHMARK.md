@@ -553,3 +553,18 @@ pixel inside the zone, PNG-to-JPEG fallback when the PNG budget is exceeded,
 and unchanged JPEG output for JPEG inputs. These tests validate image encoding
 and pixel preservation only; they do not measure whether the model selected
 the correct supply/demand zones on real market screenshots.
+
+
+## Bounded JSONL manifest records
+
+The offline benchmark reader limits each UTF-8 JSONL record to 1 MiB by
+default, including its newline. It reads each line in binary mode with a
+one-byte-over-limit sentinel before decoding or parsing, so a single oversized
+record is rejected without first allocating the complete line. Screenshot
+bytes retain their separate 5 MiB default limit. Blank lines are allowed, but
+they are subject to the same per-line byte ceiling.
+
+The CLI exposes `--max-manifest-line-bytes` for controlled local datasets.
+Increasing this limit should be intentional: model metadata and zone geometry
+normally fit comfortably below the default. This is a per-record bound, not a
+total manifest-size or total fixture-count limit.

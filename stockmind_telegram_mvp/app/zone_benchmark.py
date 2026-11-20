@@ -39,6 +39,7 @@ _REVIEWER_ID_RE = re.compile(r"^rev-[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 _ADJUDICATOR_ID_RE = re.compile(r"^adj-[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 _GUIDELINE_VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024
+DEFAULT_MAX_MANIFEST_LINE_BYTES = 1024 * 1024
 _MARKET_CONTEXT_FIELDS = ("asset_class", "symbol", "exchange", "timeframe")
 
 
@@ -916,13 +917,22 @@ def _aggregate_by_context(fixtures, field):
     return output
 
 
-def evaluate_benchmark_manifest(manifest_path, *, max_image_bytes=DEFAULT_MAX_IMAGE_BYTES):
+def evaluate_benchmark_manifest(
+    manifest_path,
+    *,
+    max_image_bytes=DEFAULT_MAX_IMAGE_BYTES,
+    max_manifest_line_bytes=DEFAULT_MAX_MANIFEST_LINE_BYTES,
+):
     """Validate screenshots and score every JSONL fixture in a manifest.
 
-    The default image-byte ceiling matches the Telegram bot's 5 MiB default.
-    Pass an explicit limit when the bot is configured with a different ceiling.
+    Screenshot reads and individual JSONL records have independent byte limits.
+    The manifest reader bounds each binary readline before UTF-8 decoding or
+    JSON parsing, so one oversized record cannot allocate an unbounded string.
     """
     max_image_bytes = _positive_integer(max_image_bytes, "max_image_bytes")
+    max_manifest_line_bytes = _positive_integer(
+        max_manifest_line_bytes, "max_manifest_line_bytes"
+    )
     manifest_path = Path(manifest_path).resolve()
     if not manifest_path.is_file():
         raise ValueError(f"benchmark manifest does not exist: {manifest_path}")
@@ -933,59 +943,72 @@ def evaluate_benchmark_manifest(manifest_path, *, max_image_bytes=DEFAULT_MAX_IM
     prediction_profile = None
     prediction_profile_sha256 = None
     annotation_guideline_version = None
-    try:
-        with manifest_path.open("r", encoding="utf-8") as manifest:
-            for line_number, raw_line in enumerate(manifest, start=1):
-                if not raw_line.strip():
-                    continue
-                try:
-                    record = strict_json_loads(raw_line)
-                except ValueError as exc:
-                    detail = exc.msg if isinstance(exc, json.JSONDecodeError) else str(exc)
-                    raise ValueError(
-                        f"line {line_number}: invalid JSON ({detail})"
-                    ) from exc
-                fixture = _validate_record(
-                    record, manifest_path.parent, line_number, max_image_bytes
+    with manifest_path.open("rb") as manifest:
+        line_number = 0
+        while True:
+            # Read at most one byte beyond the configured limit so an
+            # oversized line is rejected without buffering the whole record.
+            raw_line = manifest.readline(max_manifest_line_bytes + 1)
+            if not raw_line:
+                break
+            line_number += 1
+            if len(raw_line) > max_manifest_line_bytes:
+                raise ValueError(
+                    f"line {line_number}: exceeds the {max_manifest_line_bytes}-byte "
+                    "JSONL record limit"
                 )
-                fixture_guideline = fixture["annotation_metadata"]["guideline_version"]
-                if annotation_guideline_version is None:
-                    annotation_guideline_version = fixture_guideline
-                elif fixture_guideline != annotation_guideline_version:
-                    raise ValueError(
-                        f"line {line_number} ({fixture['fixture_id']}): mixed annotation "
-                        "guideline versions; split this manifest by guideline version"
-                    )
-                if fixture["fixture_id"] in seen_ids:
-                    raise ValueError(
-                        f"line {line_number}: duplicate fixture_id {fixture['fixture_id']!r}"
-                    )
-                seen_ids.add(fixture["fixture_id"])
+            try:
+                decoded_line = raw_line.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError("benchmark manifest must be UTF-8 JSONL") from exc
+            if not decoded_line.strip():
+                continue
+            try:
+                record = strict_json_loads(decoded_line)
+            except ValueError as exc:
+                detail = exc.msg if isinstance(exc, json.JSONDecodeError) else str(exc)
+                raise ValueError(
+                    f"line {line_number}: invalid JSON ({detail})"
+                ) from exc
+            fixture = _validate_record(
+                record, manifest_path.parent, line_number, max_image_bytes
+            )
+            fixture_guideline = fixture["annotation_metadata"]["guideline_version"]
+            if annotation_guideline_version is None:
+                annotation_guideline_version = fixture_guideline
+            elif fixture_guideline != annotation_guideline_version:
+                raise ValueError(
+                    f"line {line_number} ({fixture['fixture_id']}): mixed annotation "
+                    "guideline versions; split this manifest by guideline version"
+                )
+            if fixture["fixture_id"] in seen_ids:
+                raise ValueError(
+                    f"line {line_number}: duplicate fixture_id {fixture['fixture_id']!r}"
+                )
+            seen_ids.add(fixture["fixture_id"])
 
-                # A manifest represents distinct source screenshots. Reusing
-                # identical bytes under another fixture_id silently overweights
-                # that chart in micro-aggregated benchmark metrics.
-                image_hash = fixture["image_sha256"]
-                if image_hash in seen_image_hashes:
+            # A manifest represents distinct source screenshots. Reusing
+            # identical bytes under another fixture_id silently overweights
+            # that chart in micro-aggregated benchmark metrics.
+            image_hash = fixture["image_sha256"]
+            if image_hash in seen_image_hashes:
+                raise ValueError(
+                    f"line {line_number}: duplicate screenshot image_sha256 "
+                    f"{image_hash!r}; each fixture must use a unique screenshot"
+                )
+            seen_image_hashes.add(image_hash)
+            if prediction_profile_sha256 is None:
+                prediction_profile = fixture.pop("_prediction_profile")
+                prediction_profile_sha256 = fixture.pop("_prediction_profile_sha256")
+            else:
+                fixture_profile = fixture.pop("_prediction_profile")
+                fixture_profile_sha256 = fixture.pop("_prediction_profile_sha256")
+                if fixture_profile_sha256 != prediction_profile_sha256:
                     raise ValueError(
-                        f"line {line_number}: duplicate screenshot image_sha256 "
-                        f"{image_hash!r}; each fixture must use a unique screenshot"
+                        f"line {line_number} ({fixture['fixture_id']}): mixed prediction "
+                        "profiles; split this manifest by provider, model, prompt and settings"
                     )
-                seen_image_hashes.add(image_hash)
-                if prediction_profile_sha256 is None:
-                    prediction_profile = fixture.pop("_prediction_profile")
-                    prediction_profile_sha256 = fixture.pop("_prediction_profile_sha256")
-                else:
-                    fixture_profile = fixture.pop("_prediction_profile")
-                    fixture_profile_sha256 = fixture.pop("_prediction_profile_sha256")
-                    if fixture_profile_sha256 != prediction_profile_sha256:
-                        raise ValueError(
-                            f"line {line_number} ({fixture['fixture_id']}): mixed prediction "
-                            "profiles; split this manifest by provider, model, prompt and settings"
-                        )
-                fixtures.append(fixture)
-    except UnicodeDecodeError as exc:
-        raise ValueError("benchmark manifest must be UTF-8 JSONL") from exc
+            fixtures.append(fixture)
 
     if not fixtures:
         raise ValueError("benchmark manifest contains no fixture records")
@@ -1041,10 +1064,18 @@ def main(argv=None):
         default=DEFAULT_MAX_IMAGE_BYTES,
         help="maximum bytes read per screenshot (default: 5 MiB)",
     )
+    parser.add_argument(
+        "--max-manifest-line-bytes",
+        type=int,
+        default=DEFAULT_MAX_MANIFEST_LINE_BYTES,
+        help="maximum UTF-8 bytes per JSONL record including its newline (default: 1 MiB)",
+    )
     args = parser.parse_args(argv)
     try:
         result = evaluate_benchmark_manifest(
-            args.manifest, max_image_bytes=args.max_image_bytes
+            args.manifest,
+            max_image_bytes=args.max_image_bytes,
+            max_manifest_line_bytes=args.max_manifest_line_bytes,
         )
     except (OSError, ValueError) as exc:
         parser.error(str(exc))

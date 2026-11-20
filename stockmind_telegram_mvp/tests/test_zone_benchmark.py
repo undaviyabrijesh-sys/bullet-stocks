@@ -8,6 +8,7 @@ from pathlib import Path
 from PIL import Image
 
 from stockmind_telegram_mvp.app.zone_benchmark import (
+    DEFAULT_MAX_MANIFEST_LINE_BYTES,
     _aggregate_price_accuracy,
     evaluate_benchmark_manifest,
 )
@@ -1302,6 +1303,35 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "reference_plot_bounds is required"):
             evaluate_benchmark_manifest(self.manifest)
 
+
+    def test_rejects_manifest_record_over_byte_limit_before_json_parsing(self):
+        self.manifest.write_bytes(b"\\n" + (b" " * 129))
+
+        with self.assertRaisesRegex(
+            ValueError, r"line 2: exceeds the 128-byte JSONL record limit"
+        ):
+            evaluate_benchmark_manifest(
+                self.manifest, max_manifest_line_bytes=128
+            )
+
+    def test_manifest_record_exactly_at_byte_limit_is_accepted(self):
+        record = self._record("exact-line-limit")
+        raw_line = json.dumps(record, separators=(",", ":")).encode("utf-8") + b"\\n"
+        self.manifest.write_bytes(raw_line)
+
+        result = evaluate_benchmark_manifest(
+            self.manifest, max_manifest_line_bytes=len(raw_line)
+        )
+        self.assertEqual(result["fixture_count"], 1)
+
+    def test_rejects_non_utf8_manifest_bytes_with_controlled_error(self):
+        self.manifest.write_bytes(b"\\xff\\n")
+
+        with self.assertRaisesRegex(ValueError, "manifest must be UTF-8 JSONL"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_default_manifest_line_limit_is_one_mibibyte(self):
+        self.assertEqual(DEFAULT_MAX_MANIFEST_LINE_BYTES, 1024 * 1024)
 
     def test_rejects_duplicate_object_keys_in_jsonl_manifest(self):
         record = self._record("duplicate-json-key")
