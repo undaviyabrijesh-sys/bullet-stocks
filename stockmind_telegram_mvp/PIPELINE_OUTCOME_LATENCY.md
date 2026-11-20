@@ -4,6 +4,13 @@ The current report schema is version 4. Consumers should check `schema_version`
 when reading generated JSON because outcome-conflict accounting is explicit in
 this version.
 
+Timing values are accepted up to `2**52` milliseconds. The report computes
+p50 as the arithmetic median; this bound keeps the sum of any two accepted
+values at or below `2**53`, so integer and half-millisecond medians remain
+exact in common IEEE-754 JSON consumers. Larger values are rejected and
+counted in `rejected_timing_lines`. This is a reporting-precision guard, not
+an operational timeout.
+
 The offline pipeline report includes `telegram_handler_outcome_latency`,
 grouped by upload kind (`photo` or `document`) and the bounded final handler
 outcome. Each group reports p50, nearest-rank p95, minimum, maximum and sample

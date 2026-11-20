@@ -13,7 +13,9 @@ from collections import defaultdict
 from statistics import median
 from typing import Iterable
 
-_MAX_DURATION_MS = (1 << 63) - 1
+# Keep the even-sample median (including half milliseconds) exactly representable
+# by common IEEE-754 JSON consumers: two accepted values sum to at most 2**53.
+_MAX_DURATION_MS = 1 << 52
 _REQUEST_MARKER = "StockMind request timing "
 _HANDLER_MARKER = "StockMind Telegram "
 _HANDLER_OUTCOMES = frozenset({

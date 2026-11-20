@@ -322,5 +322,46 @@ class PipelineTelemetryTests(unittest.TestCase):
         self.assertEqual(report["request_groups"][0]["total_ms"]["p50_ms"], 12)
 
 
+    def test_even_sample_median_is_exact_at_the_maximum_accepted_duration(self):
+        maximum = 1 << 52
+        report = aggregate_timing_lines(
+            [
+                "StockMind request timing mode=chart outcome=completed "
+                f"total_ms={maximum - 1} stages=none",
+                "StockMind request timing mode=chart outcome=completed "
+                f"total_ms={maximum} stages=none",
+            ]
+        )
+
+        summary = report["request_groups"][0]["total_ms"]
+        self.assertEqual(summary["p50_ms"], maximum - 0.5)
+        self.assertEqual(summary["p95_ms"], maximum)
+        self.assertEqual(summary["min_ms"], maximum - 1)
+        self.assertEqual(summary["max_ms"], maximum)
+        self.assertEqual(
+            json.loads(json.dumps(summary))["p50_ms"],
+            maximum - 0.5,
+        )
+
+    def test_rejects_durations_above_the_exact_median_limit(self):
+        maximum = 1 << 52
+        report = aggregate_timing_lines(
+            [
+                "StockMind request timing mode=chart outcome=completed "
+                f"total_ms={maximum + 1} stages=none",
+                "StockMind request timing mode=chart outcome=completed "
+                f"total_ms=1 stages=analysis_execution={maximum + 1}ms",
+                f"StockMind Telegram photo handler_total_ms={maximum + 1}",
+            ]
+        )
+
+        self.assertEqual(report["parsed_request_events"], 0)
+        self.assertEqual(report["parsed_handler_events"], 0)
+        self.assertEqual(report["rejected_timing_lines"], 3)
+        self.assertEqual(report["request_groups"], [])
+        self.assertEqual(report["telegram_handler_metrics"], {})
+
+
+
 if __name__ == "__main__":
     unittest.main()
