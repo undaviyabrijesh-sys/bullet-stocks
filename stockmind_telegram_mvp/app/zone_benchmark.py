@@ -115,7 +115,66 @@ def _validate_prediction_metadata(metadata, line_number, fixture_id):
         )
     normalized["settings"] = settings
 
-    # Generated time is fixture-specific; the remaining fields define the
+    if "usage" in metadata:
+        usage = metadata["usage"]
+        if usage is None:
+            normalized["usage"] = None
+        else:
+            required_usage_fields = {
+                "prompt_tokens", "completion_tokens", "total_tokens"
+            }
+            allowed_usage_fields = required_usage_fields | {
+                "image_tokens", "cached_prompt_tokens", "reasoning_tokens"
+            }
+            if not isinstance(usage, dict) or not required_usage_fields.issubset(usage):
+                raise ValueError(
+                    f"line {line_number} ({fixture_id}): prediction_metadata.usage "
+                    "must contain prompt_tokens, completion_tokens and total_tokens"
+                )
+            if set(usage) - allowed_usage_fields:
+                raise ValueError(
+                    f"line {line_number} ({fixture_id}): prediction_metadata.usage "
+                    "contains unsupported token-count fields"
+                )
+            normalized_usage = {}
+            for field, value in usage.items():
+                if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                    raise ValueError(
+                        f"line {line_number} ({fixture_id}): prediction_metadata.usage."
+                        f"{field} must be a non-negative integer"
+                    )
+                normalized_usage[field] = value
+            if normalized_usage["total_tokens"] != (
+                normalized_usage["prompt_tokens"] + normalized_usage["completion_tokens"]
+            ):
+                raise ValueError(
+                    f"line {line_number} ({fixture_id}): prediction_metadata.usage "
+                    "total_tokens must equal prompt_tokens + completion_tokens"
+                )
+            for field, upper_bound in (
+                ("image_tokens", normalized_usage["prompt_tokens"]),
+                ("cached_prompt_tokens", normalized_usage["prompt_tokens"]),
+                ("reasoning_tokens", normalized_usage["completion_tokens"]),
+            ):
+                if field in normalized_usage and normalized_usage[field] > upper_bound:
+                    raise ValueError(
+                        f"line {line_number} ({fixture_id}): prediction_metadata.usage."
+                        f"{field} exceeds its parent token count"
+                    )
+            normalized["usage"] = normalized_usage
+
+    if "request_latency_ms" in metadata:
+        latency = metadata["request_latency_ms"]
+        if latency is not None and (
+            isinstance(latency, bool) or not isinstance(latency, int) or latency < 0
+        ):
+            raise ValueError(
+                f"line {line_number} ({fixture_id}): prediction_metadata.request_latency_ms "
+                "must be a non-negative integer or null"
+            )
+        normalized["request_latency_ms"] = latency
+
+    # Generated time, usage and request latency are fixture-specific; the remaining fields define the
     # inference profile and must be identical within one aggregate report.
     if (
         normalized["prompt_version"] in {"dns-chart-v6", "dns-chart-v7", "dns-chart-v8", "dns-chart-v9"}

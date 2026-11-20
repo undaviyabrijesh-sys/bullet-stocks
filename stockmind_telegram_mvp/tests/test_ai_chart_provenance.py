@@ -31,6 +31,15 @@ class ChartPredictionProvenanceTests(unittest.IsolatedAsyncioTestCase):
             model="vision-model-2026-11-05",
             created=created,
             system_fingerprint="fp-test",
+            usage=SimpleNamespace(
+                prompt_tokens=1234,
+                completion_tokens=456,
+                total_tokens=1690,
+                prompt_tokens_details=SimpleNamespace(
+                    image_tokens=900, cached_tokens=0
+                ),
+                completion_tokens_details=SimpleNamespace(reasoning_tokens=12),
+            ),
             choices=[
                 SimpleNamespace(
                     message=SimpleNamespace(
@@ -55,6 +64,19 @@ class ChartPredictionProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(metadata["prompt_sha256"], CHART_PROMPT_SHA256)
         self.assertEqual(metadata["generated_at"], "2026-11-05T20:24:00Z")
         self.assertEqual(metadata["system_fingerprint"], "fp-test")
+        self.assertEqual(
+            metadata["usage"],
+            {
+                "prompt_tokens": 1234,
+                "completion_tokens": 456,
+                "total_tokens": 1690,
+                "image_tokens": 900,
+                "cached_prompt_tokens": 0,
+                "reasoning_tokens": 12,
+            },
+        )
+        self.assertIsInstance(metadata["request_latency_ms"], int)
+        self.assertGreaterEqual(metadata["request_latency_ms"], 0)
         self.assertEqual(metadata["settings"]["temperature"], 0.1)
         self.assertEqual(metadata["settings"]["image_detail"], "high")
         self.assertEqual(metadata["settings"]["conversation_context"], "caption_only")
@@ -163,6 +185,35 @@ class ChartPredictionProvenanceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(result["prediction_metadata"]["model"])
         self.assertIsNone(result["prediction_metadata"]["generated_at"])
+        self.assertIsNone(result["prediction_metadata"]["usage"])
+        self.assertIsInstance(result["prediction_metadata"]["request_latency_ms"], int)
+
+    async def test_inconsistent_provider_token_totals_are_withheld(self):
+        response = SimpleNamespace(
+            model="vision-model",
+            created=1793908800,
+            usage=SimpleNamespace(
+                prompt_tokens=10, completion_tokens=5, total_tokens=99
+            ),
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=json.dumps({
+                            "analysis": "Visible structure only.",
+                            "plot_bounds": None,
+                            "zones": [],
+                        })
+                    )
+                )
+            ],
+        )
+        research, _ = self._research(response, "vision-model")
+
+        result = await research.analyze_chart_image(
+            [], "Map DNS", b"image-bytes", "image/png"
+        )
+
+        self.assertIsNone(result["prediction_metadata"]["usage"])
 
     def test_prompt_version_and_static_prompt_hash_are_present(self):
         self.assertEqual(CHART_PROMPT_VERSION, "dns-chart-v9")

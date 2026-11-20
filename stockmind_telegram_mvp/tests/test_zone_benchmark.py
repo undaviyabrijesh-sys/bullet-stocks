@@ -465,6 +465,90 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "non-standard JSON constant"):
             evaluate_benchmark_manifest(self.manifest)
 
+    def test_preserves_provider_usage_and_request_latency_per_fixture(self):
+        usage = {
+            "prompt_tokens": 1200,
+            "completion_tokens": 300,
+            "total_tokens": 1500,
+            "image_tokens": 850,
+            "cached_prompt_tokens": 0,
+            "reasoning_tokens": 40,
+        }
+        self._write(
+            self._record(
+                "first",
+                prediction_metadata=_prediction_metadata(
+                    usage=usage, request_latency_ms=1250
+                ),
+            ),
+            self._record(
+                "second",
+                prediction_metadata=_prediction_metadata(
+                    generated_at="2026-11-05T20:25:00Z",
+                    usage={
+                        "prompt_tokens": 900,
+                        "completion_tokens": 200,
+                        "total_tokens": 1100,
+                    },
+                    request_latency_ms=840,
+                ),
+            ),
+        )
+
+        result = evaluate_benchmark_manifest(self.manifest)
+
+        self.assertEqual(result["fixture_count"], 2)
+        self.assertEqual(
+            result["fixtures"][0]["prediction_metadata"]["usage"], usage
+        )
+        self.assertEqual(
+            result["fixtures"][0]["prediction_metadata"]["request_latency_ms"], 1250
+        )
+        self.assertEqual(
+            result["fixtures"][1]["prediction_metadata"]["usage"]["total_tokens"],
+            1100,
+        )
+        # The manifest accepted differing per-call telemetry under one model profile.
+        self.assertEqual(result["prediction_profile"]["model"], "vision-model-2026-11-05")
+
+    def test_rejects_inconsistent_provider_usage_totals(self):
+        self._write(
+            self._record(
+                prediction_metadata=_prediction_metadata(
+                    usage={
+                        "prompt_tokens": 10,
+                        "completion_tokens": 5,
+                        "total_tokens": 99,
+                    }
+                )
+            )
+        )
+
+        with self.assertRaisesRegex(ValueError, "total_tokens must equal"):
+            evaluate_benchmark_manifest(self.manifest)
+
+    def test_rejects_invalid_optional_usage_counts_and_request_latency(self):
+        invalid_metadata = (
+            _prediction_metadata(usage={
+                "prompt_tokens": True,
+                "completion_tokens": 5,
+                "total_tokens": 6,
+            }),
+            _prediction_metadata(usage={
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "image_tokens": 11,
+            }),
+            _prediction_metadata(request_latency_ms=True),
+            _prediction_metadata(request_latency_ms=-1),
+        )
+        for metadata in invalid_metadata:
+            with self.subTest(metadata=metadata):
+                self._write(self._record(prediction_metadata=metadata))
+                with self.assertRaises(ValueError):
+                    evaluate_benchmark_manifest(self.manifest)
+
     def test_rejects_missing_prediction_metadata(self):
         record = self._record()
         del record["prediction_metadata"]

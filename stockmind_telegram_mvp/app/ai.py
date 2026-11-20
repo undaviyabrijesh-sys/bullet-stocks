@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import re
+import time
 from decimal import Decimal, InvalidOperation
 from datetime import date as date_type, datetime, timezone
 
@@ -164,8 +165,55 @@ category, not a probability or calibrated accuracy score. Set draw_overlay=true 
 medium confidence. A low-confidence candidate may be described in prose, but it must have
 draw_overlay=false and all four coordinates set to zero.
 """
-def build_chart_prediction_metadata(response, requested_model, settings):
-    """Capture provider-returned model/time metadata without guessing missing values."""
+def _usage_field(container, field):
+    if isinstance(container, dict):
+        return container.get(field)
+    return getattr(container, field, None)
+
+
+def _nonnegative_usage_count(container, field):
+    value = _usage_field(container, field)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _chart_usage_metadata(response):
+    """Keep only internally consistent token counts returned by the provider."""
+    usage = getattr(response, "usage", None)
+    prompt_tokens = _nonnegative_usage_count(usage, "prompt_tokens")
+    completion_tokens = _nonnegative_usage_count(usage, "completion_tokens")
+    total_tokens = _nonnegative_usage_count(usage, "total_tokens")
+    if (
+        prompt_tokens is None
+        or completion_tokens is None
+        or total_tokens != prompt_tokens + completion_tokens
+    ):
+        return None
+
+    result = {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+    }
+    prompt_details = _usage_field(usage, "prompt_tokens_details")
+    completion_details = _usage_field(usage, "completion_tokens_details")
+    optional_counts = (
+        (prompt_details, "image_tokens", "image_tokens", prompt_tokens),
+        (prompt_details, "cached_tokens", "cached_prompt_tokens", prompt_tokens),
+        (completion_details, "reasoning_tokens", "reasoning_tokens", completion_tokens),
+    )
+    for container, source_field, target_field, upper_bound in optional_counts:
+        count = _nonnegative_usage_count(container, source_field)
+        if count is not None and count <= upper_bound:
+            result[target_field] = count
+    return result
+
+
+def build_chart_prediction_metadata(
+    response, requested_model, settings, *, request_latency_ms=None
+):
+    """Capture provider-returned model/time/usage plus measured request latency."""
     actual_model = getattr(response, "model", None)
     if not isinstance(actual_model, str) or not actual_model.strip():
         actual_model = None
@@ -185,6 +233,12 @@ def build_chart_prediction_metadata(response, requested_model, settings):
     fingerprint = getattr(response, "system_fingerprint", None)
     if not isinstance(fingerprint, str) or not fingerprint.strip():
         fingerprint = None
+    if (
+        isinstance(request_latency_ms, bool)
+        or not isinstance(request_latency_ms, int)
+        or request_latency_ms < 0
+    ):
+        request_latency_ms = None
 
     return {
         "provider": "openai",
@@ -194,6 +248,8 @@ def build_chart_prediction_metadata(response, requested_model, settings):
         "prompt_sha256": CHART_PROMPT_SHA256,
         "generated_at": generated_at,
         "system_fingerprint": fingerprint,
+        "usage": _chart_usage_metadata(response),
+        "request_latency_ms": request_latency_ms,
         "settings": dict(settings),
     }
 
@@ -1384,8 +1440,12 @@ class ResearchAI:
         if self.vision_model.startswith("gpt-6-luna"):
             chart_settings["reasoning_effort"] = "none"
             request_options["reasoning_effort"] = "none"
+        request_started = time.perf_counter()
         response = await self._await_with_turn_deadline(
             self.client.chat.completions.create(**request_options)
+        )
+        request_latency_ms = max(
+            0, int(round((time.perf_counter() - request_started) * 1000))
         )
         message = _completion_message(response, "Chart analysis")
         raw = getattr(message, "content", None)
@@ -1398,7 +1458,10 @@ class ResearchAI:
             raise ValueError("Invalid chart analysis structure.")
         result = sanitize_chart_analysis(data)
         result["prediction_metadata"] = build_chart_prediction_metadata(
-            response, self.vision_model, chart_settings
+            response,
+            self.vision_model,
+            chart_settings,
+            request_latency_ms=request_latency_ms,
         )
         # Bind this model output to the exact screenshot bytes submitted to vision.
         result["source_image_sha256"] = hashlib.sha256(image_bytes).hexdigest()
