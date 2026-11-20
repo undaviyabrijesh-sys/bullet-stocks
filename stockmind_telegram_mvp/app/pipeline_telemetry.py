@@ -154,6 +154,8 @@ def aggregate_timing_lines(lines: Iterable[str]) -> dict:
     legacy_handler_events = 0
     legacy_handler_outcome_events = 0
     handler_outcome_counts: dict[str, int] = defaultdict(int)
+    handler_outcome_total_samples: dict[tuple[str, str], list[int]] = defaultdict(list)
+    handler_outcome_download_samples: dict[tuple[str, str], list[int]] = defaultdict(list)
     rejected_timing_lines = 0
 
     for line in lines:
@@ -194,6 +196,9 @@ def aggregate_timing_lines(lines: Iterable[str]) -> dict:
                     legacy_handler_outcome_events += 1
                 else:
                     handler_outcome_counts[outcome] += 1
+                    handler_outcome_total_samples[
+                        (event["upload_kind"], outcome)
+                    ].append(event["duration_ms"])
             if request_id is None:
                 legacy_handler_events += 1
             else:
@@ -257,6 +262,16 @@ def aggregate_timing_lines(lines: Iterable[str]) -> dict:
             and {"download_ms", "handler_total_ms"} <= set(handler_metrics)
         ):
             complete_upload_requests += 1
+        outcome = record["outcome"]
+        if (
+            record["upload_kind"] is not None
+            and outcome is not None
+            and "handler_total_ms" in handler_metrics
+            and "download_ms" in handler_metrics
+        ):
+            handler_outcome_download_samples[
+                (record["upload_kind"], outcome)
+            ].append(handler_metrics["download_ms"])
         handler_summary = None
         if handler_metrics:
             handler_summary = {
@@ -282,8 +297,28 @@ def aggregate_timing_lines(lines: Iterable[str]) -> dict:
             }
         )
 
+    outcome_latency_groups = []
+    outcome_keys = sorted(
+        set(handler_outcome_total_samples) | set(handler_outcome_download_samples)
+    )
+    for upload_kind, outcome in outcome_keys:
+        total_values = handler_outcome_total_samples.get((upload_kind, outcome), [])
+        download_values = handler_outcome_download_samples.get((upload_kind, outcome), [])
+        group = {
+            "upload_kind": upload_kind,
+            "outcome": outcome,
+            "handler_total_ms": _summarize(total_values),
+            "correlated_download_sample_count": len(download_values),
+            "download_not_correlated_count": max(
+                0, len(total_values) - len(download_values)
+            ),
+        }
+        if download_values:
+            group["download_ms"] = _summarize(download_values)
+        outcome_latency_groups.append(group)
+
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "percentile_method": {
             "p50": "median",
             "p95": "nearest_rank",
@@ -307,6 +342,7 @@ def aggregate_timing_lines(lines: Iterable[str]) -> dict:
             "legacy_handler_outcome_event_count": legacy_handler_outcome_events,
         },
         "telegram_handler_outcomes": dict(sorted(handler_outcome_counts.items())),
+        "telegram_handler_outcome_latency": outcome_latency_groups,
         "correlated_requests": correlated_requests,
     }
 
