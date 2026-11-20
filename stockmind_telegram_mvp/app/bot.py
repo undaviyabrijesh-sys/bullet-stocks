@@ -73,6 +73,11 @@ def _request_scoped(handler=None, *, upload_kind: str | None = None):
     """Scope a request ID; optionally time photo/document handlers on every exit."""
     if upload_kind is not None and upload_kind not in {"photo", "document"}:
         raise ValueError("upload_kind must be photo or document")
+    handler_log_template = (
+        f"StockMind Telegram {upload_kind} request_id=%s handler_total_ms=%d"
+        if upload_kind is not None
+        else None
+    )
 
     def decorate(target):
         @wraps(target)
@@ -85,10 +90,9 @@ def _request_scoped(handler=None, *, upload_kind: str | None = None):
                 return await target(*args, **kwargs)
             finally:
                 try:
-                    if upload_kind is not None:
+                    if handler_log_template is not None:
                         logger.info(
-                            "StockMind Telegram %s request_id=%s handler_total_ms=%d",
-                            upload_kind,
+                            handler_log_template,
                             _active_request_id(),
                             _elapsed_ms(started_at),
                         )
