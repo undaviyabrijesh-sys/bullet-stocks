@@ -675,3 +675,30 @@ card; they exclude taxes, discounts, credits, retries not represented in the
 fixture, and any non-token charges. Keep the original rate-card source with
 exported reports. These estimates are not invoices and are not evidence of
 lower production spend.
+
+
+## Request-stage latency logs
+
+The Telegram bot emits privacy-minimized timing records through its application
+logger. A successful or failed research pipeline records a
+`StockMind request timing` event with `mode`, `outcome`, total pipeline
+milliseconds, and whichever stage measurements were reached:
+
+- `image_prepare`: screenshot orientation normalization and metadata cleanup.
+- `analysis_execution`: the chart-vision call for screenshots, or the complete
+  tool-enabled research loop for text requests.
+- `overlay_render`: local overlay generation and validation.
+- `telegram_text_delivery`: final analysis/error text delivery.
+- `telegram_overlay_delivery`: optional overlay photo/document delivery.
+
+Photo and image-document handlers also log the Telegram file retrieval/download
+duration and a handler total. The handler total starts after the upload
+preflight checks and includes Telegram file retrieval, bounded download, lock
+and chart-capacity waits, analysis, and final delivery. It does not include
+Telegram update ingress delay before the handler begins.
+
+These measurements are process logs, not persisted per-user analytics. They
+intentionally omit user IDs, prompts, symbols, image hashes, and image bytes.
+Aggregate them offline before drawing latency conclusions; a single request
+does not establish p50/p95 performance. The model-provider request latency
+already captured by the AI client remains a separate, narrower measurement.

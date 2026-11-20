@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from collections import defaultdict, deque
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -50,6 +51,26 @@ from .config import (
 from .tapetide import TapetideClient
 
 logger = logging.getLogger(__name__)
+
+
+def _elapsed_ms(started_at: float) -> int:
+    """Return a non-negative monotonic elapsed duration in milliseconds."""
+    return max(0, int(round((time.perf_counter() - started_at) * 1000)))
+
+
+def _log_request_timings(mode: str, outcome: str, started_at: float, stages: dict) -> None:
+    """Log request-stage durations without user content, IDs, prompts or image metadata."""
+    stage_summary = " ".join(
+        f"{name}={duration}ms" for name, duration in stages.items()
+    ) or "none"
+    logger.info(
+        "StockMind request timing mode=%s outcome=%s total_ms=%d stages=%s",
+        mode,
+        outcome,
+        _elapsed_ms(started_at),
+        stage_summary,
+    )
+
 
 IST = ZoneInfo("Asia/Kolkata")
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
@@ -394,6 +415,9 @@ async def _run_research_locked_impl(
     if user is None:
         return
 
+    request_started = time.perf_counter()
+    request_mode = "chart" if image_bytes is not None else "text"
+    stage_timings = {}
     user_id = user.id
     language = _language_for(message)
     admission_error = _research_admission_error(user_id, language)
@@ -402,17 +426,23 @@ async def _run_research_locked_impl(
         return
 
     if image_bytes is not None:
+        image_prepare_started = time.perf_counter()
         try:
             # Normalize EXIF orientation and strip descriptive/container metadata.
             # The exact same sanitized bytes go to vision, hashing and overlay rendering.
             image_bytes, image_mime_type = _prepare_chart_image_for_vision(image_bytes)
         except ChartImageError as exc:
+            stage_timings["image_prepare"] = _elapsed_ms(image_prepare_started)
+            _log_request_timings(request_mode, "image_rejected", request_started, stage_timings)
             await message.answer(chart_image_error_message(language, exc.code))
             return
         except ValueError:
+            stage_timings["image_prepare"] = _elapsed_ms(image_prepare_started)
             logger.exception("StockMind chart image preparation failed with an unclassified validation error")
+            _log_request_timings(request_mode, "image_rejected", request_started, stage_timings)
             await message.answer(chart_image_error_message(language, "invalid"))
             return
+        stage_timings["image_prepare"] = _elapsed_ms(image_prepare_started)
 
     today = datetime.now(IST).date().isoformat()
     reservation = _reserve_research_request(user_id, today)
@@ -433,11 +463,16 @@ async def _run_research_locked_impl(
     try:
         overlay_image = None
         if image_bytes is not None:
-            chart_result = await research.analyze_chart_image(
-                history, user_text, image_bytes, image_mime_type
-            )
+            analysis_started = time.perf_counter()
+            try:
+                chart_result = await research.analyze_chart_image(
+                    history, user_text, image_bytes, image_mime_type
+                )
+            finally:
+                stage_timings["analysis_execution"] = _elapsed_ms(analysis_started)
             answer = chart_result.get("analysis") or translate(language, "chart_analysis_fallback")
             overlay_render_failed = False
+            overlay_started = time.perf_counter()
             try:
                 overlay_image, drawn_count = _render_overlay_prepared(
                     image_bytes,
@@ -449,6 +484,8 @@ async def _run_research_locked_impl(
                 logger.exception("Chart analysis completed, but overlay rendering failed")
                 overlay_image, drawn_count = None, 0
                 overlay_render_failed = True
+            finally:
+                stage_timings["overlay_render"] = _elapsed_ms(overlay_started)
 
             if overlay_render_failed:
                 answer += (
@@ -457,7 +494,11 @@ async def _run_research_locked_impl(
             elif not drawn_count:
                 answer += _overlay_unavailable_note(chart_result, drawn_count, language)
         else:
-            answer = await research.answer(history, user_text)
+            analysis_started = time.perf_counter()
+            try:
+                answer = await research.answer(history, user_text)
+            finally:
+                stage_timings["analysis_execution"] = _elapsed_ms(analysis_started)
 
         history_text = user_text or "Please analyse the attached chart screenshot for DNS zones."
         if image_bytes is not None:
@@ -472,28 +513,60 @@ async def _run_research_locked_impl(
             failure_message = (
                 translate(language, "research_timeout", seconds=exc.timeout_seconds)
             )
-        if not await send_analysis_text(message, status, failure_message):
+        delivery_started = time.perf_counter()
+        delivered = await send_analysis_text(message, status, failure_message)
+        stage_timings["telegram_text_delivery"] = _elapsed_ms(delivery_started)
+        _log_request_timings(
+            request_mode,
+            "timeout" if delivered else "timeout_delivery_failed",
+            request_started,
+            stage_timings,
+        )
+        if not delivered:
             logger.warning("StockMind research deadline expired and Telegram could not deliver the timeout message")
         return
     except ResearchResponseIncomplete:
         failure_message = translate(language, "research_incomplete")
-        if not await send_analysis_text(message, status, failure_message):
+        delivery_started = time.perf_counter()
+        delivered = await send_analysis_text(message, status, failure_message)
+        stage_timings["telegram_text_delivery"] = _elapsed_ms(delivery_started)
+        _log_request_timings(
+            request_mode,
+            "incomplete_response" if delivered else "incomplete_response_delivery_failed",
+            request_started,
+            stage_timings,
+        )
+        if not delivered:
             logger.warning("StockMind received an incomplete model response and Telegram could not deliver the warning")
         return
     except Exception:
         logger.exception("StockMind research request failed")
         failure_message = translate(language, "research_failed")
-        if not await send_analysis_text(message, status, failure_message):
+        delivery_started = time.perf_counter()
+        delivered = await send_analysis_text(message, status, failure_message)
+        stage_timings["telegram_text_delivery"] = _elapsed_ms(delivery_started)
+        _log_request_timings(
+            request_mode,
+            "failed" if delivered else "failed_error_delivery",
+            request_started,
+            stage_timings,
+        )
+        if not delivered:
             logger.warning("StockMind research failed and Telegram could not deliver the error message")
         return
 
-    if not await send_analysis_text(message, status, answer):
+    delivery_started = time.perf_counter()
+    text_delivered = await send_analysis_text(message, status, answer)
+    stage_timings["telegram_text_delivery"] = _elapsed_ms(delivery_started)
+    outcome = "completed" if text_delivered else "text_delivery_failed"
+    if not text_delivered:
         logger.warning("StockMind analysis succeeded, but Telegram text delivery failed")
 
     # Deliver the overlay after the written analysis has been committed to chat.
     # A Telegram photo-send failure must not turn a successful AI analysis into
     # a failed research response or overwrite the user's readable answer.
     if overlay_image is not None:
+        overlay_delivery_started = time.perf_counter()
         delivered = await send_overlay_photo(
             message,
             overlay_image,
@@ -501,8 +574,16 @@ async def _run_research_locked_impl(
                 translate(language, "overlay_caption")
             ),
         )
+        stage_timings["telegram_overlay_delivery"] = _elapsed_ms(overlay_delivery_started)
         if not delivered:
+            outcome = (
+                "completed_overlay_delivery_failed"
+                if text_delivered
+                else "text_and_overlay_delivery_failed"
+            )
             logger.warning("Chart analysis succeeded, but Telegram overlay delivery failed")
+
+    _log_request_timings(request_mode, outcome, request_started, stage_timings)
 
 
 @dp.message(CommandStart())
@@ -618,6 +699,8 @@ async def handle_chart_photo(message: Message):
             await message.answer(admission_error)
             return
 
+    handler_started = time.perf_counter()
+    download_started = time.perf_counter()
     try:
         telegram_file = await bot.get_file(photo.file_id)
         if not telegram_file.file_path:
@@ -634,9 +717,20 @@ async def handle_chart_photo(message: Message):
     except Exception:
         await message.answer(_ui(message, "upload_download_failed"))
         return
+    finally:
+        logger.info(
+            "StockMind Telegram photo download_ms=%d",
+            _elapsed_ms(download_started),
+        )
 
     caption = message.caption or _ui(message, "chart_caption_default")
-    await run_research(message, caption, image_bytes, "image/jpeg")
+    try:
+        await run_research(message, caption, image_bytes, "image/jpeg")
+    finally:
+        logger.info(
+            "StockMind Telegram photo handler_total_ms=%d",
+            _elapsed_ms(handler_started),
+        )
 
 
 @dp.message(F.document)
@@ -656,6 +750,8 @@ async def handle_chart_document(message: Message):
             await message.answer(admission_error)
             return
 
+    handler_started = time.perf_counter()
+    download_started = time.perf_counter()
     try:
         telegram_file = await bot.get_file(document.file_id)
         if not telegram_file.file_path:
@@ -672,9 +768,20 @@ async def handle_chart_document(message: Message):
     except Exception:
         await message.answer(_ui(message, "upload_download_failed"))
         return
+    finally:
+        logger.info(
+            "StockMind Telegram document download_ms=%d",
+            _elapsed_ms(download_started),
+        )
 
     caption = message.caption or _ui(message, "chart_caption_default")
-    await run_research(message, caption, image_bytes, mime_type)
+    try:
+        await run_research(message, caption, image_bytes, mime_type)
+    finally:
+        logger.info(
+            "StockMind Telegram document handler_total_ms=%d",
+            _elapsed_ms(handler_started),
+        )
 
 
 @dp.message(F.text)

@@ -821,6 +821,59 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(send_overlay.await_args.args[1], b"overlay-jpeg")
         self.assertEqual(bot_module.histories[self.user_id][-1]["content"], result["analysis"])
 
+    async def test_chart_request_logs_stage_timings_without_user_content(self):
+        result = {
+            "analysis": "Visible demand structure; verify the price scale.",
+            "plot_bounds": {"x_start": 0.08, "x_end": 0.94, "y_top": 0.12, "y_bottom": 0.9},
+            "zones": [{"zone_type": "demand", "draw_overlay": True}],
+        }
+        self.use_research(analyze_chart_image=AsyncMock(return_value=result))
+
+        with (
+            patch.object(
+                bot_module,
+                "_prepare_chart_image_for_vision",
+                return_value=(b"normalized-chart", "image/png"),
+            ),
+            patch.object(
+                bot_module,
+                "_render_overlay_prepared",
+                return_value=(b"overlay-jpeg", 1),
+            ),
+            patch.object(
+                bot_module,
+                "send_overlay_photo",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch.object(bot_module.logger, "info") as info,
+        ):
+            await bot_module.run_research(
+                self.message, "Map BTC 1H DNS", b"chart-bytes", "image/png"
+            )
+
+        timing_calls = [
+            call for call in info.call_args_list
+            if call.args
+            and call.args[0]
+            == "StockMind request timing mode=%s outcome=%s total_ms=%d stages=%s"
+        ]
+        self.assertEqual(len(timing_calls), 1)
+        _, mode, outcome, total_ms, stages = timing_calls[0].args
+        self.assertEqual(mode, "chart")
+        self.assertEqual(outcome, "completed")
+        self.assertGreaterEqual(total_ms, 0)
+        for stage in (
+            "image_prepare=",
+            "analysis_execution=",
+            "overlay_render=",
+            "telegram_text_delivery=",
+            "telegram_overlay_delivery=",
+        ):
+            self.assertIn(stage, stages)
+        self.assertNotIn("Map BTC", stages)
+        self.assertNotIn(str(self.user_id), stages)
+
     async def test_chart_analysis_reports_overlay_render_failure_separately(self):
         result = {
             "analysis": "Visible demand structure; verify the price scale.",
