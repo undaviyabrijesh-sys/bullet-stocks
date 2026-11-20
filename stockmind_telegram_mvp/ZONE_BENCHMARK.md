@@ -573,3 +573,36 @@ independent: increasing one does not increase the other. Typical model metadata
 and zone geometry should fit comfortably below the defaults. The byte ceilings
 bound input size, but the evaluator still retains parsed fixture metrics in
 memory; use separate manifests for very large benchmark collections.
+
+
+## Paired inference usage and latency
+
+The paired comparison report includes an `inference_telemetry` section. Its
+`baseline` and `candidate` summaries report the fixture coverage, observed
+totals, means, minima and maxima for provider-reported prompt, completion,
+total, image, cached-prompt and reasoning token counts. Request latency is
+summarized separately in milliseconds. Optional token subtotals have their
+own coverage counts because providers may omit them even when total usage is
+available.
+
+`paired_deltas` uses candidate minus baseline for the same fixture ID and
+only includes a delta when both reports contain that metric for that fixture.
+It reports the paired fixture count, missing-pair count, total delta, mean
+delta, minimum and maximum delta. Negative token or latency deltas indicate
+lower observed consumption or shorter model-call time for the candidate;
+they do not by themselves establish a lower currency cost or a faster
+end-to-end Telegram response.
+
+Missing telemetry is never replaced with zero. If one side has no provider
+usage or request timing for a fixture, that fixture is excluded from that
+metric's paired delta and the coverage fields disclose the omission. The
+per-fixture comparison rows retain the raw baseline and candidate telemetry
+for auditability.
+
+Token totals are provider-reported counts, not estimated image-token counts.
+No currency cost is inferred: pricing, cached-input treatment and model
+rates can vary by model and effective date. Request latency covers the
+vision completion round trip only; it excludes image download/preparation,
+queueing before the request and overlay rendering/upload. The synthetic
+comparison tests validate arithmetic and missing-data handling, not actual
+provider savings or real-market DNS accuracy.
