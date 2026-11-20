@@ -613,3 +613,57 @@ vision completion round trip only; it excludes image download/preparation,
 queueing before the request and overlay rendering/upload. The synthetic
 comparison tests validate arithmetic and missing-data handling, not actual
 provider savings or real-market DNS accuracy.
+
+
+## Optional date-bound currency cost estimates
+
+The paired comparison CLI can estimate USD cost when you provide an explicit
+rate card. No model prices are built into StockMind and the tool does not fetch
+or guess current provider rates. The rate card must use exact provider-returned
+model IDs and a date window covering the fixture's provider-returned
+`generated_at` date.
+
+Example rate-card shape (the values below are placeholders, not actual prices):
+
+~~~json
+{
+  "schema": "stockmind.usage-pricing.v1",
+  "version": "replace-with-your-rate-card-version",
+  "currency": "USD",
+  "effective_from": "2026-11-01",
+  "effective_until": null,
+  "source": "Record the official pricing source and retrieval date here",
+  "models": {
+    "exact-provider-model-id": {
+      "input_usd_per_million_tokens": "0",
+      "cached_input_usd_per_million_tokens": "0",
+      "output_usd_per_million_tokens": "0"
+    }
+  }
+}
+~~~
+
+Run the comparison with:
+
+~~~bash
+python -m stockmind_telegram_mvp.app.zone_benchmark_compare \
+  baseline-report.json candidate-report.json \
+  --pricing-file pricing-card.json
+~~~
+
+Rates must be decimal strings (not JSON floats), non-negative, and expressed
+per one million tokens. The card is versioned and date-bounded; a fixture is
+left unpriced when its actual model is absent, its provider timestamp falls
+outside the card's effective dates, usage is missing, or a discounted cached
+input rate is supplied without the cached-token count needed to calculate it.
+Missing values are never treated as zero.
+
+Provider-reported `image_tokens` are a subset of prompt/input tokens and are
+not charged a second time. `reasoning_tokens` are a subset of completion/output
+tokens and are not charged a second time. If no cached-input rate is supplied,
+all prompt tokens use the standard input rate. Cost outputs are rounded to
+12 decimal places in USD and are estimates based only on the supplied card;
+they exclude taxes, discounts, credits, retries not represented in the fixture,
+and any non-token charges. Keep the original rate-card source with exported
+reports. These estimates are not invoices and are not evidence of lower
+production spend.

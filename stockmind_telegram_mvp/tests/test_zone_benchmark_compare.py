@@ -882,6 +882,116 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         self.assertIsNone(empty["p95"])
         self.assertEqual(empty["missing_fixture_count"], 2)
 
+    def test_optional_date_bound_pricing_estimates_paired_model_costs(self):
+        baseline_usage = {
+            "prompt_tokens": 1000, "completion_tokens": 250, "total_tokens": 1250,
+            "image_tokens": 400, "cached_prompt_tokens": 200, "reasoning_tokens": 50,
+        }
+        candidate_usage = {
+            "prompt_tokens": 800, "completion_tokens": 200, "total_tokens": 1000,
+            "image_tokens": 300, "cached_prompt_tokens": 100, "reasoning_tokens": 40,
+        }
+        baseline = self._report(
+            "baseline-model", [{**_zone(), "draw_overlay": True}], usage=baseline_usage
+        )
+        candidate = self._report(
+            "candidate-model", [{**_zone(), "draw_overlay": True}], usage=candidate_usage
+        )
+        pricing_card = {
+            "schema": "stockmind.usage-pricing.v1",
+            "version": "test-rate-card-2026-11",
+            "currency": "USD",
+            "effective_from": "2026-11-01",
+            "effective_until": "2026-12-01",
+            "source": "Synthetic unit-test rates; not provider pricing",
+            "models": {
+                "baseline-model": {
+                    "input_usd_per_million_tokens": "10",
+                    "cached_input_usd_per_million_tokens": "2",
+                    "output_usd_per_million_tokens": "20",
+                },
+                "candidate-model": {
+                    "input_usd_per_million_tokens": "10",
+                    "cached_input_usd_per_million_tokens": "2",
+                    "output_usd_per_million_tokens": "20",
+                },
+            },
+        }
+
+        result = compare_benchmark_reports(
+            baseline, candidate, pricing_card=pricing_card
+        )
+        cost = result["currency_cost_estimate"]
+        self.assertEqual(cost["baseline"]["total_cost_usd"], "0.013400000000")
+        self.assertEqual(cost["candidate"]["total_cost_usd"], "0.011200000000")
+        self.assertEqual(
+            cost["paired_deltas"]["total_delta_usd"], "-0.002200000000"
+        )
+        self.assertEqual(cost["paired_deltas"]["paired_fixture_count"], 1)
+        fixture_cost = result["fixtures"][0]["estimated_cost"]
+        self.assertEqual(fixture_cost["baseline"]["status"], "priced")
+        self.assertEqual(fixture_cost["baseline"]["image_tokens_included_in_input"], 400)
+        self.assertEqual(fixture_cost["baseline"]["reasoning_tokens_included_in_output"], 50)
+
+    def test_cost_estimate_is_unpriced_when_discounted_cached_usage_is_missing(self):
+        baseline = self._report(
+            "baseline-model", [{**_zone(), "draw_overlay": True}],
+            usage={"prompt_tokens": 1000, "completion_tokens": 250, "total_tokens": 1250},
+        )
+        candidate = self._report(
+            "candidate-model", [{**_zone(), "draw_overlay": True}],
+            usage={"prompt_tokens": 1000, "completion_tokens": 250, "total_tokens": 1250},
+        )
+        pricing_card = {
+            "schema": "stockmind.usage-pricing.v1",
+            "version": "test-rate-card",
+            "currency": "USD",
+            "effective_from": "2026-11-01",
+            "effective_until": None,
+            "source": "Synthetic unit-test rates; not provider pricing",
+            "models": {
+                model: {
+                    "input_usd_per_million_tokens": "10",
+                    "cached_input_usd_per_million_tokens": "2",
+                    "output_usd_per_million_tokens": "20",
+                }
+                for model in ("baseline-model", "candidate-model")
+            },
+        }
+        result = compare_benchmark_reports(
+            baseline, candidate, pricing_card=pricing_card
+        )
+        cost = result["currency_cost_estimate"]
+        self.assertEqual(cost["baseline"]["priced_fixture_count"], 0)
+        self.assertEqual(cost["baseline"]["unpriced_reasons"], {
+            "cached_token_usage_missing": 1
+        })
+        self.assertIsNone(cost["paired_deltas"]["total_delta_usd"])
+
+    def test_pricing_card_rejects_float_rates_and_unknown_model_rate_fields(self):
+        report = self._report("baseline-model", [{**_zone(), "draw_overlay": True}])
+        candidate = self._report("candidate-model", [{**_zone(), "draw_overlay": True}])
+        card = {
+            "schema": "stockmind.usage-pricing.v1",
+            "version": "test-rate-card",
+            "currency": "USD",
+            "effective_from": "2026-11-01",
+            "effective_until": None,
+            "source": "Synthetic unit-test rates; not provider pricing",
+            "models": {
+                "baseline-model": {
+                    "input_usd_per_million_tokens": 10.0,
+                    "output_usd_per_million_tokens": "20",
+                },
+                "candidate-model": {
+                    "input_usd_per_million_tokens": "10",
+                    "output_usd_per_million_tokens": "20",
+                },
+            },
+        }
+        with self.assertRaisesRegex(ValueError, "decimal string"):
+            compare_benchmark_reports(report, candidate, pricing_card=card)
+
     def test_paired_telemetry_delta_reports_median_and_p95(self):
         baseline_values = [100, 200, 300, 400, 500]
         candidate_values = [150, 180, 450, 350, 700]

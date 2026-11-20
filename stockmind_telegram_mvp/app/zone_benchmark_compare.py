@@ -8,6 +8,7 @@ import statistics
 from pathlib import Path
 
 from .strict_json import loads as strict_json_loads
+from .usage_cost import compare_fixture_costs
 from .zone_benchmark import (
     _aggregate_by_context,
     _aggregate_metrics,
@@ -1031,7 +1032,7 @@ def _compare_context(baseline_fixtures, candidate_fixtures, field):
     return output
 
 
-def compare_benchmark_reports(baseline_report, candidate_report):
+def compare_benchmark_reports(baseline_report, candidate_report, *, pricing_card=None):
     """Compare reports only when every fixture and scoring input is identical."""
     baseline = _validate_report(baseline_report, "baseline")
     candidate = _validate_report(candidate_report, "candidate")
@@ -1060,6 +1061,12 @@ def compare_benchmark_reports(baseline_report, candidate_report):
 
     base_fixtures = [baseline[key] for key in sorted(baseline)]
     candidate_fixtures = [candidate[key] for key in sorted(candidate)]
+    cost_summary = None
+    fixture_costs = None
+    if pricing_card is not None:
+        cost_summary, fixture_costs = compare_fixture_costs(
+            base_fixtures, candidate_fixtures, pricing_card
+        )
     base_matches = [m for f in base_fixtures for m in f["matches"]]
     candidate_matches = [m for f in candidate_fixtures for m in f["matches"]]
     base_overall = _aggregate_metrics([f["overall"] for f in base_fixtures], base_matches)
@@ -1093,7 +1100,7 @@ def compare_benchmark_reports(baseline_report, candidate_report):
     fixture_results = []
     for fixture_id in sorted(baseline):
         base, cand = baseline[fixture_id], candidate[fixture_id]
-        fixture_results.append({
+        fixture_result = {
             "fixture_id": fixture_id,
             "market_context": base["market_context"],
             "metrics": _compare_metrics(base["overall"], cand["overall"]),
@@ -1115,11 +1122,14 @@ def compare_benchmark_reports(baseline_report, candidate_report):
                     base["confidence_stratified_results"], cand["confidence_stratified_results"]
                 )
             } if "confidence_stratified_results" in base and "confidence_stratified_results" in cand else {}),
-        })
+        }
+        if fixture_costs is not None:
+            fixture_result["estimated_cost"] = fixture_costs[fixture_id]
+        fixture_results.append(fixture_result)
 
     base_ignored = sum(f["ignored_prediction_count"] for f in base_fixtures)
     candidate_ignored = sum(f["ignored_prediction_count"] for f in candidate_fixtures)
-    return {
+    result = {
         "fixture_count": len(base_fixtures),
         "annotation_guideline_version": baseline_report["annotation_guideline_version"],
         "baseline_prediction_profile": baseline_report["prediction_profile"],
@@ -1160,6 +1170,9 @@ def compare_benchmark_reports(baseline_report, candidate_report):
         } if "confidence_stratified_results" in baseline_report else {}),
         "fixtures": fixture_results,
     }
+    if cost_summary is not None:
+        result["currency_cost_estimate"] = cost_summary
+    return result
 
 
 def _read_report(path, label):
@@ -1179,11 +1192,21 @@ def main(argv=None):
     )
     parser.add_argument("baseline_report", type=Path)
     parser.add_argument("candidate_report", type=Path)
+    parser.add_argument(
+        "--pricing-file",
+        type=Path,
+        help="Optional date-bound JSON rate card; no provider prices are built in.",
+    )
     args = parser.parse_args(argv)
     try:
+        pricing_card = (
+            _read_report(args.pricing_file, "pricing")
+            if args.pricing_file is not None else None
+        )
         result = compare_benchmark_reports(
             _read_report(args.baseline_report, "baseline"),
             _read_report(args.candidate_report, "candidate"),
+            pricing_card=pricing_card,
         )
     except (OSError, ValueError, TypeError, KeyError) as exc:
         parser.error(str(exc))
