@@ -11,6 +11,7 @@ from stockmind_telegram_mvp.app.zone_benchmark import evaluate_benchmark_manifes
 from stockmind_telegram_mvp.app.zone_benchmark_compare import (
     _read_report,
     _validate_price_accuracy,
+    _validate_report,
     compare_benchmark_reports,
 )
 
@@ -601,6 +602,22 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
         candidate["fixture_count"] = 2
         with self.assertRaisesRegex(ValueError, "duplicate fixture_id"):
             compare_benchmark_reports(baseline, candidate)
+
+    def test_rejects_duplicate_screenshot_hashes_under_distinct_fixture_ids(self):
+        report = self._report("baseline", [{**_zone(), "draw_overlay": True}])
+        duplicate = dict(report["fixtures"][0])
+        duplicate["fixture_id"] = "btc-1h-duplicate"
+        duplicate["adjudication_metadata"] = _adjudication_metadata(
+            duplicate["fixture_id"],
+            duplicate["image_sha256"],
+            duplicate["market_context"],
+            duplicate["annotation_metadata"],
+        )
+        report["fixtures"].append(duplicate)
+        report["fixture_count"] += 1
+
+        with self.assertRaisesRegex(ValueError, "duplicate screenshot image_sha256"):
+            _validate_report(report, "test")
 
     def test_compares_plot_boundary_accuracy_on_identical_manual_plot(self):
         reference_plot = {

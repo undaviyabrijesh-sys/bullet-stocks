@@ -585,6 +585,7 @@ def _validate_report(report, label):
         raise ValueError(f"{label} fixture_count does not match its fixtures array")
 
     indexed = {}
+    seen_image_hashes = set()
     for index, fixture in enumerate(fixtures):
         prefix = f"{label} fixture at index {index}"
         if not isinstance(fixture, dict):
@@ -598,6 +599,12 @@ def _validate_report(report, label):
             value = fixture.get(field)
             if not isinstance(value, str) or not _SHA256_RE.fullmatch(value):
                 raise ValueError(f"{prefix} has an invalid {field}")
+        image_hash = fixture["image_sha256"]
+        if image_hash in seen_image_hashes:
+            raise ValueError(
+                f"{label} report contains duplicate screenshot image_sha256 {image_hash!r}"
+            )
+        seen_image_hashes.add(image_hash)
         calibration_hash = fixture.get("price_axis_calibration_sha256")
         if calibration_hash is not None and (
             not isinstance(calibration_hash, str) or not _SHA256_RE.fullmatch(calibration_hash)
