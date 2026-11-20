@@ -126,7 +126,7 @@ class PipelineOutcomeLatencyTests(unittest.TestCase):
         self.assertNotIn("download_ms", group)
 
     def test_upload_kind_conflict_excludes_correlated_handler_outcome(self):
-        request_id = "g" * 32
+        request_id = "7" * 32
         report = aggregate_timing_lines(
             [
                 f"StockMind Telegram photo request_id={request_id} download_ms=5",
@@ -146,7 +146,7 @@ class PipelineOutcomeLatencyTests(unittest.TestCase):
 
 
     def test_upload_kind_conflict_without_outcome_does_not_count_as_outcome_conflict(self):
-        request_id = "h" * 32
+        request_id = "8" * 32
         report = aggregate_timing_lines(
             [
                 f"StockMind Telegram photo request_id={request_id} download_ms=5",
