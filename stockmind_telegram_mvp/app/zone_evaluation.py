@@ -393,7 +393,12 @@ def evaluate_zone_predictions(
     validate_evaluation_image_dimensions(image_width, image_height)
     if isinstance(iou_threshold, bool) or not isinstance(iou_threshold, (int, float)):
         raise ValueError("iou_threshold must be a number greater than 0 and at most 1")
-    iou_threshold = float(iou_threshold)
+    try:
+        iou_threshold = float(iou_threshold)
+    except (OverflowError, TypeError, ValueError) as exc:
+        raise ValueError(
+            "iou_threshold must be a number greater than 0 and at most 1"
+        ) from exc
     if not math.isfinite(iou_threshold) or not 0 < iou_threshold <= 1:
         raise ValueError("iou_threshold must be a number greater than 0 and at most 1")
     if not isinstance(predicted_zones, (list, tuple)):

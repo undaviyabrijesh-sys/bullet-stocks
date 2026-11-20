@@ -367,6 +367,21 @@ class ZoneEvaluationTests(unittest.TestCase):
         self.assertIsNone(result["overall"]["f1"])
         self.assertIsNone(result["overall"]["mean_iou"])
 
+    def test_unrepresentable_integer_threshold_is_rejected_by_both_evaluators(self):
+        threshold = 10 ** 400
+        with self.subTest(evaluator="AI zone predictions"):
+            with self.assertRaisesRegex(ValueError, "iou_threshold must be a number"):
+                evaluate_zone_predictions(
+                    [], [], iou_threshold=threshold,
+                    image_width=640, image_height=360,
+                )
+        with self.subTest(evaluator="manual annotation agreement"):
+            with self.assertRaisesRegex(ValueError, "iou_threshold must be a number"):
+                evaluate_manual_annotation_agreement(
+                    [], [], iou_threshold=threshold,
+                    image_width=640, image_height=360,
+                )
+
     def test_invalid_threshold_is_rejected(self):
         for threshold in (0, 1.1, float("nan"), True):
             with self.subTest(threshold=threshold):
