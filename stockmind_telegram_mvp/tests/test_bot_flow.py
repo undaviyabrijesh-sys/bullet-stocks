@@ -1,1229 +1,242 @@
-"""Integration-style tests for the StockMind research-to-Telegram flow.
-
-The bot module is imported with dummy configuration only. All provider and
-Telegram operations are mocked; these tests never contact external services.
-"""
-import asyncio
-import importlib
-import os
+"""Tests for offline aggregation of privacy-minimized pipeline timing logs."""
+import json
+from io import StringIO
 import unittest
-from datetime import datetime
-from io import BytesIO
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
-from unittest.mock import patch as environment_patch
-
-from PIL import Image
-from PIL.PngImagePlugin import PngInfo
-
-
-from stockmind_telegram_mvp.app.ai import ResearchTurnDeadlineExceeded, ResearchResponseIncomplete
-from stockmind_telegram_mvp.app.overlay_engine import ChartImageError
-from stockmind_telegram_mvp.app.localization import translate
-from stockmind_telegram_mvp.app.telegram_delivery import split_telegram_text
-from stockmind_telegram_mvp.app.user_locks import (
-    LEASE_LOST_CANCEL_MESSAGE,
-    UserLockRegistry,
+from stockmind_telegram_mvp.app.pipeline_telemetry import (
+    aggregate_timing_lines,
+    main,
+    parse_timing_line,
 )
 
 
-_TEST_ENV = {
-    "TELEGRAM_BOT_TOKEN": "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
-    "OPENAI_API_KEY": "stockmind-test-key",
-    "TAPETIDE_TOKEN": "stockmind-test-tapetide-token",
-    "OPENAI_MODEL": "gpt-6-luna-test",
-    "OPENAI_VISION_MODEL": "gpt-6-luna-test",
-    "STOCKMIND_PREFERENCES_DB": ":memory:",
-}
-with environment_patch.dict(os.environ, _TEST_ENV):
-    bot_module = importlib.import_module("stockmind_telegram_mvp.app.bot")
-
-
-class ChartImagePrivacyPreparationTests(unittest.TestCase):
-    def _metadata_png(self):
-        exif = Image.Exif()
-        exif[274] = 1
-        exif[315] = "Private annotator name"
-        pnginfo = PngInfo()
-        pnginfo.add_text("Comment", "Private screenshot note")
-        output = BytesIO()
-        Image.new("RGB", (64, 48), (24, 80, 140)).save(
-            output, format="PNG", exif=exif, pnginfo=pnginfo
+class PipelineTelemetryTests(unittest.TestCase):
+    def test_parses_request_timing_with_logger_prefix(self):
+        event = parse_timing_line(
+            "2026-11-20 INFO bot StockMind request timing "
+            "mode=chart outcome=completed total_ms=125 "
+            "stages=image_prepare=5ms analysis_execution=90ms overlay_render=10ms"
         )
-        return output.getvalue()
-
-    def test_strips_exif_and_png_text_before_vision_receives_image(self):
-        original = self._metadata_png()
-
-        prepared, mime_type = bot_module._prepare_chart_image_for_vision(original)
-
-        self.assertEqual(mime_type, "image/png")
-        self.assertNotEqual(prepared, original)
-        with Image.open(BytesIO(prepared)) as image:
-            self.assertEqual(image.size, (64, 48))
-            self.assertEqual(image.getpixel((10, 10)), (24, 80, 140))
-            self.assertFalse(image.getexif())
-            self.assertNotIn("Comment", image.info)
-
-    def test_metadata_free_screenshot_keeps_exact_original_bytes(self):
-        output = BytesIO()
-        Image.new("RGB", (64, 48), "white").save(output, format="PNG")
-        original = output.getvalue()
-
-        prepared, mime_type = bot_module._prepare_chart_image_for_vision(original)
-
-        self.assertEqual(mime_type, "image/png")
-        self.assertEqual(prepared, original)
-
-    def test_sanitization_size_overflow_uses_stable_too_large_error(self):
-        original = self._metadata_png()
-        with patch.object(
-            bot_module,
-            "_strip_annotation_metadata",
-            side_effect=bot_module.AnnotationImageTooLargeError("Metadata-cleaned chart image exceeds max_image_bytes (5242880)"),
-        ):
-            with self.assertRaises(ChartImageError) as raised:
-                bot_module._prepare_chart_image_for_vision(original)
-
-        self.assertEqual(raised.exception.code, "too_large")
-
-    def test_generic_value_error_cannot_claim_the_size_limit_was_exceeded(self):
-        original = self._metadata_png()
-        with patch.object(
-            bot_module,
-            "_strip_annotation_metadata",
-            side_effect=ValueError("decoder note: exceeds max_image_bytes in another context"),
-        ):
-            with self.assertRaises(ChartImageError) as raised:
-                bot_module._prepare_chart_image_for_vision(original)
-
-        self.assertEqual(raised.exception.code, "invalid")
-
-    def test_sanitization_failure_hides_internal_error_details(self):
-        original = self._metadata_png()
-        with patch.object(
-            bot_module,
-            "_strip_annotation_metadata",
-            side_effect=ValueError("private decoder detail"),
-        ):
-            with self.assertRaises(ChartImageError) as raised:
-                bot_module._prepare_chart_image_for_vision(original)
-
-        self.assertEqual(raised.exception.code, "invalid")
-        self.assertNotIn("private decoder detail", str(raised.exception))
-
-
-class OverlayOutcomeMessageTests(unittest.TestCase):
-    def test_drawn_overlay_needs_no_unavailable_note(self):
         self.assertEqual(
-            bot_module._overlay_unavailable_note(
-                {"plot_bounds": {"x_start": 0.1}, "zones": []}, 1
-            ),
-            "",
-        )
-
-    def test_missing_plot_boundary_is_distinguished_from_missing_zones(self):
-        note = bot_module._overlay_unavailable_note(
-            {"plot_bounds": None, "zones": [{"zone_type": "demand"}]}, 0
-        )
-        self.assertIn("main price-plot boundary", note)
-        self.assertIn("withheld all overlays", note)
-
-    def test_empty_zone_list_does_not_claim_that_no_zone_exists(self):
-        note = bot_module._overlay_unavailable_note(
+            event,
             {
-                "plot_bounds": {
-                    "x_start": 0.1, "x_end": 0.9,
-                    "y_top": 0.1, "y_bottom": 0.9,
+                "kind": "request",
+                "mode": "chart",
+                "outcome": "completed",
+                "total_ms": 125,
+                "stages": {
+                    "image_prepare": 5,
+                    "analysis_execution": 90,
+                    "overlay_render": 10,
                 },
-                "zones": [],
             },
-            0,
-        )
-        self.assertIn("No distinct supply/demand zone was returned", note)
-        self.assertIn("does not prove that no zone exists", note)
-
-    def test_model_declined_geometry_is_distinguished_from_renderer_rejection(self):
-        note = bot_module._overlay_unavailable_note(
-            {
-                "plot_bounds": {
-                    "x_start": 0.1, "x_end": 0.9,
-                    "y_top": 0.1, "y_bottom": 0.9,
-                },
-                "zones": [{"zone_type": "demand", "draw_overlay": False}],
-            },
-            0,
-        )
-        self.assertIn("candidate areas", note)
-        self.assertIn("none had geometry approved", note)
-
-    def test_final_pixel_or_plot_rejection_is_reported_separately(self):
-        note = bot_module._overlay_unavailable_note(
-            {
-                "plot_bounds": {
-                    "x_start": 0.1, "x_end": 0.9,
-                    "y_top": 0.1, "y_bottom": 0.9,
-                },
-                "zones": [{"zone_type": "demand", "draw_overlay": True}],
-            },
-            0,
-        )
-        self.assertIn("final pixel-size and plot-boundary checks", note)
-        self.assertIn("sharper, uncropped screenshot", note)
-
-
-class ChartImageLocalizationTests(unittest.IsolatedAsyncioTestCase):
-    async def test_image_validation_error_is_localized_before_quota_reservation(self):
-        message = SimpleNamespace(
-            from_user=SimpleNamespace(id=987654321, language_code="gu"),
-            answer=AsyncMock(),
-        )
-        with (
-            patch.object(bot_module, "_language_for", return_value="gu"),
-            patch.object(bot_module, "_research_admission_error", return_value=None),
-            patch.object(
-                bot_module,
-                "prepare_chart_image",
-                side_effect=ChartImageError("animated", "decoder detail must not be shown"),
-            ),
-            patch.object(bot_module, "_reserve_research_request") as reserve,
-        ):
-            await bot_module._run_research_locked_impl(
-                message, "analyse chart", b"image bytes", "image/png"
-            )
-
-        message.answer.assert_awaited_once_with(
-            translate("gu", "chart_image_animated")
-        )
-        reserve.assert_not_called()
-
-
-class ChartCapacityTests(unittest.IsolatedAsyncioTestCase):
-    @staticmethod
-    def message(user_id=987654321):
-        return SimpleNamespace(
-            from_user=SimpleNamespace(id=user_id, language_code="en"),
-            answer=AsyncMock(),
         )
 
-    async def test_chart_pipeline_respects_process_local_concurrency_limit(self):
-        semaphore = asyncio.Semaphore(1)
-        first_started = asyncio.Event()
-        release_first = asyncio.Event()
-        active = 0
-        maximum_active = 0
-
-        async def slow_pipeline(*args, **kwargs):
-            nonlocal active, maximum_active
-            active += 1
-            maximum_active = max(maximum_active, active)
-            if active == 1:
-                first_started.set()
-            try:
-                await release_first.wait()
-            finally:
-                active -= 1
-
-        first_message = self.message()
-        second_message = self.message(987654322)
-        with (
-            patch.object(bot_module, "chart_analysis_semaphore", semaphore),
-            patch.object(bot_module, "_research_admission_error", return_value=None),
-            patch.object(
-                bot_module, "_run_research_locked_impl",
-                new_callable=AsyncMock, side_effect=slow_pipeline,
-            ) as pipeline,
-        ):
-            first = asyncio.create_task(
-                bot_module._run_research_locked(first_message, "chart one", b"image", "image/png")
-            )
-            await asyncio.wait_for(first_started.wait(), timeout=1)
-            second = asyncio.create_task(
-                bot_module._run_research_locked(second_message, "chart two", b"image", "image/png")
-            )
-            await asyncio.sleep(0.01)
-            self.assertEqual(pipeline.await_count, 1)
-            release_first.set()
-            await asyncio.wait_for(asyncio.gather(first, second), timeout=1)
-
-        self.assertEqual(pipeline.await_count, 2)
-        self.assertEqual(maximum_active, 1)
-        await asyncio.wait_for(semaphore.acquire(), timeout=1)
-        semaphore.release()
-
-    async def test_capacity_timeout_does_not_start_pipeline_or_consume_quota(self):
-        semaphore = asyncio.Semaphore(1)
-        await semaphore.acquire()
-        message = self.message()
-        try:
-            with (
-                patch.object(bot_module, "chart_analysis_semaphore", semaphore),
-                patch.object(bot_module, "CHART_CAPACITY_WAIT_TIMEOUT_SECONDS", 0.01),
-                # Chart queue patience is independent of the per-user lock timeout.
-                patch.object(bot_module, "USER_LOCK_WAIT_TIMEOUT_SECONDS", 120.0),
-                patch.object(bot_module, "_research_admission_error", return_value=None),
-                patch.object(bot_module, "_reserve_research_request") as reserve,
-                patch.object(
-                    bot_module, "_run_research_locked_impl", new_callable=AsyncMock
-                ) as pipeline,
-            ):
-                await bot_module._run_research_locked(
-                    message, "chart request", b"image", "image/png"
-                )
-
-            pipeline.assert_not_awaited()
-            reserve.assert_not_called()
-            message.answer.assert_awaited_once()
-            self.assertIn("chart-analysis slots", message.answer.await_args.args[0])
-        finally:
-            semaphore.release()
-
-    async def test_capacity_slot_is_released_when_pipeline_raises(self):
-        semaphore = asyncio.Semaphore(1)
-        message = self.message()
-        with (
-            patch.object(bot_module, "chart_analysis_semaphore", semaphore),
-            patch.object(bot_module, "_research_admission_error", return_value=None),
-            patch.object(
-                bot_module, "_run_research_locked_impl",
-                new_callable=AsyncMock, side_effect=RuntimeError("vision failure"),
-            ),
-        ):
-            with self.assertRaisesRegex(RuntimeError, "vision failure"):
-                await bot_module._run_research_locked(
-                    message, "chart request", b"image", "image/png"
-                )
-
-        await asyncio.wait_for(semaphore.acquire(), timeout=1)
-        semaphore.release()
-
-    async def test_capacity_slot_is_released_when_pipeline_is_cancelled(self):
-        semaphore = asyncio.Semaphore(1)
-        message = self.message()
-        pipeline_started = asyncio.Event()
-
-        async def wait_for_cancellation(*args, **kwargs):
-            pipeline_started.set()
-            await asyncio.Event().wait()
-
-        with (
-            patch.object(bot_module, "chart_analysis_semaphore", semaphore),
-            patch.object(bot_module, "_research_admission_error", return_value=None),
-            patch.object(
-                bot_module, "_run_research_locked_impl",
-                new_callable=AsyncMock, side_effect=wait_for_cancellation,
-            ),
-        ):
-            task = asyncio.create_task(
-                bot_module._run_research_locked(
-                    message, "chart request", b"image", "image/png"
-                )
-            )
-            await asyncio.wait_for(pipeline_started.wait(), timeout=1)
-            task.cancel()
-            with self.assertRaises(asyncio.CancelledError):
-                await task
-
-        await asyncio.wait_for(semaphore.acquire(), timeout=1)
-        semaphore.release()
-
-    async def test_text_research_bypasses_chart_capacity_semaphore(self):
-        semaphore = asyncio.Semaphore(1)
-        await semaphore.acquire()
-        message = self.message()
-        try:
-            with (
-                patch.object(bot_module, "chart_analysis_semaphore", semaphore),
-                patch.object(
-                    bot_module, "_run_research_locked_impl", new_callable=AsyncMock
-                ) as pipeline,
-            ):
-                await bot_module._run_research_locked(message, "text-only question")
-            pipeline.assert_awaited_once_with(message, "text-only question", None, "image/jpeg")
-        finally:
-            semaphore.release()
-
-
-class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
-        bot_module.histories.clear()
-        bot_module.usage.clear()
-        bot_module.usage_day.clear()
-        bot_module.beta_users.clear()
-        bot_module.user_locks.clear()
-        bot_module.user_languages.clear()
-        if bot_module.language_preferences is not None:
-            bot_module.language_preferences.clear()
-        if bot_module.admission_store is not None:
-            bot_module.admission_store.clear()
-        if bot_module.conversation_history_store is not None:
-            bot_module.conversation_history_store.clear()
-        bot_module.history_storage_unavailable_users.clear()
-
-        self.user_id = 987654321
-        self.status = SimpleNamespace(edit_text=AsyncMock())
-        self.message = SimpleNamespace(
-            from_user=SimpleNamespace(id=self.user_id),
-            answer=AsyncMock(return_value=self.status),
-            answer_photo=AsyncMock(),
-        )
-
-    async def test_language_command_sets_explicit_gujarati_preference(self):
-        language_message = SimpleNamespace(
-            from_user=SimpleNamespace(id=self.user_id, language_code="en"),
-            text="/language gu",
-            answer=AsyncMock(),
-        )
-
-        await bot_module.set_language(language_message)
-
-        self.assertEqual(bot_module.user_languages[self.user_id], "gu")
-        reply = language_message.answer.await_args.args[0]
-        self.assertIn("Interface ભાષા", reply)
-        self.assertIn("ગુજરાતી", reply)
-
-    async def test_saved_language_is_loaded_after_process_cache_is_cleared(self):
-        language_message = SimpleNamespace(
-            from_user=SimpleNamespace(id=self.user_id, language_code="en"),
-            text="/language gu",
-            answer=AsyncMock(),
-        )
-        await bot_module.set_language(language_message)
-        bot_module.user_languages.clear()
-
-        resolved = bot_module._language_for(
-            SimpleNamespace(from_user=SimpleNamespace(id=self.user_id, language_code="en"))
-        )
-
-        self.assertEqual(resolved, "gu")
-
-    async def test_language_command_warns_when_persistence_is_unavailable(self):
-        class BrokenPreferenceStore:
-            def get(self, user_id):
-                return None
-
-            def set(self, user_id, language):
-                raise OSError("read-only test database")
-
-        language_message = SimpleNamespace(
-            from_user=SimpleNamespace(id=self.user_id, language_code="en"),
-            text="/language hi",
-            answer=AsyncMock(),
-        )
-        with patch.object(bot_module, "language_preferences", BrokenPreferenceStore()):
-            await bot_module.set_language(language_message)
-
-        self.assertEqual(bot_module.user_languages[self.user_id], "hi")
-        reply = language_message.answer.await_args.args[0]
-        self.assertIn("इस सत्र", reply)
-        self.assertIn("सहेजा नहीं जा सका", reply)
-
-    async def test_language_command_help_uses_telegram_locale(self):
-        language_message = SimpleNamespace(
-            from_user=SimpleNamespace(id=self.user_id, language_code="hi-IN"),
-            text="/language",
-            answer=AsyncMock(),
-        )
-
-        await bot_module.set_language(language_message)
-
-        reply = language_message.answer.await_args.args[0]
-        self.assertIn("इंटरफ़ेस भाषा", reply)
-        self.assertIn("/language gu", reply)
-
-    async def test_start_uses_explicit_language_before_telegram_locale(self):
-        start_message = SimpleNamespace(
-            from_user=SimpleNamespace(id=self.user_id, language_code="hi-IN"),
-            answer=AsyncMock(),
-        )
-        bot_module.user_languages[self.user_id] = "gu"
-
-        await bot_module.start(start_message)
-
-        reply = start_message.answer.await_args.args[0]
-        self.assertIn("બીટામાં આપનું સ્વાગત છે", reply)
-        self.assertNotIn("बीटा में आपका स्वागत है", reply)
-
-    async def test_admission_error_uses_requested_ui_language(self):
-        bot_module.beta_users.add(self.user_id + 1)
-        with patch.object(bot_module, "BETA_USER_LIMIT", 1):
-            error = bot_module._research_admission_error(self.user_id, "hi")
-        self.assertIn("बीटा सीमा", error)
-
-    async def test_research_fails_closed_when_shared_lock_store_is_unavailable(self):
-        research = self.use_research(answer=AsyncMock(return_value="must not run"))
-
-        with patch.object(bot_module, "user_locks", None):
-            await bot_module.run_research(self.message, "Analyse BTC")
-
-        research.answer.assert_not_awaited()
-        self.message.answer.assert_awaited_once()
-        self.assertIn("storage", self.message.answer.await_args.args[0].lower())
-
-    async def test_busy_same_user_request_is_rejected_before_quota_reservation(self):
-        first_started = asyncio.Event()
-        release_first = asyncio.Event()
-
-        async def answer(history, user_text):
-            first_started.set()
-            await release_first.wait()
-            return f"answer: {user_text}"
-
-        research = self.use_research(answer=AsyncMock(side_effect=answer))
-        registry = UserLockRegistry(wait_timeout_seconds=0.02)
-        with patch.object(bot_module, "user_locks", registry), patch.object(
-            bot_module,
-            "_reserve_research_request",
-            wraps=bot_module._reserve_research_request,
-        ) as reserve:
-            first_task = asyncio.create_task(
-                bot_module.run_research(self.message, "first request")
-            )
-            await asyncio.wait_for(first_started.wait(), timeout=1)
-            await bot_module.run_research(self.message, "second request")
-
-            self.assertEqual(reserve.call_count, 1)
-            self.assertIn(
-                "Another StockMind request",
-                self.message.answer.await_args_list[-1].args[0],
-            )
-            release_first.set()
-            await asyncio.wait_for(first_task, timeout=1)
-
-        research.answer.assert_awaited_once()
-
-    async def test_reset_fails_closed_when_shared_lock_store_is_unavailable(self):
-        reset_message = SimpleNamespace(
-            from_user=SimpleNamespace(id=self.user_id),
-            answer=AsyncMock(),
-        )
-
-        with patch.object(bot_module, "user_locks", None):
-            await bot_module.reset(reset_message)
-
-        reset_message.answer.assert_awaited_once()
-        self.assertIn("safely reset", reset_message.answer.await_args.args[0].lower())
-
-    async def test_reset_reports_busy_while_same_user_research_is_running(self):
-        research_started = asyncio.Event()
-        release_research = asyncio.Event()
-
-        async def answer(history, user_text):
-            research_started.set()
-            await release_research.wait()
-            return "completed answer"
-
-        self.use_research(answer=AsyncMock(side_effect=answer))
-        registry = UserLockRegistry(wait_timeout_seconds=0.02)
-        with patch.object(bot_module, "user_locks", registry):
-            research_task = asyncio.create_task(
-                bot_module.run_research(self.message, "active request")
-            )
-            await asyncio.wait_for(research_started.wait(), timeout=1)
-            reset_message = SimpleNamespace(
-                from_user=SimpleNamespace(id=self.user_id),
-                answer=AsyncMock(),
-            )
-            await bot_module.reset(reset_message)
-            reset_message.answer.assert_awaited_once()
-            self.assertIn(
-                "request is still running",
-                reset_message.answer.await_args.args[0],
-            )
-            release_research.set()
-            await asyncio.wait_for(research_task, timeout=1)
-
-    async def test_research_reports_lost_shared_lock_and_does_not_start_model(self):
-        class LostLeaseContext:
-            async def __aenter__(self):
-                raise asyncio.CancelledError(LEASE_LOST_CANCEL_MESSAGE)
-
-            async def __aexit__(self, exc_type, exc, traceback):
-                return False
-
-        class LostLeaseRegistry:
-            def hold(self, user_id):
-                return LostLeaseContext()
-
-        research = self.use_research(answer=AsyncMock(return_value="must not run"))
-        with patch.object(bot_module, "user_locks", LostLeaseRegistry()):
-            await bot_module.run_research(self.message, "Analyse BTC")
-
-        research.answer.assert_not_awaited()
-        self.message.answer.assert_awaited_once()
-        self.assertIn("storage", self.message.answer.await_args.args[0].lower())
-
-    def use_research(self, **methods):
-        research = SimpleNamespace(**methods)
-        self.enterContext(patch.object(bot_module, "research", research))
-        return research
-
-    async def test_text_answer_is_saved_and_delivered(self):
-        research = self.use_research(answer=AsyncMock(return_value="BTC structure is unclear."))
-
-        await bot_module.run_research(self.message, "Analyse BTC")
-
-        research.answer.assert_awaited_once()
-        self.status.edit_text.assert_awaited_once_with("BTC structure is unclear.")
+    def test_parses_request_with_no_completed_stages(self):
         self.assertEqual(
-            list(bot_module.histories[self.user_id]),
+            parse_timing_line(
+                "StockMind request timing mode=text outcome=failed "
+                "total_ms=0 stages=none"
+            ),
+            {
+                "kind": "request",
+                "mode": "text",
+                "outcome": "failed",
+                "total_ms": 0,
+                "stages": {},
+            },
+        )
+
+    def test_aggregates_median_nearest_rank_p95_and_stage_coverage(self):
+        lines = []
+        for duration in range(1, 21):
+            stages = f"analysis_execution={duration * 2}ms"
+            if duration == 1:
+                stages += " overlay_render=3ms"
+            lines.append(
+                "StockMind request timing mode=chart outcome=completed "
+                f"total_ms={duration * 10} stages={stages}"
+            )
+
+        report = aggregate_timing_lines(lines)
+        self.assertEqual(report["parsed_request_events"], 20)
+        self.assertEqual(report["rejected_timing_lines"], 0)
+        group = report["request_groups"][0]
+        self.assertEqual(group["request_count"], 20)
+        self.assertEqual(group["total_ms"]["p50_ms"], 105)
+        self.assertEqual(group["total_ms"]["p95_ms"], 190)
+        self.assertEqual(
+            group["stages"]["analysis_execution"]["p50_ms"], 21
+        )
+        self.assertEqual(
+            group["stages"]["analysis_execution"]["p95_ms"], 38
+        )
+        self.assertEqual(
+            group["stages"]["overlay_render"]["sample_count"], 1
+        )
+        self.assertEqual(
+            group["stages"]["overlay_render"]["missing_count"], 19
+        )
+
+    def test_separates_mode_and_outcome_groups(self):
+        report = aggregate_timing_lines(
             [
-                {"role": "user", "content": "Analyse BTC"},
-                {"role": "assistant", "content": "BTC structure is unclear."},
-            ],
+                "StockMind request timing mode=chart outcome=completed "
+                "total_ms=100 stages=analysis_execution=70ms",
+                "StockMind request timing mode=chart outcome=failed "
+                "total_ms=200 stages=analysis_execution=150ms",
+                "StockMind request timing mode=text outcome=completed "
+                "total_ms=300 stages=analysis_execution=250ms",
+            ]
         )
-
-    def test_completed_turn_bounds_persisted_and_process_local_context(self):
-        answer = "BTC setup with confirmation and invalidation. " * 1200
-
-        bot_module._record_conversation_turn(self.user_id, "Analyse BTC", answer)
-
-        local_history = list(bot_module.histories[self.user_id])
-        persisted_history = bot_module.conversation_history_store.get(
-            self.user_id,
-            bot_module.MAX_HISTORY_MESSAGES,
-            bot_module.MAX_HISTORY_BYTES,
-        )
-        local_bytes = sum(
-            len(item["content"].encode("utf-8")) for item in local_history
-        )
-        persisted_bytes = sum(
-            len(item["content"].encode("utf-8")) for item in persisted_history
-        )
-
-        self.assertLessEqual(local_bytes, bot_module.MAX_HISTORY_BYTES)
-        self.assertLessEqual(persisted_bytes, bot_module.MAX_HISTORY_BYTES)
-        self.assertEqual(local_history, persisted_history)
-        self.assertEqual(local_history[-1]["role"], "assistant")
-        self.assertIn("[message shortened", local_history[-1]["content"])
-
-    async def test_conversation_history_survives_process_cache_reset(self):
-        first_research = SimpleNamespace(
-            answer=AsyncMock(return_value="First answer with the BTC context.")
-        )
-        with patch.object(bot_module, "research", first_research):
-            await bot_module.run_research(self.message, "Analyse BTC")
-
-        bot_module.histories.clear()
-        second_research = SimpleNamespace(
-            answer=AsyncMock(return_value="Second answer.")
-        )
-        with patch.object(bot_module, "research", second_research):
-            await bot_module.run_research(self.message, "What changed?")
-
-        self.assertEqual(
-            second_research.answer.await_args.args[0],
-            [
-                {"role": "user", "content": "Analyse BTC"},
-                {"role": "assistant", "content": "First answer with the BTC context."},
-            ],
-        )
-
-    async def test_reset_deletes_persisted_conversation_history(self):
-        research = SimpleNamespace(answer=AsyncMock(return_value="Saved answer."))
-        with patch.object(bot_module, "research", research):
-            await bot_module.run_research(self.message, "Remember this context")
-
-        reset_message = SimpleNamespace(
-            from_user=SimpleNamespace(id=self.user_id),
-            answer=AsyncMock(),
-        )
-        await bot_module.reset(reset_message)
-        bot_module.histories.clear()
-
-        self.assertEqual(bot_module._load_conversation_history(self.user_id), [])
-        self.assertIn("cleared", reset_message.answer.await_args.args[0].lower())
-
-    async def test_reset_warns_when_persisted_history_cannot_be_deleted(self):
-        bot_module.histories[self.user_id].append(
-            {"role": "assistant", "content": "local context"}
-        )
-        reset_message = SimpleNamespace(
-            from_user=SimpleNamespace(id=self.user_id),
-            answer=AsyncMock(),
-        )
-        with patch.object(bot_module, "conversation_history_store", None):
-            await bot_module.reset(reset_message)
-
-        self.assertEqual(list(bot_module.histories[self.user_id]), [])
-        self.assertIn("could not be deleted", reset_message.answer.await_args.args[0])
-
-    async def test_long_research_answer_is_not_truncated_before_telegram_delivery(self):
-        answer = ("BTC setup: confirmation, invalidation and risk notes.\n\n" * 180)
-        chunks = split_telegram_text(answer)
-        research = self.use_research(answer=AsyncMock(return_value=answer))
-
-        await bot_module.run_research(self.message, "Analyse BTC")
-
-        research.answer.assert_awaited_once()
-        self.status.edit_text.assert_awaited_once_with(chunks[0])
-        # message.answer is first used for the progress status; subsequent
-        # calls are the additional answer chunks.
-        delivered_chunks = [self.status.edit_text.await_args.args[0]] + [
-            call.args[0] for call in self.message.answer.await_args_list[1:]
+        keys = [
+            (group["mode"], group["outcome"])
+            for group in report["request_groups"]
         ]
-        self.assertEqual(delivered_chunks, chunks)
-        self.assertEqual("".join(delivered_chunks), answer)
-        self.assertEqual(bot_module.histories[self.user_id][-1]["content"], answer)
-
-    async def test_same_user_requests_are_serialized_and_second_sees_first_turn(self):
-        first_started = asyncio.Event()
-        release_first = asyncio.Event()
-        calls = []
-
-        async def answer(history, user_text):
-            calls.append((list(history), user_text))
-            if user_text == "first request":
-                first_started.set()
-                await release_first.wait()
-            return f"answer: {user_text}"
-
-        research = self.use_research(answer=AsyncMock(side_effect=answer))
-        first_task = asyncio.create_task(bot_module.run_research(self.message, "first request"))
-        await asyncio.wait_for(first_started.wait(), timeout=1)
-
-        second_task = asyncio.create_task(bot_module.run_research(self.message, "second request"))
-        await asyncio.sleep(0)
-        self.assertFalse(second_task.done(), "same-user request should wait for the active turn")
-
-        release_first.set()
-        await asyncio.wait_for(asyncio.gather(first_task, second_task), timeout=1)
-
-        research.answer.assert_awaited()
-        self.assertEqual([user_text for _, user_text in calls], ["first request", "second request"])
         self.assertEqual(
-            calls[1][0],
+            keys,
+            [("chart", "completed"), ("chart", "failed"), ("text", "completed")],
+        )
+
+    def test_keeps_photo_and_document_handler_metrics_separate(self):
+        report = aggregate_timing_lines(
             [
-                {"role": "user", "content": "first request"},
-                {"role": "assistant", "content": "answer: first request"},
-            ],
+                "StockMind Telegram photo download_ms=10",
+                "StockMind Telegram photo download_ms=30",
+                "StockMind Telegram photo handler_total_ms=80",
+                "StockMind Telegram document download_ms=20",
+                "StockMind Telegram document handler_total_ms=100",
+            ]
+        )
+        self.assertEqual(report["parsed_handler_events"], 5)
+        self.assertEqual(
+            report["telegram_handler_metrics"]["telegram_photo_download_ms"]["p50_ms"],
+            20,
         )
         self.assertEqual(
-            list(bot_module.histories[self.user_id]),
+            report["telegram_handler_metrics"]["telegram_photo_handler_total_ms"]["p95_ms"],
+            80,
+        )
+        self.assertEqual(
+            report["telegram_handler_metrics"]["telegram_document_download_ms"]["p50_ms"],
+            20,
+        )
+
+    def test_rejects_duplicate_or_malformed_stage_fields(self):
+        report = aggregate_timing_lines(
             [
-                {"role": "user", "content": "first request"},
-                {"role": "assistant", "content": "answer: first request"},
-                {"role": "user", "content": "second request"},
-                {"role": "assistant", "content": "answer: second request"},
-            ],
+                "StockMind request timing mode=chart outcome=completed "
+                "total_ms=10 stages=analysis_execution=5ms analysis_execution=6ms",
+                "StockMind request timing mode=chart outcome=completed "
+                "total_ms=-1 stages=none",
+                "StockMind request timing mode=chart outcome=completed "
+                "total_ms=10 stages=analysis_execution=not-a-duration",
+                "ordinary application log line",
+            ]
         )
+        self.assertEqual(report["parsed_request_events"], 0)
+        self.assertEqual(report["rejected_timing_lines"], 3)
+        self.assertEqual(report["request_groups"], [])
 
-    async def test_reset_waits_for_active_same_user_research(self):
-        bot_module.histories[self.user_id].append(
-            {"role": "assistant", "content": "previous context"}
+    def test_ignores_unrelated_log_context_in_exported_report(self):
+        report = aggregate_timing_lines(
+            [
+                "user_id=123 prompt='Map BTC 1H' StockMind request timing "
+                "mode=chart outcome=completed total_ms=10 stages=analysis_execution=5ms"
+            ]
         )
-        research_started = asyncio.Event()
-        release_research = asyncio.Event()
+        serialized = json.dumps(report)
+        self.assertNotIn("123", serialized)
+        self.assertNotIn("Map BTC", serialized)
 
-        async def answer(history, user_text):
-            research_started.set()
-            await release_research.wait()
-            return "completed answer"
+    def test_empty_input_returns_explicit_empty_coverage(self):
+        report = aggregate_timing_lines([])
+        self.assertEqual(report["parsed_request_events"], 0)
+        self.assertEqual(report["parsed_handler_events"], 0)
+        self.assertEqual(report["request_groups"], [])
+        self.assertEqual(report["telegram_handler_metrics"], {})
 
-        self.use_research(answer=AsyncMock(side_effect=answer))
-        research_task = asyncio.create_task(bot_module.run_research(self.message, "new question"))
-        await asyncio.wait_for(research_started.wait(), timeout=1)
-
-        reset_message = SimpleNamespace(
-            from_user=SimpleNamespace(id=self.user_id),
-            answer=AsyncMock(),
+    def test_parses_opaque_request_id_for_request_and_handler_events(self):
+        request_id = "a" * 32
+        request = parse_timing_line(
+            f"StockMind request timing request_id={request_id} "
+            "mode=chart outcome=completed total_ms=100 stages=analysis_execution=70ms"
         )
-        reset_task = asyncio.create_task(bot_module.reset(reset_message))
-        await asyncio.sleep(0)
-        self.assertFalse(reset_task.done(), "reset should wait until the active turn commits")
-
-        release_research.set()
-        await asyncio.wait_for(asyncio.gather(research_task, reset_task), timeout=1)
-        self.assertEqual(list(bot_module.histories[self.user_id]), [])
-        reset_message.answer.assert_awaited_once_with(
-            "Conversation context cleared. Ask a new research question."
+        handler = parse_timing_line(
+            f"StockMind Telegram photo request_id={request_id} download_ms=12"
         )
+        self.assertEqual(request["request_id"], request_id)
+        self.assertEqual(handler["request_id"], request_id)
+        self.assertEqual(handler["upload_kind"], "photo")
+        self.assertEqual(handler["metric"], "download_ms")
 
-    async def test_chart_deadline_is_reported_without_saving_a_successful_turn(self):
-        research = self.use_research(
-            analyze_chart_image=AsyncMock(
-                side_effect=ResearchTurnDeadlineExceeded(0.02)
-            )
+    def test_correlates_interleaved_upload_and_request_events_by_id(self):
+        photo_id = "a" * 32
+        document_id = "b" * 32
+        report = aggregate_timing_lines(
+            [
+                f"StockMind Telegram photo request_id={photo_id} download_ms=10",
+                f"StockMind Telegram document request_id={document_id} download_ms=20",
+                f"StockMind request timing request_id={document_id} mode=chart "
+                "outcome=completed total_ms=200 stages=analysis_execution=150ms",
+                f"StockMind Telegram photo request_id={photo_id} handler_total_ms=80",
+                f"StockMind request timing request_id={photo_id} mode=chart "
+                "outcome=completed total_ms=100 stages=analysis_execution=70ms",
+                f"StockMind Telegram document request_id={document_id} handler_total_ms=120",
+            ]
         )
+        self.assertEqual(report["schema_version"], 2)
+        self.assertEqual(report["correlation_summary"]["request_ids_seen"], 2)
+        self.assertEqual(report["correlation_summary"]["complete_upload_request_count"], 2)
+        rows = {row["request_id"]: row for row in report["correlated_requests"]}
+        self.assertEqual(rows[photo_id]["request"]["total_ms"], 100)
+        self.assertEqual(rows[photo_id]["telegram_handler"]["download_ms"], 10)
+        self.assertEqual(rows[photo_id]["telegram_handler"]["handler_total_ms"], 80)
+        self.assertEqual(rows[document_id]["request"]["total_ms"], 200)
+        self.assertEqual(rows[document_id]["telegram_handler"]["kind"], "document")
 
-        with patch.object(
-            bot_module,
-            "_prepare_chart_image_for_vision",
-            return_value=(b"normalized-chart", "image/png"),
-        ):
-            await bot_module.run_research(
-                self.message, "Map BTC 1H DNS", b"chart-bytes", "image/png"
-            )
-
-        research.analyze_chart_image.assert_awaited_once()
-        self.status.edit_text.assert_awaited_once()
-        self.assertIn("0.02-second time budget expired", self.status.edit_text.await_args.args[0])
-        self.assertEqual(list(bot_module.histories[self.user_id]), [])
-
-    async def test_text_deadline_is_reported_without_saving_a_successful_turn(self):
-        research = self.use_research(
-            answer=AsyncMock(side_effect=ResearchTurnDeadlineExceeded(0.02))
+    def test_duplicate_events_for_one_request_id_are_not_silently_joined(self):
+        request_id = "c" * 32
+        report = aggregate_timing_lines(
+            [
+                f"StockMind request timing request_id={request_id} mode=chart "
+                "outcome=completed total_ms=100 stages=none",
+                f"StockMind Telegram photo request_id={request_id} download_ms=10",
+                f"StockMind Telegram photo request_id={request_id} download_ms=11",
+                f"StockMind Telegram photo request_id={request_id} handler_total_ms=80",
+            ]
         )
+        self.assertEqual(report["correlation_summary"]["conflicted_request_id_count"], 1)
+        self.assertEqual(report["correlated_requests"], [])
 
-        await bot_module.run_research(self.message, "Analyse BTC")
-
-        research.answer.assert_awaited_once()
-        self.status.edit_text.assert_awaited_once()
-        failure_message = self.status.edit_text.await_args.args[0]
-        self.assertIn("research turn", failure_message)
-        self.assertNotIn("chart analysis", failure_message)
-        self.assertIn("0.02-second time budget expired", failure_message)
-        self.assertEqual(list(bot_module.histories[self.user_id]), [])
-
-    async def test_incomplete_model_response_is_reported_in_selected_language_without_history(self):
-        bot_module.user_languages[self.user_id] = "gu"
-        research = self.use_research(
-            answer=AsyncMock(side_effect=ResearchResponseIncomplete("truncated"))
+    def test_invalid_request_id_is_rejected_and_legacy_logs_remain_supported(self):
+        report = aggregate_timing_lines(
+            [
+                "StockMind request timing request_id=not-an-id mode=chart "
+                "outcome=completed total_ms=100 stages=none",
+                "StockMind request timing mode=text outcome=completed "
+                "total_ms=20 stages=analysis_execution=10ms",
+                "StockMind Telegram photo download_ms=5",
+            ]
         )
+        self.assertEqual(report["rejected_timing_lines"], 1)
+        self.assertEqual(report["correlation_summary"]["legacy_request_event_count"], 1)
+        self.assertEqual(report["correlation_summary"]["legacy_handler_event_count"], 1)
+        self.assertEqual(report["correlated_requests"], [])
 
-        await bot_module.run_research(self.message, "Analyse BTC")
-
-        research.answer.assert_awaited_once()
-        failure_message = self.status.edit_text.await_args.args[0]
-        self.assertIn("સંપૂર્ણ અને ઉપયોગી જવાબ", failure_message)
-        self.assertIn("અધૂરા જવાબને પૂર્ણ બતાવ્યો નથી", failure_message)
-        self.assertEqual(list(bot_module.histories[self.user_id]), [])
-
-    async def test_chart_analysis_is_saved_even_when_overlay_delivery_fails(self):
-        result = {
-            "analysis": "Visible demand structure; verify the price scale.",
-            "plot_bounds": {"x_start": 0.08, "x_end": 0.94, "y_top": 0.12, "y_bottom": 0.9},
-            "zones": [{"zone_type": "demand", "draw_overlay": True}],
-        }
-        research = self.use_research(analyze_chart_image=AsyncMock(return_value=result))
-        with patch.object(
-            bot_module, "_prepare_chart_image_for_vision",
-            return_value=(b"normalized-chart", "image/png"),
-        ) as prepare, patch.object(
-            bot_module, "_render_overlay_prepared", return_value=(b"overlay-jpeg", 1)
-        ) as render, patch.object(
-            bot_module, "send_overlay_photo", new_callable=AsyncMock, return_value=False
-        ) as send_overlay:
-            await bot_module.run_research(self.message, "Map BTC 1H DNS", b"chart-bytes", "image/png")
-
-        prepare.assert_called_once_with(b"chart-bytes")
-        research.analyze_chart_image.assert_awaited_once()
-        self.assertEqual(research.analyze_chart_image.await_args.args[2], b"normalized-chart")
-        self.assertEqual(research.analyze_chart_image.await_args.args[3], "image/png")
-        render.assert_called_once()
-        self.assertEqual(render.call_args.args[0], b"normalized-chart")
-        self.status.edit_text.assert_awaited_once_with(
-            "Visible demand structure; verify the price scale."
+    def test_cli_reads_standard_input_and_emits_json(self):
+        source = StringIO(
+            "StockMind request timing mode=text outcome=completed "
+            "total_ms=12 stages=analysis_execution=8ms\n"
         )
-        send_overlay.assert_awaited_once()
-        self.assertEqual(send_overlay.await_args.args[0], self.message)
-        self.assertEqual(send_overlay.await_args.args[1], b"overlay-jpeg")
-        self.assertEqual(bot_module.histories[self.user_id][-1]["content"], result["analysis"])
-
-    async def test_chart_request_logs_stage_timings_without_user_content(self):
-        result = {
-            "analysis": "Visible demand structure; verify the price scale.",
-            "plot_bounds": {"x_start": 0.08, "x_end": 0.94, "y_top": 0.12, "y_bottom": 0.9},
-            "zones": [{"zone_type": "demand", "draw_overlay": True}],
-        }
-        self.use_research(analyze_chart_image=AsyncMock(return_value=result))
-
-        with (
-            patch.object(
-                bot_module,
-                "_prepare_chart_image_for_vision",
-                return_value=(b"normalized-chart", "image/png"),
-            ),
-            patch.object(
-                bot_module,
-                "_render_overlay_prepared",
-                return_value=(b"overlay-jpeg", 1),
-            ),
-            patch.object(
-                bot_module,
-                "send_overlay_photo",
-                new_callable=AsyncMock,
-                return_value=True,
-            ),
-            patch.object(bot_module.logger, "info") as info,
-        ):
-            await bot_module.run_research(
-                self.message, "Map BTC 1H DNS", b"chart-bytes", "image/png"
-            )
-
-        timing_calls = [
-            call for call in info.call_args_list
-            if call.args
-            and call.args[0]
-            == "StockMind request timing mode=%s outcome=%s total_ms=%d stages=%s"
-        ]
-        self.assertEqual(len(timing_calls), 1)
-        _, mode, outcome, total_ms, stages = timing_calls[0].args
-        self.assertEqual(mode, "chart")
-        self.assertEqual(outcome, "completed")
-        self.assertGreaterEqual(total_ms, 0)
-        for stage in (
-            "image_prepare=",
-            "analysis_execution=",
-            "overlay_render=",
-            "telegram_text_delivery=",
-            "telegram_overlay_delivery=",
-        ):
-            self.assertIn(stage, stages)
-        self.assertNotIn("Map BTC", stages)
-        self.assertNotIn(str(self.user_id), stages)
-
-    async def test_chart_analysis_reports_overlay_render_failure_separately(self):
-        result = {
-            "analysis": "Visible demand structure; verify the price scale.",
-            "plot_bounds": {"x_start": 0.08, "x_end": 0.94, "y_top": 0.12, "y_bottom": 0.9},
-            "zones": [{"zone_type": "demand", "draw_overlay": True}],
-        }
-        research = self.use_research(analyze_chart_image=AsyncMock(return_value=result))
-
-        with patch.object(
-            bot_module, "_prepare_chart_image_for_vision",
-            return_value=(b"normalized-chart", "image/png"),
-        ), patch.object(
-            bot_module, "_render_overlay_prepared",
-            side_effect=RuntimeError("renderer failed"),
-        ):
-            await bot_module.run_research(
-                self.message, "Map BTC 1H DNS", b"chart-bytes", "image/png"
-            )
-
-        answer = self.status.edit_text.await_args.args[0]
-        self.assertIn("chart analysis completed", answer)
-        self.assertIn("couldn't render the overlay", answer)
-        self.assertNotIn("no zone location was clear enough", answer)
-        self.message.answer_photo.assert_not_awaited()
-        self.assertEqual(bot_module.histories[self.user_id][-1]["content"], answer)
-
-    async def test_missing_drawable_zones_keep_the_uncertainty_message(self):
-        result = {
-            "analysis": "The chart is too unclear to locate a reliable zone.",
-            "plot_bounds": None,
-            "zones": [],
-        }
-        research = self.use_research(analyze_chart_image=AsyncMock(return_value=result))
-
-        with patch.object(
-            bot_module, "_prepare_chart_image_for_vision",
-            return_value=(b"normalized-chart", "image/png"),
-        ), patch.object(
-            bot_module, "_render_overlay_prepared", return_value=(None, 0)
-        ):
-            await bot_module.run_research(
-                self.message, "Map BTC 1H DNS", b"chart-bytes", "image/png"
-            )
-
-        answer = self.status.edit_text.await_args.args[0]
-        self.assertIn("main price-plot boundary", answer)
-        self.assertIn("withheld all overlays", answer)
-        self.assertNotIn("No distinct supply/demand zone was returned", answer)
-        self.assertNotIn("couldn't render the overlay", answer)
-        self.message.answer_photo.assert_not_awaited()
-        self.assertEqual(bot_module.histories[self.user_id][-1]["content"], answer)
-
-    async def test_successful_answer_is_kept_when_text_delivery_is_ambiguous(self):
-        research = self.use_research(answer=AsyncMock(return_value="Research completed."))
-        self.status.edit_text.side_effect = TimeoutError("Telegram request timed out")
-
-        await bot_module.run_research(self.message, "Check TCS")
-
-        research.answer.assert_awaited_once()
-        self.status.edit_text.assert_awaited_once_with("Research completed.")
-        self.message.answer.assert_awaited_once()
-        self.assertEqual(bot_module.histories[self.user_id][-1]["content"], "Research completed.")
-
-    async def test_progress_message_failure_does_not_prevent_research_or_final_reply(self):
-        research = self.use_research(answer=AsyncMock(return_value="Research completed."))
-        self.message.answer.side_effect = [RuntimeError("progress unavailable"), None]
-
-        await bot_module.run_research(self.message, "Check Reliance")
-
-        research.answer.assert_awaited_once()
-        self.message.answer.assert_any_await("Research completed.")
-        self.assertEqual(bot_module.histories[self.user_id][-1]["content"], "Research completed.")
-
-    async def test_provider_failure_does_not_append_a_successful_assistant_turn(self):
-        research = self.use_research(answer=AsyncMock(side_effect=RuntimeError("provider unavailable")))
-
-        await bot_module.run_research(self.message, "Analyse Nifty")
-
-        research.answer.assert_awaited_once()
-        self.status.edit_text.assert_awaited_once()
-        self.assertIn("couldn't complete this analysis", self.status.edit_text.await_args.args[0])
-        self.assertEqual(list(bot_module.histories[self.user_id]), [])
-
-    async def test_reset_for_unknown_user_does_not_allocate_history_or_keep_lock(self):
-        unknown_user_id = self.user_id + 1
-        reset_message = SimpleNamespace(
-            from_user=SimpleNamespace(id=unknown_user_id),
-            answer=AsyncMock(),
-        )
-
-        await bot_module.reset(reset_message)
-
-        self.assertNotIn(unknown_user_id, bot_module.histories)
-        self.assertEqual(len(bot_module.user_locks), 0)
-        reset_message.answer.assert_awaited_once_with(
-            "Conversation context cleared. Ask a new research question."
-        )
-
-    async def test_concurrent_start_requests_respect_beta_capacity(self):
-        first = SimpleNamespace(
-            from_user=SimpleNamespace(id=self.user_id),
-            answer=AsyncMock(),
-        )
-        second = SimpleNamespace(
-            from_user=SimpleNamespace(id=self.user_id + 1),
-            answer=AsyncMock(),
-        )
-
-        with patch.object(bot_module, "BETA_USER_LIMIT", 1):
-            await asyncio.gather(bot_module.start(first), bot_module.start(second))
-
-        self.assertEqual(len(bot_module.beta_users), 1)
-        replies = [first.answer.await_args.args[0], second.answer.await_args.args[0]]
-        self.assertEqual(replies.count(bot_module.WELCOME), 1)
-        self.assertEqual(
-            replies.count("The 10-person beta is currently full. Please try again later."),
-            1,
-        )
-
-    async def test_research_and_start_share_the_same_beta_capacity(self):
-        research = self.use_research(answer=AsyncMock(return_value="should not run"))
-        admitted = SimpleNamespace(
-            from_user=SimpleNamespace(id=self.user_id),
-            answer=AsyncMock(),
-        )
-        rejected = SimpleNamespace(
-            from_user=SimpleNamespace(id=self.user_id + 1),
-            answer=AsyncMock(),
-            answer_photo=AsyncMock(),
-        )
-
-        with patch.object(bot_module, "BETA_USER_LIMIT", 1):
-            await bot_module.start(admitted)
-            await bot_module.run_research(rejected, "Analyse BTC")
-
-        research.answer.assert_not_awaited()
-        rejected.answer.assert_awaited_once_with(
-            "The 10-person beta is currently full. Please try again later."
-        )
-        self.assertNotIn(self.user_id + 1, bot_module.usage)
-
-    async def test_beta_membership_and_daily_quota_survive_process_cache_reset(self):
-        first = SimpleNamespace(
-            from_user=SimpleNamespace(id=self.user_id),
-            answer=AsyncMock(),
-        )
-        await bot_module.start(first)
-        self.assertIn(bot_module.WELCOME, first.answer.await_args.args)
-
-        today = datetime.now(bot_module.IST).date().isoformat()
-        with patch.object(bot_module, "DAILY_QUERY_LIMIT", 1):
-            self.assertTrue(bot_module._consume_daily_query(self.user_id, today))
-            # Simulate a fresh process by discarding all process-local mirrors.
-            bot_module.beta_users.clear()
-            bot_module.usage.clear()
-            bot_module.usage_day.clear()
-            self.assertEqual(
-                bot_module._research_admission_error(self.user_id, "en"),
-                "You've reached today's beta research limit. It resets at midnight IST.",
-            )
-
-        second = SimpleNamespace(
-            from_user=SimpleNamespace(id=self.user_id + 1),
-            answer=AsyncMock(),
-        )
-        with patch.object(bot_module, "BETA_USER_LIMIT", 1):
-            await bot_module.start(second)
-        self.assertIn("beta is currently full", second.answer.await_args.args[0])
-
-    async def test_quota_storage_failure_fails_closed_before_image_processing(self):
-        with patch.object(bot_module, "admission_store", None), patch.object(
-            bot_module, "prepare_chart_image"
-        ) as prepare:
-            await bot_module.run_research(
-                self.message, "Analyse this chart", b"untrusted-image", "image/png"
-            )
-        prepare.assert_not_called()
-        self.message.answer.assert_awaited_once()
-        self.assertIn("quota storage is unavailable", self.message.answer.await_args.args[0])
-
-    async def test_concurrent_same_user_requests_cannot_exceed_daily_limit(self):
-        research = self.use_research(answer=AsyncMock(return_value="Research completed."))
-
-        with patch.object(bot_module, "DAILY_QUERY_LIMIT", 1):
-            await asyncio.wait_for(
-                asyncio.gather(
-                    bot_module.run_research(self.message, "first request"),
-                    bot_module.run_research(self.message, "second request"),
-                ),
-                timeout=2,
-            )
-
-        research.answer.assert_awaited_once()
-        self.assertEqual(bot_module.usage[self.user_id], 1)
-        self.assertTrue(
-            any(
-                call.args == ("You've reached today's beta research limit. It resets at midnight IST.",)
-                for call in self.message.answer.await_args_list
-            )
-        )
-
-    async def test_daily_usage_resets_for_a_new_ist_date(self):
-        user_id = self.user_id + 2
-        with patch.object(bot_module, "DAILY_QUERY_LIMIT", 2):
-            self.assertTrue(bot_module._consume_daily_query(user_id, "2026-11-06"))
-            self.assertTrue(bot_module._consume_daily_query(user_id, "2026-11-06"))
-            self.assertFalse(bot_module._consume_daily_query(user_id, "2026-11-06"))
-            self.assertTrue(bot_module._consume_daily_query(user_id, "2026-11-07"))
-
-        self.assertEqual(bot_module.usage_day[user_id], "2026-11-07")
-        self.assertEqual(bot_module.usage[user_id], 1)
-
-    async def test_full_beta_rejects_chart_before_image_normalization(self):
-        bot_module.beta_users.add(self.user_id + 1)
-        with patch.object(bot_module, "BETA_USER_LIMIT", 1), patch.object(
-            bot_module, "prepare_chart_image"
-        ) as prepare:
-            await bot_module.run_research(
-                self.message, "Analyse this chart", b"untrusted-image", "image/png"
-            )
-
-        prepare.assert_not_called()
-        self.message.answer.assert_awaited_once_with(
-            "The 10-person beta is currently full. Please try again later."
-        )
-        self.assertNotIn(self.user_id, bot_module.beta_users)
-        self.assertNotIn(self.user_id, bot_module.usage)
-
-    async def test_daily_limit_rejects_chart_before_image_normalization(self):
-        today = datetime.now(bot_module.IST).date().isoformat()
-        bot_module.usage_day[self.user_id] = today
-        bot_module.usage[self.user_id] = 1
-
-        with patch.object(bot_module, "DAILY_QUERY_LIMIT", 1), patch.object(
-            bot_module, "prepare_chart_image"
-        ) as prepare:
-            await bot_module.run_research(
-                self.message, "Analyse this chart", b"untrusted-image", "image/png"
-            )
-
-        prepare.assert_not_called()
-        self.message.answer.assert_awaited_once_with(
-            "You've reached today's beta research limit. It resets at midnight IST."
-        )
-        self.assertEqual(bot_module.usage[self.user_id], 1)
-
-    async def test_full_beta_photo_is_rejected_before_telegram_download(self):
-        bot_module.beta_users.add(self.user_id + 1)
-        photo_message = SimpleNamespace(
-            from_user=SimpleNamespace(id=self.user_id),
-            photo=[SimpleNamespace(file_id="telegram-file-id", file_size=1024)],
-            caption="BTC 1H",
-            answer=AsyncMock(),
-        )
-
-        with patch.object(bot_module, "BETA_USER_LIMIT", 1), patch.object(
-            bot_module.bot, "get_file", new=AsyncMock()
-        ) as get_file:
-            await bot_module.handle_chart_photo(photo_message)
-
-        get_file.assert_not_awaited()
-        photo_message.answer.assert_awaited_once_with(
-            "The 10-person beta is currently full. Please try again later."
-        )
-
-    async def test_photo_preflight_uses_telegram_language_for_beta_rejection(self):
-        bot_module.beta_users.add(self.user_id + 1)
-        photo_message = SimpleNamespace(
-            from_user=SimpleNamespace(id=self.user_id, language_code="hi-IN"),
-            photo=[SimpleNamespace(file_id="telegram-file-id", file_size=1024)],
-            caption="BTC 1H",
-            answer=AsyncMock(),
-        )
-
-        with patch.object(bot_module, "BETA_USER_LIMIT", 1), patch.object(
-            bot_module.bot, "get_file", new=AsyncMock()
-        ) as get_file:
-            await bot_module.handle_chart_photo(photo_message)
-
-        get_file.assert_not_awaited()
-        reply = photo_message.answer.await_args.args[0]
-        self.assertIn("बीटा सीमा", reply)
-        self.assertNotIn("The 10-person beta", reply)
-
-    async def test_daily_limit_document_is_rejected_before_telegram_download(self):
-        today = datetime.now(bot_module.IST).date().isoformat()
-        bot_module.usage_day[self.user_id] = today
-        bot_module.usage[self.user_id] = 1
-        document_message = SimpleNamespace(
-            from_user=SimpleNamespace(id=self.user_id),
-            document=SimpleNamespace(
-                mime_type="image/png",
-                file_size=1024,
-                file_id="telegram-file-id",
-            ),
-            caption="BTC 1H",
-            answer=AsyncMock(),
-        )
-
-        with patch.object(bot_module, "DAILY_QUERY_LIMIT", 1), patch.object(
-            bot_module.bot, "get_file", new=AsyncMock()
-        ) as get_file:
-            await bot_module.handle_chart_document(document_message)
-
-        get_file.assert_not_awaited()
-        document_message.answer.assert_awaited_once_with(
-            "You've reached today's beta research limit. It resets at midnight IST."
-        )
-
-    async def test_photo_download_overflow_uses_telegram_interface_language(self):
-        photo_message = SimpleNamespace(
-            from_user=SimpleNamespace(id=self.user_id, language_code="hi-IN"),
-            photo=[SimpleNamespace(file_id="telegram-file-id", file_size=None)],
-            caption="BTC 1H",
-            answer=AsyncMock(),
-        )
-
-        async def overflow_download(file_path, destination):
-            destination.write(b"12345")
-
-        with patch.object(bot_module, "MAX_CHART_IMAGE_BYTES", 4), patch.object(
-            bot_module.bot,
-            "get_file",
-            new=AsyncMock(return_value=SimpleNamespace(file_path="photos/test.jpg")),
-        ) as get_file, patch.object(
-            bot_module.bot,
-            "download_file",
-            new=AsyncMock(side_effect=overflow_download),
-        ) as download_file:
-            await bot_module.handle_chart_photo(photo_message)
-
-        get_file.assert_awaited_once_with("telegram-file-id")
-        download_file.assert_awaited_once()
-        reply = photo_message.answer.await_args.args[0]
-        self.assertIn("यह image बहुत बड़ी है", reply)
-        self.assertNotIn("That screenshot is too large", reply)
-
-
-class BotModuleResourceCleanup(unittest.TestCase):
-    @classmethod
-    def tearDownClass(cls):
-        async def close_async_clients():
-            await bot_module.market.close()
-            await bot_module.crypto_market.close()
-            await bot_module.bot.session.close()
-
-        asyncio.run(close_async_clients())
-        bot_module.research.client.close()
-        if bot_module.language_preferences is not None:
-            bot_module.language_preferences.close()
+        output = StringIO()
+        with patch("sys.stdin", source), patch("sys.stdout", output):
+            exit_code = main(["-"])
+        self.assertEqual(exit_code, 0)
+        report = json.loads(output.getvalue())
+        self.assertEqual(report["parsed_request_events"], 1)
+        self.assertEqual(report["request_groups"][0]["total_ms"]["p50_ms"], 12)
 
 
 if __name__ == "__main__":
