@@ -69,7 +69,11 @@ def _match(predictions, references, threshold):
     from being dropped because normalized floating-point coordinates round
     its IoU a few ulps below the configured threshold.
     """
-    threshold_fraction = Fraction(*threshold.as_integer_ratio())
+    # The public API accepts decimal thresholds (for example 0.3). Using the
+    # float's binary ratio makes 0.3 slightly larger than the decimal value
+    # supplied by the caller and can reject an exact 3/10 IoU boundary.
+    # str(float) preserves the shortest round-trippable decimal representation.
+    threshold_fraction = Fraction(str(threshold))
     scores = tuple(
         tuple(_pixel_iou_fraction(p["box_px"], r["box_px"]) for r in references)
         for p in predictions
