@@ -1,7 +1,7 @@
 {
- "date": "2026-11-19",
+ "date": "2026-11-20",
  "strategy_version": 3,
- "scanned": 2405,
+ "scanned": 2407,
  "items": [
   {
    "level": 1499.0,
@@ -10,9 +10,9 @@
    "monthly_sma10": 1145.6000061035156,
    "monthly_sma20_undercut": true,
    "monthly_sma20_undercut_month": "Mar'26",
-   "static_score": 55.472576683371656,
-   "vol_ratio": 1.7383849671897111,
-   "rs": 0.29685077808032023,
+   "static_score": 45.15637077240063,
+   "vol_ratio": 1.1194126125314496,
+   "rs": 0.2842775163238518,
    "base_range": 0.43890575899300677,
    "setup_month": "Oct'26",
    "symbol": "ALIVUS"
@@ -25,8 +25,8 @@
    "monthly_sma20_undercut": true,
    "monthly_sma20_undercut_month": "Jun'26",
    "static_score": 35.0,
-   "vol_ratio": 0.6814568783690995,
-   "rs": 0.38480576801969835,
+   "vol_ratio": 0.7771133391805244,
+   "rs": 0.4178770543913919,
    "base_range": 0.6901077932180597,
    "setup_month": "Oct'26",
    "symbol": "COFORGE"
@@ -38,9 +38,9 @@
    "monthly_sma10": 1424.060009765625,
    "monthly_sma20_undercut": true,
    "monthly_sma20_undercut_month": "Sep'25",
-   "static_score": 9.818010698303446,
-   "vol_ratio": 0.7602737891485778,
-   "rs": -0.1572138075012386,
+   "static_score": 9.923038571719488,
+   "vol_ratio": 0.585220969260135,
+   "rs": -0.18446543918217773,
    "base_range": 0.3811644895992685,
    "setup_month": "Oct'26",
    "symbol": "GESHIP"
@@ -52,9 +52,9 @@
    "monthly_sma10": 316.6300018310547,
    "monthly_sma20_undercut": true,
    "monthly_sma20_undercut_month": "Jun'22",
-   "static_score": 42.00421033164725,
-   "vol_ratio": 0.801496507091841,
-   "rs": 0.2647619883701742,
+   "static_score": 45.21285302171946,
+   "vol_ratio": 1.0389995432249923,
+   "rs": 0.2418033285901764,
    "base_range": 0.24207790094020565,
    "setup_month": "Oct'26",
    "symbol": "KARURVYSYA"
@@ -66,9 +66,9 @@
    "monthly_sma10": 1544.110009765625,
    "monthly_sma20_undercut": true,
    "monthly_sma20_undercut_month": "Jun'26",
-   "static_score": 26.651415926875416,
-   "vol_ratio": 0.4903604906898522,
-   "rs": 0.09603720339399313,
+   "static_score": 33.927542932984665,
+   "vol_ratio": 0.5050571058438579,
+   "rs": 0.16562618641579196,
    "base_range": 0.20068344430345175,
    "setup_month": "Oct'26",
    "symbol": "TECHM"
