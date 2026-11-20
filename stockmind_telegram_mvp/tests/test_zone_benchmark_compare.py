@@ -922,16 +922,57 @@ class PairedBenchmarkComparisonTests(unittest.TestCase):
             baseline, candidate, pricing_card=pricing_card
         )
         cost = result["currency_cost_estimate"]
-        self.assertEqual(cost["baseline"]["total_cost_usd"], "0.013400000000")
-        self.assertEqual(cost["candidate"]["total_cost_usd"], "0.011200000000")
+        self.assertEqual(cost["baseline"]["total_cost_usd"], "0.013400000000000000")
+        self.assertEqual(cost["candidate"]["total_cost_usd"], "0.011200000000000000")
         self.assertEqual(
-            cost["paired_deltas"]["total_delta_usd"], "-0.002200000000"
+            cost["paired_deltas"]["total_delta_usd"], "-0.002200000000000000"
         )
         self.assertEqual(cost["paired_deltas"]["paired_fixture_count"], 1)
         fixture_cost = result["fixtures"][0]["estimated_cost"]
         self.assertEqual(fixture_cost["baseline"]["status"], "priced")
         self.assertEqual(fixture_cost["baseline"]["image_tokens_included_in_input"], 400)
         self.assertEqual(fixture_cost["baseline"]["reasoning_tokens_included_in_output"], 50)
+
+    def test_cost_estimate_preserves_sub_picodollar_per_token_precision(self):
+        baseline = self._report(
+            "baseline-model",
+            [{**_zone(), "draw_overlay": True}],
+            usage={"prompt_tokens": 1, "completion_tokens": 0, "total_tokens": 1},
+        )
+        candidate = self._report(
+            "candidate-model",
+            [{**_zone(), "draw_overlay": True}],
+            usage={"prompt_tokens": 2, "completion_tokens": 0, "total_tokens": 2},
+        )
+        card = {
+            "schema": "stockmind.usage-pricing.v1",
+            "version": "sub-picodollar-precision-test",
+            "currency": "USD",
+            "effective_from": "2026-11-01",
+            "effective_until": None,
+            "source": "Synthetic unit-test rates; not provider pricing",
+            "models": {
+                "baseline-model": {
+                    "input_usd_per_million_tokens": "0.000000000001",
+                    "output_usd_per_million_tokens": "0",
+                },
+                "candidate-model": {
+                    "input_usd_per_million_tokens": "0.000000000001",
+                    "output_usd_per_million_tokens": "0",
+                },
+            },
+        }
+
+        result = compare_benchmark_reports(baseline, candidate, pricing_card=card)
+        cost = result["currency_cost_estimate"]
+        self.assertEqual(cost["baseline"]["total_cost_usd"], "0.000000000000000001")
+        self.assertEqual(cost["candidate"]["total_cost_usd"], "0.000000000000000002")
+        self.assertEqual(cost["paired_deltas"]["total_delta_usd"], "0.000000000000000001")
+        self.assertEqual(
+            result["fixtures"][0]["estimated_cost"]["baseline"]["total_cost_usd"],
+            "0.000000000000000001",
+        )
+
 
     def test_cost_estimate_is_unpriced_when_discounted_cached_usage_is_missing(self):
         baseline = self._report(
