@@ -599,6 +599,13 @@ metric's paired delta and the coverage fields disclose the omission. The
 per-fixture comparison rows retain the raw baseline and candidate telemetry
 for auditability.
 
+Each metric summary now also reports its median and nearest-rank p95. Paired
+candidate-minus-baseline deltas include the median and nearest-rank p95 of the
+per-fixture differences. The nearest-rank method selects the sorted value at
+rank ceil(0.95 * n); for small samples p95 can equal the maximum, so always
+read these statistics alongside the reported fixture coverage rather than as
+a stable tail-latency guarantee.
+
 Token totals are provider-reported counts, not estimated image-token counts.
 No currency cost is inferred: pricing, cached-input treatment and model
 rates can vary by model and effective date. Request latency covers the
