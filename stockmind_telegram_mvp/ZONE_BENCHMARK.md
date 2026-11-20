@@ -558,16 +558,18 @@ the correct supply/demand zones on real market screenshots.
 ## Bounded JSONL manifest records
 
 The offline benchmark reader limits each UTF-8 JSONL record to 1 MiB by
-default, including its newline. It reads each line in binary mode with a
-one-byte-over-limit sentinel before decoding or parsing, so a single oversized
-record is rejected without first allocating the complete line. Screenshot
-bytes retain their separate 5 MiB default limit. Blank lines are allowed, but
-they are subject to the same per-line byte ceiling.
+default, including its newline, and limits the complete manifest to 32 MiB.
+Both limits are enforced while reading in binary mode with a one-byte-over-limit
+sentinel before UTF-8 decoding or JSON parsing. An oversized record or manifest
+is rejected without reading the remainder of the file. Screenshot bytes retain
+their separate 5 MiB default limit. Blank lines count toward both manifest
+limits.
 
-The CLI exposes `--max-manifest-line-bytes` for controlled local datasets.
-The default is 1 MiB and the hard maximum is 16 MiB. The hard cap prevents an
-unrepresentably large `readline()` size from escaping as an `OverflowError` and
-keeps an override from silently disabling the per-record memory bound. Increasing
-the limit should be intentional: model metadata and zone geometry normally fit
-comfortably below the default. This is a per-record bound, not a total
-manifest-size or total fixture-count limit.
+The CLI exposes `--max-manifest-bytes` and `--max-manifest-line-bytes` for
+controlled local datasets. The total manifest limit has a hard maximum of
+128 MiB; the per-record limit has a hard maximum of 16 MiB. These caps keep
+configuration errors from silently disabling resource bounds. The limits are
+independent: increasing one does not increase the other. Typical model metadata
+and zone geometry should fit comfortably below the defaults. The byte ceilings
+bound input size, but the evaluator still retains parsed fixture metrics in
+memory; use separate manifests for very large benchmark collections.

@@ -8,6 +8,8 @@ from pathlib import Path
 from PIL import Image
 
 from stockmind_telegram_mvp.app.zone_benchmark import (
+    DEFAULT_MAX_MANIFEST_BYTES,
+    MAX_MANIFEST_BYTES,
     DEFAULT_MAX_MANIFEST_LINE_BYTES,
     MAX_MANIFEST_LINE_BYTES,
     _aggregate_price_accuracy,
@@ -1330,6 +1332,42 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "manifest must be UTF-8 JSONL"):
             evaluate_benchmark_manifest(self.manifest)
+
+    def test_default_manifest_total_limit_is_32_mibibytes(self):
+        self.assertEqual(DEFAULT_MAX_MANIFEST_BYTES, 32 * 1024 * 1024)
+
+    def test_manifest_exactly_at_total_byte_limit_is_accepted(self):
+        record = self._record("exact-total-limit")
+        raw_line = json.dumps(record, separators=(",", ":")).encode("utf-8") + b"\n"
+        self.manifest.write_bytes(raw_line)
+
+        result = evaluate_benchmark_manifest(
+            self.manifest,
+            max_manifest_bytes=len(raw_line),
+            max_manifest_line_bytes=len(raw_line),
+        )
+        self.assertEqual(result["fixture_count"], 1)
+
+    def test_rejects_manifest_over_total_byte_limit_before_parsing(self):
+        self.manifest.write_bytes(b" " * 129)
+
+        with self.assertRaisesRegex(
+            ValueError, r"manifest exceeds the 128-byte total JSONL limit"
+        ):
+            evaluate_benchmark_manifest(
+                self.manifest,
+                max_manifest_bytes=128,
+                max_manifest_line_bytes=1024,
+            )
+
+    def test_rejects_manifest_total_limit_above_hard_cap(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            f"max_manifest_bytes must not exceed {MAX_MANIFEST_BYTES}",
+        ):
+            evaluate_benchmark_manifest(
+                self.manifest, max_manifest_bytes=MAX_MANIFEST_BYTES + 1
+            )
 
     def test_default_manifest_line_limit_is_one_mibibyte(self):
         self.assertEqual(DEFAULT_MAX_MANIFEST_LINE_BYTES, 1024 * 1024)

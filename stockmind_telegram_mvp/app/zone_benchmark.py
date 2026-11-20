@@ -39,6 +39,8 @@ _REVIEWER_ID_RE = re.compile(r"^rev-[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 _ADJUDICATOR_ID_RE = re.compile(r"^adj-[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 _GUIDELINE_VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024
+DEFAULT_MAX_MANIFEST_BYTES = 32 * 1024 * 1024
+MAX_MANIFEST_BYTES = 128 * 1024 * 1024
 DEFAULT_MAX_MANIFEST_LINE_BYTES = 1024 * 1024
 MAX_MANIFEST_LINE_BYTES = 16 * 1024 * 1024
 _MARKET_CONTEXT_FIELDS = ("asset_class", "symbol", "exchange", "timeframe")
@@ -922,15 +924,21 @@ def evaluate_benchmark_manifest(
     manifest_path,
     *,
     max_image_bytes=DEFAULT_MAX_IMAGE_BYTES,
+    max_manifest_bytes=DEFAULT_MAX_MANIFEST_BYTES,
     max_manifest_line_bytes=DEFAULT_MAX_MANIFEST_LINE_BYTES,
 ):
     """Validate screenshots and score every JSONL fixture in a manifest.
 
-    Screenshot reads and individual JSONL records have independent byte limits.
-    The manifest reader bounds each binary readline before UTF-8 decoding or
-    JSON parsing, so one oversized record cannot allocate an unbounded string.
+    Screenshot bytes, total manifest bytes, and individual JSONL records have
+    independent limits. The binary reader stops one byte beyond either manifest
+    ceiling before UTF-8 decoding or JSON parsing.
     """
     max_image_bytes = _positive_integer(max_image_bytes, "max_image_bytes")
+    max_manifest_bytes = _positive_integer(max_manifest_bytes, "max_manifest_bytes")
+    if max_manifest_bytes > MAX_MANIFEST_BYTES:
+        raise ValueError(
+            f"max_manifest_bytes must not exceed {MAX_MANIFEST_BYTES}"
+        )
     max_manifest_line_bytes = _positive_integer(
         max_manifest_line_bytes, "max_manifest_line_bytes"
     )
@@ -950,12 +958,20 @@ def evaluate_benchmark_manifest(
     annotation_guideline_version = None
     with manifest_path.open("rb") as manifest:
         line_number = 0
+        manifest_bytes_read = 0
         while True:
-            # Read at most one byte beyond the configured limit so an
-            # oversized line is rejected without buffering the whole record.
-            raw_line = manifest.readline(max_manifest_line_bytes + 1)
+            # Bound both aggregate input and each record. The one-byte sentinel
+            # detects overflow without reading the remainder of a large file.
+            remaining_manifest_bytes = max_manifest_bytes - manifest_bytes_read
+            read_limit = min(max_manifest_line_bytes, remaining_manifest_bytes) + 1
+            raw_line = manifest.readline(read_limit)
             if not raw_line:
                 break
+            manifest_bytes_read += len(raw_line)
+            if manifest_bytes_read > max_manifest_bytes:
+                raise ValueError(
+                    f"manifest exceeds the {max_manifest_bytes}-byte total JSONL limit"
+                )
             line_number += 1
             if len(raw_line) > max_manifest_line_bytes:
                 raise ValueError(
@@ -1070,6 +1086,12 @@ def main(argv=None):
         help="maximum bytes read per screenshot (default: 5 MiB)",
     )
     parser.add_argument(
+        "--max-manifest-bytes",
+        type=int,
+        default=DEFAULT_MAX_MANIFEST_BYTES,
+        help="maximum total bytes read from the JSONL manifest (default: 32 MiB; maximum: 128 MiB)",
+    )
+    parser.add_argument(
         "--max-manifest-line-bytes",
         type=int,
         default=DEFAULT_MAX_MANIFEST_LINE_BYTES,
@@ -1080,6 +1102,7 @@ def main(argv=None):
         result = evaluate_benchmark_manifest(
             args.manifest,
             max_image_bytes=args.max_image_bytes,
+            max_manifest_bytes=args.max_manifest_bytes,
             max_manifest_line_bytes=args.max_manifest_line_bytes,
         )
     except (OSError, ValueError) as exc:
