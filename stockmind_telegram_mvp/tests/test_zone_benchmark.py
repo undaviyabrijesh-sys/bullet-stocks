@@ -9,6 +9,7 @@ from PIL import Image
 
 from stockmind_telegram_mvp.app.zone_benchmark import (
     DEFAULT_MAX_MANIFEST_BYTES,
+    MAX_BENCHMARK_IMAGE_BYTES,
     MAX_MANIFEST_BYTES,
     DEFAULT_MAX_MANIFEST_LINE_BYTES,
     MAX_MANIFEST_LINE_BYTES,
@@ -914,6 +915,22 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "max_image_bytes must be a positive integer"):
             evaluate_benchmark_manifest(self.manifest, max_image_bytes=0)
+
+    def test_rejects_image_byte_limit_above_hard_cap_before_opening_manifest(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            f"max_image_bytes must not exceed {MAX_BENCHMARK_IMAGE_BYTES}",
+        ):
+            evaluate_benchmark_manifest(
+                self.manifest, max_image_bytes=MAX_BENCHMARK_IMAGE_BYTES + 1
+            )
+
+    def test_rejects_unrepresentably_large_image_byte_limit_before_opening_manifest(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            f"max_image_bytes must not exceed {MAX_BENCHMARK_IMAGE_BYTES}",
+        ):
+            evaluate_benchmark_manifest(self.manifest, max_image_bytes=10 ** 400)
 
     def test_rejects_screenshot_hash_mismatch(self):
         self._write(self._record(image_sha256="0" * 64))

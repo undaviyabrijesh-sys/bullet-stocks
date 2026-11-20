@@ -39,6 +39,7 @@ _REVIEWER_ID_RE = re.compile(r"^rev-[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 _ADJUDICATOR_ID_RE = re.compile(r"^adj-[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 _GUIDELINE_VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024
+MAX_BENCHMARK_IMAGE_BYTES = 32 * 1024 * 1024
 DEFAULT_MAX_MANIFEST_BYTES = 32 * 1024 * 1024
 MAX_MANIFEST_BYTES = 128 * 1024 * 1024
 DEFAULT_MAX_MANIFEST_LINE_BYTES = 1024 * 1024
@@ -934,6 +935,10 @@ def evaluate_benchmark_manifest(
     ceiling before UTF-8 decoding or JSON parsing.
     """
     max_image_bytes = _positive_integer(max_image_bytes, "max_image_bytes")
+    if max_image_bytes > MAX_BENCHMARK_IMAGE_BYTES:
+        raise ValueError(
+            f"max_image_bytes must not exceed {MAX_BENCHMARK_IMAGE_BYTES}"
+        )
     max_manifest_bytes = _positive_integer(max_manifest_bytes, "max_manifest_bytes")
     if max_manifest_bytes > MAX_MANIFEST_BYTES:
         raise ValueError(
