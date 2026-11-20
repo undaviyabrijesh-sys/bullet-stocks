@@ -257,6 +257,18 @@ class PipelineTelemetryTests(unittest.TestCase):
         )
         self.assertEqual(report["correlation_summary"]["complete_upload_request_count"], 0)
 
+    def test_handler_outcome_counts_include_events_without_request_ids(self):
+        report = aggregate_timing_lines(
+            [
+                "StockMind Telegram photo outcome=rejected handler_total_ms=8",
+                "StockMind Telegram document handler_total_ms=9",
+            ]
+        )
+        self.assertEqual(report["telegram_handler_outcomes"], {"rejected": 1})
+        self.assertEqual(report["correlation_summary"]["handler_outcome_event_count"], 1)
+        self.assertEqual(report["correlation_summary"]["legacy_handler_outcome_event_count"], 1)
+        self.assertEqual(report["correlation_summary"]["legacy_handler_event_count"], 2)
+
     def test_unknown_handler_outcomes_are_rejected(self):
         report = aggregate_timing_lines(
             [

@@ -187,6 +187,13 @@ def aggregate_timing_lines(lines: Iterable[str]) -> dict:
         else:
             handler_samples[event["event"]].append(event["duration_ms"])
             parsed_handlers += 1
+            metric = event["metric"]
+            outcome = event.get("outcome")
+            if metric == "handler_total_ms":
+                if outcome is None:
+                    legacy_handler_outcome_events += 1
+                else:
+                    handler_outcome_counts[outcome] += 1
             if request_id is None:
                 legacy_handler_events += 1
             else:
@@ -200,13 +207,6 @@ def aggregate_timing_lines(lines: Iterable[str]) -> dict:
                 ):
                     conflicted_request_ids.add(request_id)
                 record["upload_kind"] = event["upload_kind"]
-                metric = event["metric"]
-                outcome = event.get("outcome")
-                if metric == "handler_total_ms":
-                    if outcome is None:
-                        legacy_handler_outcome_events += 1
-                    else:
-                        handler_outcome_counts[outcome] += 1
                 if outcome is not None:
                     if record["outcome"] is not None:
                         conflicted_request_ids.add(request_id)
