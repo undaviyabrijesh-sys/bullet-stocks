@@ -1143,10 +1143,11 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
         total_calls = [
             call for call in info.call_args_list
             if call.args and call.args[0]
-            == "StockMind Telegram photo request_id=%s handler_total_ms=%d"
+            == "StockMind Telegram photo request_id=%s outcome=%s handler_total_ms=%d"
         ]
         self.assertEqual(len(total_calls), 1)
         self.assertEqual(len(total_calls[0].args[1]), 32)
+        self.assertEqual(total_calls[0].args[2], "rejected")
 
     async def test_photo_preflight_uses_telegram_language_for_beta_rejection(self):
         bot_module.beta_users.add(self.user_id + 1)
@@ -1194,10 +1195,11 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
         total_calls = [
             call for call in info.call_args_list
             if call.args and call.args[0]
-            == "StockMind Telegram document request_id=%s handler_total_ms=%d"
+            == "StockMind Telegram document request_id=%s outcome=%s handler_total_ms=%d"
         ]
         self.assertEqual(len(total_calls), 1)
         self.assertEqual(len(total_calls[0].args[1]), 32)
+        self.assertEqual(total_calls[0].args[2], "rejected")
 
 
     async def test_photo_download_and_research_timing_share_opaque_request_id(self):
@@ -1252,9 +1254,10 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
         total_calls = [
             call for call in info.call_args_list
             if call.args and call.args[0]
-            == "StockMind Telegram photo request_id=%s handler_total_ms=%d"
+            == "StockMind Telegram photo request_id=%s outcome=%s handler_total_ms=%d"
         ]
         self.assertEqual((len(download_calls), len(request_calls), len(total_calls)), (1, 1, 1))
+        self.assertEqual(total_calls[0].args[2], "completed")
         request_ids = {
             download_calls[0].args[1],
             request_calls[0].args[1],

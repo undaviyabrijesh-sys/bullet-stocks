@@ -58,6 +58,45 @@ logger = logging.getLogger(__name__)
 _request_id_context: ContextVar[str | None] = ContextVar(
     "stockmind_request_id", default=None
 )
+_request_outcome_context: ContextVar[str | None] = ContextVar(
+    "stockmind_upload_outcome", default=None
+)
+_UPLOAD_OUTCOMES = frozenset({
+    "completed", "delivery_failed", "timeout", "incomplete_response",
+    "invalid_image", "research_failed", "rejected", "download_failed",
+    "request_busy", "capacity_timeout", "storage_unavailable",
+    "handler_error", "unknown",
+})
+
+
+def _set_upload_outcome(outcome: str) -> None:
+    """Set a bounded outcome only while a photo/document handler is active."""
+    if _request_outcome_context.get() is None:
+        return
+    if outcome not in _UPLOAD_OUTCOMES:
+        raise ValueError("unsupported StockMind upload outcome")
+    _request_outcome_context.set(outcome)
+
+
+def _upload_outcome_from_research(outcome: str) -> str:
+    """Collapse research outcomes into stable, low-cardinality upload categories."""
+    if outcome == "completed":
+        return "completed"
+    if outcome in {
+        "text_delivery_failed",
+        "completed_overlay_delivery_failed",
+        "text_and_overlay_delivery_failed",
+    }:
+        return "delivery_failed"
+    if outcome in {"timeout", "timeout_delivery_failed"}:
+        return "timeout"
+    if outcome in {"incomplete_response", "incomplete_response_delivery_failed"}:
+        return "incomplete_response"
+    if outcome == "image_rejected":
+        return "invalid_image"
+    if outcome in {"failed", "failed_error_delivery"}:
+        return "research_failed"
+    return "unknown"
 
 
 def _active_request_id() -> str:
@@ -74,7 +113,7 @@ def _request_scoped(handler=None, *, upload_kind: str | None = None):
     if upload_kind is not None and upload_kind not in {"photo", "document"}:
         raise ValueError("upload_kind must be photo or document")
     handler_log_template = (
-        f"StockMind Telegram {upload_kind} request_id=%s handler_total_ms=%d"
+        f"StockMind Telegram {upload_kind} request_id=%s outcome=%s handler_total_ms=%d"
         if upload_kind is not None
         else None
     )
@@ -83,20 +122,30 @@ def _request_scoped(handler=None, *, upload_kind: str | None = None):
         @wraps(target)
         async def wrapped(*args, **kwargs):
             token = None
+            outcome_token = None
             if _request_id_context.get() is None:
                 token = _request_id_context.set(uuid4().hex)
+            if upload_kind is not None:
+                outcome_token = _request_outcome_context.set("unknown")
             started_at = time.perf_counter() if upload_kind is not None else None
             try:
                 return await target(*args, **kwargs)
+            except BaseException:
+                if outcome_token is not None:
+                    _request_outcome_context.set("handler_error")
+                raise
             finally:
                 try:
                     if handler_log_template is not None:
                         logger.info(
                             handler_log_template,
                             _active_request_id(),
+                            _request_outcome_context.get() or "unknown",
                             _elapsed_ms(started_at),
                         )
                 finally:
+                    if outcome_token is not None:
+                        _request_outcome_context.reset(outcome_token)
                     if token is not None:
                         _request_id_context.reset(token)
 
@@ -112,6 +161,7 @@ def _elapsed_ms(started_at: float) -> int:
 
 def _log_request_timings(mode: str, outcome: str, started_at: float, stages: dict) -> None:
     """Log timings with an opaque correlation ID, never a Telegram/user identifier."""
+    _set_upload_outcome(_upload_outcome_from_research(outcome))
     stage_summary = " ".join(
         f"{name}={duration}ms" for name, duration in stages.items()
     ) or "none"
@@ -400,9 +450,11 @@ async def run_research(
 ):
     user = message.from_user
     if user is None:
+        _set_upload_outcome("rejected")
         return
 
     if user_locks is None:
+        _set_upload_outcome("storage_unavailable")
         await message.answer(translate(_language_for(message), "quota_storage_unavailable"))
         return
 
@@ -410,13 +462,16 @@ async def run_research(
         async with user_locks.hold(user.id):
             await _run_research_locked(message, user_text, image_bytes, image_mime_type)
     except UserLockBusy:
+        _set_upload_outcome("request_busy")
         await message.answer(translate(_language_for(message), "request_busy"))
     except UserLockUnavailable:
+        _set_upload_outcome("storage_unavailable")
         logger.exception("StockMind could not acquire the shared per-user request lock")
         await message.answer(translate(_language_for(message), "quota_storage_unavailable"))
     except asyncio.CancelledError as exc:
         if not is_lease_lost_cancellation(exc):
             raise
+        _set_upload_outcome("storage_unavailable")
         logger.error("StockMind stopped a request after its shared per-user lock lease was lost")
         await message.answer(translate(_language_for(message), "quota_storage_unavailable"))
 
@@ -436,6 +491,7 @@ async def _run_research_locked(
     language = _language_for(message)
     admission_error = _research_admission_error(message.from_user.id, language)
     if admission_error:
+        _set_upload_outcome("rejected")
         await message.answer(admission_error)
         return
 
@@ -445,6 +501,7 @@ async def _run_research_locked(
             timeout=CHART_CAPACITY_WAIT_TIMEOUT_SECONDS,
         )
     except TimeoutError:
+        _set_upload_outcome("capacity_timeout")
         try:
             await message.answer(translate(language, "chart_capacity_busy"))
         except Exception:
@@ -467,6 +524,7 @@ async def _run_research_locked_impl(
 ):
     user = message.from_user
     if user is None:
+        _set_upload_outcome("rejected")
         return
 
     request_started = time.perf_counter()
@@ -476,6 +534,7 @@ async def _run_research_locked_impl(
     language = _language_for(message)
     admission_error = _research_admission_error(user_id, language)
     if admission_error:
+        _set_upload_outcome("rejected")
         await message.answer(admission_error)
         return
 
@@ -501,6 +560,7 @@ async def _run_research_locked_impl(
     today = datetime.now(IST).date().isoformat()
     reservation = _reserve_research_request(user_id, today)
     if reservation != "ok":
+        _set_upload_outcome("rejected")
         await message.answer(translate(language, reservation))
         return
     try:
@@ -745,12 +805,14 @@ async def reset(message: Message):
 async def handle_chart_photo(message: Message):
     photo = message.photo[-1]
     if photo.file_size and photo.file_size > MAX_CHART_IMAGE_BYTES:
+        _set_upload_outcome("rejected")
         await message.answer(_ui(message, "upload_too_large"))
         return
 
     if message.from_user is not None:
         admission_error = _research_admission_error(message.from_user.id, _language_for(message))
         if admission_error:
+            _set_upload_outcome("rejected")
             await message.answer(admission_error)
             return
 
@@ -763,12 +825,15 @@ async def handle_chart_photo(message: Message):
         await bot.download_file(telegram_file.file_path, destination=buffer)
         image_bytes = buffer.getvalue()
         if len(image_bytes) > MAX_CHART_IMAGE_BYTES:
+            _set_upload_outcome("rejected")
             await message.answer(_ui(message, "upload_too_large"))
             return
     except UploadTooLargeError:
+        _set_upload_outcome("rejected")
         await message.answer(_ui(message, "upload_too_large"))
         return
     except Exception:
+        _set_upload_outcome("download_failed")
         await message.answer(_ui(message, "upload_download_failed"))
         return
     finally:
@@ -788,6 +853,7 @@ async def handle_chart_document(message: Message):
     document = message.document
     mime_type = document.mime_type or ""
     if mime_type not in ALLOWED_IMAGE_TYPES:
+        _set_upload_outcome("rejected")
         await message.answer(_ui(message, "unsupported_document"))
         return
     if document.file_size and document.file_size > MAX_CHART_IMAGE_BYTES:
@@ -797,6 +863,7 @@ async def handle_chart_document(message: Message):
     if message.from_user is not None:
         admission_error = _research_admission_error(message.from_user.id, _language_for(message))
         if admission_error:
+            _set_upload_outcome("rejected")
             await message.answer(admission_error)
             return
 
@@ -809,12 +876,15 @@ async def handle_chart_document(message: Message):
         await bot.download_file(telegram_file.file_path, destination=buffer)
         image_bytes = buffer.getvalue()
         if len(image_bytes) > MAX_CHART_IMAGE_BYTES:
+            _set_upload_outcome("rejected")
             await message.answer(_ui(message, "upload_too_large"))
             return
     except UploadTooLargeError:
+        _set_upload_outcome("rejected")
         await message.answer(_ui(message, "upload_too_large"))
         return
     except Exception:
+        _set_upload_outcome("download_failed")
         await message.answer(_ui(message, "upload_download_failed"))
         return
     finally:

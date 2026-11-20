@@ -166,10 +166,15 @@ class PipelineTelemetryTests(unittest.TestCase):
         handler = parse_timing_line(
             f"StockMind Telegram photo request_id={request_id} download_ms=12"
         )
+        handler_total = parse_timing_line(
+            f"StockMind Telegram photo request_id={request_id} "
+            "outcome=completed handler_total_ms=80"
+        )
         self.assertEqual(request["request_id"], request_id)
         self.assertEqual(handler["request_id"], request_id)
         self.assertEqual(handler["upload_kind"], "photo")
         self.assertEqual(handler["metric"], "download_ms")
+        self.assertEqual(handler_total["outcome"], "completed")
 
     def test_correlates_interleaved_upload_and_request_events_by_id(self):
         photo_id = "a" * 32
@@ -221,6 +226,46 @@ class PipelineTelemetryTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_handler_outcomes_are_counted_and_attached_to_correlated_uploads(self):
+        request_id = "e" * 32
+        report = aggregate_timing_lines(
+            [
+                f"StockMind Telegram photo request_id={request_id} download_ms=12",
+                f"StockMind request timing request_id={request_id} mode=chart "
+                "outcome=completed total_ms=100 stages=analysis_execution=70ms",
+                f"StockMind Telegram photo request_id={request_id} "
+                "outcome=completed handler_total_ms=120",
+            ]
+        )
+        self.assertEqual(report["telegram_handler_outcomes"], {"completed": 1})
+        self.assertEqual(report["correlation_summary"]["handler_outcome_event_count"], 1)
+        self.assertEqual(report["correlation_summary"]["legacy_handler_outcome_event_count"], 0)
+        self.assertEqual(report["correlation_summary"]["complete_upload_request_count"], 1)
+        self.assertEqual(report["correlated_requests"][0]["telegram_handler"]["outcome"], "completed")
+
+    def test_text_request_is_not_counted_as_a_complete_chart_upload(self):
+        request_id = "f" * 32
+        report = aggregate_timing_lines(
+            [
+                f"StockMind Telegram photo request_id={request_id} download_ms=12",
+                f"StockMind request timing request_id={request_id} mode=text "
+                "outcome=completed total_ms=100 stages=analysis_execution=70ms",
+                f"StockMind Telegram photo request_id={request_id} "
+                "outcome=completed handler_total_ms=120",
+            ]
+        )
+        self.assertEqual(report["correlation_summary"]["complete_upload_request_count"], 0)
+
+    def test_unknown_handler_outcomes_are_rejected(self):
+        report = aggregate_timing_lines(
+            [
+                "StockMind Telegram photo request_id=" + "a" * 32
+                + " outcome=unexpected_value handler_total_ms=80"
+            ]
+        )
+        self.assertEqual(report["parsed_handler_events"], 0)
+        self.assertEqual(report["rejected_timing_lines"], 1)
 
     def test_duplicate_events_for_one_request_id_are_not_silently_joined(self):
         request_id = "c" * 32

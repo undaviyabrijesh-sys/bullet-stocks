@@ -749,3 +749,12 @@ under the same access and retention controls as other application logs. A
 report with zero parsed events or non-zero `rejected_timing_lines` should be
 investigated before using its percentiles. Small samples, especially p95, are
 descriptive only and are not latency guarantees.
+
+
+## Telegram upload outcome telemetry
+
+Photo and document handler completion events include a bounded `outcome` field alongside the opaque request ID and total handler duration. Outcome values are intentionally low-cardinality: completed, delivery_failed, timeout, incomplete_response, invalid_image, research_failed, rejected, download_failed, request_busy, capacity_timeout, storage_unavailable, handler_error, or unknown. They contain no user, symbol, prompt, or provider identifiers.
+
+The offline telemetry report counts these outcomes and attaches the final handler outcome to the correlated request row. Download timing events remain outcome-free because they are emitted before analysis and delivery finish. Legacy handler logs without an outcome remain readable and are counted separately.
+
+A request is counted in `complete_upload_request_count` only when it has a chart-mode research timing event plus both download and total-handler timing measurements. Text-mode request events cannot be misclassified as completed chart uploads. Conflicting or duplicate events remain excluded from per-request correlation.

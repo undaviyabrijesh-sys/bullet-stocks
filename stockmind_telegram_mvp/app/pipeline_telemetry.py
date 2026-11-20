@@ -16,6 +16,12 @@ from typing import Iterable
 _MAX_DURATION_MS = (1 << 63) - 1
 _REQUEST_MARKER = "StockMind request timing "
 _HANDLER_MARKER = "StockMind Telegram "
+_HANDLER_OUTCOMES = frozenset({
+    "completed", "delivery_failed", "timeout", "incomplete_response",
+    "invalid_image", "research_failed", "rejected", "download_failed",
+    "request_busy", "capacity_timeout", "storage_unavailable",
+    "handler_error", "unknown",
+})
 
 _REQUEST_RE = re.compile(
     r"StockMind request timing "
@@ -28,6 +34,7 @@ _STAGE_RE = re.compile(r"(?P<name>[a-z][a-z0-9_]*)=(?P<duration>[0-9]+)ms")
 _HANDLER_RE = re.compile(
     r"StockMind Telegram (?P<kind>photo|document) "
     r"(?:request_id=(?P<request_id>[0-9a-f]{32}) )?"
+    r"(?:outcome=(?P<outcome>[a-z][a-z0-9_]*) )?"
     r"(?P<metric>download_ms|handler_total_ms)=(?P<duration>[0-9]+)\s*$"
 )
 
@@ -88,21 +95,26 @@ def parse_timing_line(line: str) -> dict | None:
     handler_match = _HANDLER_RE.search(line.rstrip("\r\n"))
     if handler_match is not None:
         duration_ms = _duration(handler_match.group("duration"))
+        metric = handler_match.group("metric")
+        outcome = handler_match.group("outcome")
         if duration_ms is None:
+            return None
+        if outcome is not None and (
+            metric != "handler_total_ms" or outcome not in _HANDLER_OUTCOMES
+        ):
             return None
         event = {
             "kind": "handler",
-            "event": (
-                f"telegram_{handler_match.group('kind')}_"
-                f"{handler_match.group('metric')}"
-            ),
+            "event": f"telegram_{handler_match.group('kind')}_{metric}",
             "duration_ms": duration_ms,
             "upload_kind": handler_match.group("kind"),
-            "metric": handler_match.group("metric"),
+            "metric": metric,
         }
         request_id = handler_match.group("request_id")
         if request_id is not None:
             event["request_id"] = request_id
+        if outcome is not None:
+            event["outcome"] = outcome
         return event
     return None
 
@@ -140,6 +152,8 @@ def aggregate_timing_lines(lines: Iterable[str]) -> dict:
     parsed_handlers = 0
     legacy_request_events = 0
     legacy_handler_events = 0
+    legacy_handler_outcome_events = 0
+    handler_outcome_counts: dict[str, int] = defaultdict(int)
     rejected_timing_lines = 0
 
     for line in lines:
@@ -164,7 +178,7 @@ def aggregate_timing_lines(lines: Iterable[str]) -> dict:
             else:
                 record = correlations.setdefault(
                     request_id,
-                    {"request": None, "upload_kind": None, "handler_metrics": {}},
+                    {"request": None, "upload_kind": None, "handler_metrics": {}, "outcome": None},
                 )
                 if record["request"] is not None:
                     conflicted_request_ids.add(request_id)
@@ -178,7 +192,7 @@ def aggregate_timing_lines(lines: Iterable[str]) -> dict:
             else:
                 record = correlations.setdefault(
                     request_id,
-                    {"request": None, "upload_kind": None, "handler_metrics": {}},
+                    {"request": None, "upload_kind": None, "handler_metrics": {}, "outcome": None},
                 )
                 if (
                     record["upload_kind"] is not None
@@ -187,6 +201,17 @@ def aggregate_timing_lines(lines: Iterable[str]) -> dict:
                     conflicted_request_ids.add(request_id)
                 record["upload_kind"] = event["upload_kind"]
                 metric = event["metric"]
+                outcome = event.get("outcome")
+                if metric == "handler_total_ms":
+                    if outcome is None:
+                        legacy_handler_outcome_events += 1
+                    else:
+                        handler_outcome_counts[outcome] += 1
+                if outcome is not None:
+                    if record["outcome"] is not None:
+                        conflicted_request_ids.add(request_id)
+                    else:
+                        record["outcome"] = outcome
                 if metric in record["handler_metrics"]:
                     conflicted_request_ids.add(request_id)
                 else:
@@ -227,10 +252,19 @@ def aggregate_timing_lines(lines: Iterable[str]) -> dict:
         handler_metrics = record["handler_metrics"]
         if (
             request is not None
+            and request["mode"] == "chart"
             and record["upload_kind"] is not None
             and {"download_ms", "handler_total_ms"} <= set(handler_metrics)
         ):
             complete_upload_requests += 1
+        handler_summary = None
+        if handler_metrics:
+            handler_summary = {
+                "kind": record["upload_kind"],
+                **handler_metrics,
+            }
+            if record["outcome"] is not None:
+                handler_summary["outcome"] = record["outcome"]
         correlated_requests.append(
             {
                 "request_id": request_id,
@@ -244,14 +278,7 @@ def aggregate_timing_lines(lines: Iterable[str]) -> dict:
                         "stages": request["stages"],
                     }
                 ),
-                "telegram_handler": (
-                    None
-                    if not handler_metrics
-                    else {
-                        "kind": record["upload_kind"],
-                        **handler_metrics,
-                    }
-                ),
+                "telegram_handler": handler_summary,
             }
         )
 
@@ -276,7 +303,10 @@ def aggregate_timing_lines(lines: Iterable[str]) -> dict:
             "conflicted_request_id_count": len(conflicted_request_ids),
             "legacy_request_event_count": legacy_request_events,
             "legacy_handler_event_count": legacy_handler_events,
+            "handler_outcome_event_count": sum(handler_outcome_counts.values()),
+            "legacy_handler_outcome_event_count": legacy_handler_outcome_events,
         },
+        "telegram_handler_outcomes": dict(sorted(handler_outcome_counts.items())),
         "correlated_requests": correlated_requests,
     }
 
