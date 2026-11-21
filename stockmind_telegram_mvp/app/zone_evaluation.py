@@ -197,12 +197,20 @@ def _confidence_stratified_results(predicted_zones, drawable_predictions, matche
 
 
 def _finite_mean(values):
-    """Compute a finite mean without overflowing an otherwise representable average."""
+    """Compute a finite mean without overflowing or prematurely underflowing samples."""
     if not values:
         return None
-    count = len(values)
     try:
-        mean = math.fsum(value / count for value in values)
+        # Scale before summing so large samples cannot overflow the intermediate
+        # total. Averaging the scaled values before restoring the scale also
+        # preserves repeated subnormal samples: dividing each tiny sample by
+        # count first can round every term to zero even when the mean is
+        # representable.
+        scale = max(abs(value) for value in values)
+        if scale == 0:
+            return 0.0
+        normalized_mean = math.fsum(value / scale for value in values) / len(values)
+        mean = normalized_mean * scale
     except (OverflowError, ValueError) as exc:
         raise ValueError("metric mean exceeds the supported numeric range") from exc
     if not math.isfinite(mean):

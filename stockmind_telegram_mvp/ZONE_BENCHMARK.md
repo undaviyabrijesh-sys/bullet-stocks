@@ -765,3 +765,11 @@ Photo and document handler completion events include a bounded `outcome` field a
 The offline telemetry report counts these outcomes and attaches the final handler outcome to the correlated request row. Download timing events remain outcome-free because they are emitted before analysis and delivery finish. Legacy handler logs without an outcome remain readable and are counted separately.
 
 A request is counted in `complete_upload_request_count` only when it has a chart-mode research timing event plus both download and total-handler timing measurements. Text-mode request events cannot be misclassified as completed chart uploads. Conflicting or duplicate events remain excluded from per-request correlation.
+
+## Numerically stable metric aggregation
+
+Zone-evaluation means scale samples by the largest absolute value before summing,
+then restore the scale after averaging. This keeps the intermediate sum bounded
+and avoids rounding every uniformly subnormal sample to zero before the mean is
+computed. Empty metric collections remain undefined (null in reports); the
+benchmark does not manufacture zero-valued observations for missing data.

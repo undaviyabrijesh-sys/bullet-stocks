@@ -471,6 +471,13 @@ class ZoneEvaluationTests(unittest.TestCase):
     def test_finite_mean_does_not_overflow_when_intermediate_sum_would(self):
         self.assertEqual(_finite_mean([1e308, 1e308]), 1e308)
 
+    def test_finite_mean_preserves_representable_subnormal_samples(self):
+        smallest_positive = math.ulp(0.0)
+        self.assertEqual(
+            _finite_mean([smallest_positive, smallest_positive]),
+            smallest_positive,
+        )
+
     def test_price_comparison_is_unscored_instead_of_extrapolating(self):
         result = evaluate(
             [prediction(y_top=0.19, y_bottom=0.4)],
