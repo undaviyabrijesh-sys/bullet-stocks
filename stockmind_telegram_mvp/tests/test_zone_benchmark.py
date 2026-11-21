@@ -845,6 +845,25 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         ):
             evaluate_benchmark_manifest(self.manifest)
 
+    def test_malformed_reference_plot_bounds_raise_value_error(self):
+        axis_plot = {
+            "x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9
+        }
+        self._write(self._record(
+            price_axis_anchors=[
+                {"y": 0.2, "price": 120},
+                {"y": 0.5, "price": 90},
+                {"y": 0.8, "price": 60},
+            ],
+            price_axis_scale="linear",
+            price_axis_plot_bounds=axis_plot,
+            reference_plot_bounds=["not", "a", "plot", "object"],
+            predicted_plot_bounds=axis_plot,
+        ))
+
+        with self.assertRaises(ValueError):
+            evaluate_benchmark_manifest(self.manifest)
+
     def test_price_axis_metrics_are_aggregated_without_inventing_missing_values(self):
         self._write(
             self._record(
