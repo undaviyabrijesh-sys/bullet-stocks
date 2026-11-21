@@ -202,6 +202,31 @@ class ChartImageLocalizationTests(unittest.IsolatedAsyncioTestCase):
         )
         reserve.assert_not_called()
 
+    async def test_unreadable_prepared_dimensions_fail_closed_before_quota_reservation(self):
+        message = SimpleNamespace(
+            from_user=SimpleNamespace(id=987654321, language_code="gu"),
+            answer=AsyncMock(),
+        )
+        with (
+            patch.object(bot_module, "_language_for", return_value="gu"),
+            patch.object(bot_module, "_research_admission_error", return_value=None),
+            patch.object(
+                bot_module, "_prepare_chart_image_for_vision",
+                return_value=(b"prepared-chart", "image/png"),
+            ),
+            patch.object(bot_module, "_prepared_chart_image_size", return_value=None),
+            patch.object(bot_module, "_reserve_research_request") as reserve,
+            patch.object(bot_module, "_log_request_timings"),
+        ):
+            await bot_module._run_research_locked_impl(
+                message, "analyse chart", b"original-chart", "image/png"
+            )
+
+        message.answer.assert_awaited_once_with(
+            bot_module.chart_image_error_message("gu", "invalid")
+        )
+        reserve.assert_not_called()
+
 
 class ChartCapacityTests(unittest.IsolatedAsyncioTestCase):
     @staticmethod
@@ -372,6 +397,13 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
             answer=AsyncMock(return_value=self.status),
             answer_photo=AsyncMock(),
         )
+        # Most flow tests use placeholder prepared bytes; provide their known
+        # fixture dimensions unless a test explicitly exercises dimension failure.
+        self.prepared_dimensions_patch = patch.object(
+            bot_module, "_prepared_chart_image_size", return_value=(640, 480)
+        )
+        self.prepared_dimensions_patch.start()
+        self.addCleanup(self.prepared_dimensions_patch.stop)
 
     async def test_language_command_sets_explicit_gujarati_preference(self):
         language_message = SimpleNamespace(

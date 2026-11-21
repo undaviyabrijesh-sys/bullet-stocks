@@ -558,6 +558,15 @@ async def _run_research_locked_impl(
             # Normalize EXIF orientation and strip descriptive/container metadata.
             # The exact same sanitized bytes go to vision, hashing and overlay rendering.
             image_bytes, image_mime_type = _prepare_chart_image_for_vision(image_bytes)
+            # Pixel-aware sanitization is required to agree with the renderer's
+            # minimum-size and plot-containment checks. Never silently fall back
+            # to normalized-coordinate-only approval if dimensions are unreadable.
+            image_size = _prepared_chart_image_size(image_bytes)
+            if image_size is None:
+                raise ChartImageError(
+                    "invalid",
+                    "The prepared chart image dimensions could not be verified safely.",
+                )
         except ChartImageError as exc:
             stage_timings["image_prepare"] = _elapsed_ms(image_prepare_started)
             _log_request_timings(request_mode, "image_rejected", request_started, stage_timings)
@@ -570,7 +579,6 @@ async def _run_research_locked_impl(
             await message.answer(chart_image_error_message(language, "invalid"))
             return
         stage_timings["image_prepare"] = _elapsed_ms(image_prepare_started)
-        image_size = _prepared_chart_image_size(image_bytes)
 
     today = datetime.now(IST).date().isoformat()
     reservation = _reserve_research_request(user_id, today)
