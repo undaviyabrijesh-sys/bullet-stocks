@@ -1,3 +1,4 @@
+import math
 import unittest
 from unittest.mock import patch
 
@@ -476,6 +477,13 @@ class ZoneEvaluationTests(unittest.TestCase):
         self.assertEqual(
             _finite_mean([smallest_positive, smallest_positive]),
             smallest_positive,
+        )
+
+    def test_finite_mean_preserves_small_residual_after_large_cancellation(self):
+        residual = 1e-16
+        self.assertEqual(
+            _finite_mean([1e308, -1e308, residual]),
+            residual / 3,
         )
 
     def test_price_comparison_is_unscored_instead_of_extrapolating(self):
