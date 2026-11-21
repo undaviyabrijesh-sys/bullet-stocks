@@ -821,6 +821,30 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, expected):
                     evaluate_benchmark_manifest(self.manifest)
 
+    def test_price_axis_plot_bounds_must_match_manual_reference_plot(self):
+        axis_plot = {
+            "x_start": 0.1, "x_end": 0.9, "y_top": 0.1, "y_bottom": 0.9
+        }
+        reference_plot = {
+            "x_start": 0.1, "x_end": 0.9, "y_top": 0.05, "y_bottom": 0.95
+        }
+        self._write(self._record(
+            price_axis_anchors=[
+                {"y": 0.2, "price": 120},
+                {"y": 0.5, "price": 90},
+                {"y": 0.8, "price": 60},
+            ],
+            price_axis_scale="linear",
+            price_axis_plot_bounds=axis_plot,
+            reference_plot_bounds=reference_plot,
+            predicted_plot_bounds=reference_plot,
+        ))
+
+        with self.assertRaisesRegex(
+            ValueError, "price_axis_plot_bounds must match reference_plot_bounds"
+        ):
+            evaluate_benchmark_manifest(self.manifest)
+
     def test_price_axis_metrics_are_aggregated_without_inventing_missing_values(self):
         self._write(
             self._record(
