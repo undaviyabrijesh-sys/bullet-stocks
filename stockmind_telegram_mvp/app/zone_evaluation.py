@@ -426,9 +426,13 @@ def evaluate_zone_predictions(
         )
         if plot_box is None:
             raise ValueError("price_axis_plot_bounds must be a valid normalized plot rectangle")
-        _, plot_top, _, plot_bottom = plot_box
-        plot_top_normalized = plot_top / image_height
-        plot_bottom_normalized = plot_bottom / image_height
+        # Manual anchors and plot bounds share the original normalized
+        # screenshot coordinate frame. Comparing anchors with pixel-rounded
+        # plot edges can reject a valid edge anchor when the normalized edge
+        # falls between source pixels (or when it is exactly the bottom edge).
+        # Keep this check inclusive, matching the annotation editor.
+        plot_top_normalized = float(price_axis_plot_bounds["y_top"])
+        plot_bottom_normalized = float(price_axis_plot_bounds["y_bottom"])
         calibration = calibrate_price_axis(
             price_axis_anchors,
             scale=price_axis_scale,
@@ -436,7 +440,7 @@ def evaluate_zone_predictions(
         )
         for index, anchor in enumerate(price_axis_anchors):
             anchor_y = float(anchor["y"])  # validated by calibrate_price_axis
-            if not plot_top_normalized <= anchor_y < plot_bottom_normalized:
+            if not plot_top_normalized <= anchor_y <= plot_bottom_normalized:
                 raise ValueError(
                     f"price-axis anchor at index {index} falls outside the manually marked main price plot"
                 )

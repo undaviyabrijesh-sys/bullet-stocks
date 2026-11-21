@@ -910,5 +910,60 @@ class ZoneEvaluationTests(unittest.TestCase):
         )
 
 
+
+class PriceAxisPlotBoundaryConsistencyTests(unittest.TestCase):
+    def test_anchor_at_fractional_bottom_plot_edge_uses_unrounded_coordinates(self):
+        plot = {
+            "x_start": 0.1,
+            "x_end": 0.9,
+            "y_top": 0.1,
+            "y_bottom": 0.9002,
+        }
+        anchors = [
+            {"y": 0.2, "price": 120},
+            {"y": 0.5, "price": 90},
+            {"y": 0.9002, "price": 50},
+        ]
+
+        result = evaluate_zone_predictions(
+            [],
+            [],
+            price_axis_anchors=anchors,
+            price_axis_plot_bounds=plot,
+            predicted_plot_bounds=plot,
+            reference_plot_bounds=plot,
+            image_width=640,
+            image_height=360,
+        )
+
+        self.assertEqual(result["price_accuracy"]["anchor_count"], 3)
+        self.assertEqual(result["price_accuracy"]["scale"], "linear")
+
+    def test_anchor_just_beyond_raw_bottom_plot_edge_is_rejected(self):
+        plot = {
+            "x_start": 0.1,
+            "x_end": 0.9,
+            "y_top": 0.1,
+            "y_bottom": 0.9002,
+        }
+        anchors = [
+            {"y": 0.2, "price": 120},
+            {"y": 0.5, "price": 90},
+            {"y": 0.9003, "price": 50},
+        ]
+
+        with self.assertRaisesRegex(ValueError, "falls outside the manually marked main price plot"):
+            evaluate_zone_predictions(
+                [],
+                [],
+                price_axis_anchors=anchors,
+                price_axis_plot_bounds=plot,
+                predicted_plot_bounds=plot,
+                reference_plot_bounds=plot,
+                image_width=640,
+                image_height=360,
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
