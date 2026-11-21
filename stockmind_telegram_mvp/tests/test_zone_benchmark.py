@@ -1092,6 +1092,25 @@ class ZoneBenchmarkRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "inside the manifest directory"):
             evaluate_benchmark_manifest(self.manifest)
 
+    def test_rejects_symlink_that_resolves_outside_manifest_directory(self):
+        record = self._record("symlink-escape")
+        with tempfile.TemporaryDirectory() as outside_dir:
+            outside_image = Path(outside_dir) / "external.png"
+            source_image = self.root / record["image_file"]
+            outside_image.write_bytes(source_image.read_bytes())
+            link = self.root / "external-link.png"
+            try:
+                link.symlink_to(outside_image)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"symlinks are unavailable: {exc}")
+
+            record["image_file"] = link.name
+            self._write(record)
+            with self.assertRaisesRegex(
+                ValueError, "image_file resolves outside the manifest directory"
+            ):
+                evaluate_benchmark_manifest(self.manifest)
+
     def test_rejects_duplicate_fixture_ids(self):
         self._write(self._record("duplicate"), self._record("duplicate"))
 
