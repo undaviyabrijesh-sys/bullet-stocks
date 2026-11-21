@@ -87,6 +87,19 @@ class PriceAxisCalibrationTests(unittest.TestCase):
             with self.subTest(calibration=calibration), self.assertRaises(ValueError):
                 calibration.price_at_y(0.4)
 
+    def test_rejects_invalid_fit_metadata_in_direct_calibration_state(self):
+        invalid_calibrations = (
+            PriceAxisCalibration("linear", -100.0, 140.0, 0.2, 0.8, 2, 0.0),
+            PriceAxisCalibration("linear", -100.0, 140.0, 0.2, 0.8, True, 0.0),
+            PriceAxisCalibration("linear", -100.0, 140.0, 0.2, 0.8, 21, 0.0),
+            PriceAxisCalibration("linear", -100.0, 140.0, 0.2, 0.8, 3, float("nan")),
+            PriceAxisCalibration("linear", -100.0, 140.0, 0.2, 0.8, 3, -0.001),
+            PriceAxisCalibration("linear", -100.0, 140.0, 0.2, 0.8, 3, 0.100001),
+        )
+        for calibration in invalid_calibrations:
+            with self.subTest(calibration=calibration), self.assertRaises(ValueError):
+                calibration.price_at_y(0.4)
+
     def test_rejects_centered_reference_outside_anchor_range(self):
         calibration = PriceAxisCalibration(
             "linear", -100.0, 140.0, 0.2, 0.8, 3, 0.0,
