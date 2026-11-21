@@ -69,6 +69,25 @@ class PriceAxisCalibration:
 
     def price_at_y(self, y: float) -> float:
         """Convert a normalized screenshot y-coordinate to price without extrapolation."""
+        anchor_count = self.anchor_count
+        if (
+            isinstance(anchor_count, bool)
+            or not isinstance(anchor_count, int)
+            or not 3 <= anchor_count <= MAX_AXIS_ANCHORS
+        ):
+            raise ValueError(
+                f"calibration anchor_count must be between 3 and {MAX_AXIS_ANCHORS}"
+            )
+        max_anchor_relative_error = _finite_number(
+            self.max_anchor_relative_error,
+            "calibration max_anchor_relative_error",
+        )
+        if not 0 <= max_anchor_relative_error <= MAX_ALLOWED_RELATIVE_ERROR:
+            raise ValueError(
+                "calibration max_anchor_relative_error must be between "
+                f"0 and {MAX_ALLOWED_RELATIVE_ERROR}"
+            )
+
         y = _finite_number(y, "y")
         if not 0 <= y <= 1:
             raise ValueError("y must be a finite normalized coordinate")
