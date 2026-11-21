@@ -457,6 +457,33 @@ class ZoneEvaluationTests(unittest.TestCase):
         self.assertAlmostEqual(comparison["predicted_price_bounds"]["price_high"], 98.8888888889)
         self.assertAlmostEqual(comparison["reference_price_bounds"]["price_low"], 80)
 
+    def test_price_axis_scoring_uses_the_same_source_pixel_rows_as_zone_geometry(self):
+        base = evaluate(
+            [prediction()],
+            [zone()],
+            price_axis_anchors=AXIS_ANCHORS,
+            price_axis_plot_bounds=PLOT_BOUNDS,
+            predicted_plot_bounds=PLOT_BOUNDS,
+        )
+        subpixel_anchors = [
+            {"y": 0.2001, "price": 120},
+            {"y": 0.5001, "price": 90},
+            {"y": 0.8001, "price": 60},
+        ]
+        quantized = evaluate(
+            [prediction()],
+            [zone()],
+            price_axis_anchors=subpixel_anchors,
+            price_axis_plot_bounds=PLOT_BOUNDS,
+            predicted_plot_bounds=PLOT_BOUNDS,
+        )
+
+        self.assertEqual(quantized["price_accuracy"], base["price_accuracy"])
+        self.assertEqual(
+            quantized["matches"][0]["price_comparison"],
+            base["matches"][0]["price_comparison"],
+        )
+
     def test_geometry_price_percentage_overflow_is_unscored(self):
         predicted_bounds = {"price_high": 1e308, "price_low": 1e-300}
         reference_bounds = {"price_high": 1.0, "price_low": 1e-300}

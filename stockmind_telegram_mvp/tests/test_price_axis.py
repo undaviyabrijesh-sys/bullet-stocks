@@ -68,6 +68,43 @@ class PriceAxisCalibrationTests(unittest.TestCase):
         self.assertTrue(math.isfinite(bounds["price_high"]))
         self.assertTrue(math.isfinite(bounds["price_low"]))
 
+    def test_image_height_quantizes_anchor_rows_before_fitting(self):
+        anchors = [
+            {"y": 0.2001, "price": 120},
+            {"y": 0.5001, "price": 90},
+            {"y": 0.8001, "price": 60},
+        ]
+        quantized_anchors = [
+            {"y": 0.2, "price": 120},
+            {"y": 0.5, "price": 90},
+            {"y": 0.8, "price": 60},
+        ]
+
+        actual = calibrate_price_axis(anchors, image_height=360)
+        expected = calibrate_price_axis(quantized_anchors)
+
+        self.assertEqual(actual, expected)
+
+    def test_image_height_rejects_anchors_that_collapse_to_one_source_row(self):
+        anchors = [
+            {"y": 0.2, "price": 120},
+            {"y": 0.2001, "price": 110},
+            {"y": 0.8, "price": 60},
+        ]
+        with self.assertRaisesRegex(ValueError, "distinct y"):
+            calibrate_price_axis(anchors, image_height=360)
+
+    def test_image_height_must_be_a_positive_integer(self):
+        anchors = [
+            {"y": 0.2, "price": 120},
+            {"y": 0.5, "price": 90},
+            {"y": 0.8, "price": 60},
+        ]
+        for image_height in (True, 0, -1, 360.0):
+            with self.subTest(image_height=image_height):
+                with self.assertRaisesRegex(ValueError, "image_height"):
+                    calibrate_price_axis(anchors, image_height=image_height)
+
     def test_legacy_positional_calibration_constructor_still_works(self):
         calibration = PriceAxisCalibration(
             "linear", -100.0, 140.0, 0.2, 0.8, 3, 0.0

@@ -442,6 +442,7 @@ def evaluate_zone_predictions(
             price_axis_anchors,
             scale=price_axis_scale,
             max_relative_error=max_axis_relative_error,
+            image_height=image_height,
         )
         for index, anchor in enumerate(price_axis_anchors):
             anchor_y = float(anchor["y"])  # validated by calibrate_price_axis

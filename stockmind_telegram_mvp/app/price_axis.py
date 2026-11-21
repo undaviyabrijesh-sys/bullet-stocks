@@ -189,10 +189,15 @@ def calibrate_price_axis(
     *,
     scale="linear",
     max_relative_error=DEFAULT_MAX_RELATIVE_ERROR,
+    image_height=None,
 ):
     """Fit a linear or logarithmic price axis from 3..20 manual anchors.
 
     Each anchor is {"y": normalized_full_image_y, "price": positive_price}.
+    When image_height is supplied, y is quantized to the nearest source-image
+    row with Python's round() rule before fitting. This keeps calibration on
+    the same pixel grid as rendered zone boundaries; anchors that collapse to
+    one row are rejected as duplicate coordinates.
     The chart's conventional orientation is required: higher prices must appear
     above lower prices. At least three anchors are required so curvature or a
     broken/non-uniform scale can be detected instead of being fit perfectly by
@@ -207,6 +212,12 @@ def calibrate_price_axis(
         raise ValueError(
             f"max_relative_error must be greater than 0 and at most {MAX_ALLOWED_RELATIVE_ERROR}"
         )
+    if image_height is not None and (
+        isinstance(image_height, bool)
+        or not isinstance(image_height, int)
+        or image_height <= 0
+    ):
+        raise ValueError("image_height must be a positive integer")
 
     points = []
     for index, anchor in enumerate(anchors):
@@ -218,6 +229,13 @@ def calibrate_price_axis(
             raise ValueError(f"anchor {index} y must be between 0 and 1")
         if price <= 0:
             raise ValueError(f"anchor {index} price must be positive")
+        if image_height is not None:
+            try:
+                y = round(y * image_height) / image_height
+            except (OverflowError, ValueError, ZeroDivisionError) as exc:
+                raise ValueError(
+                    f"anchor {index} y cannot be represented at source-image resolution"
+                ) from exc
         points.append((y, price))
 
     points.sort(key=lambda point: point[0])
