@@ -465,6 +465,13 @@ The public `render_overlay` entry point always validates and normalizes the
 supplied screenshot before converting normalized coordinates to pixels. There
 is no public boolean flag that disables image validation or EXIF normalization.
 
+For an EXIF-oriented source, `prepare_chart_image` fully decodes and integrity-
+checks the untrusted input before transposing and re-encoding it. A successful
+Pillow encode preserves the source format and pixel count, so the normalized
+output is not reopened for a second full decode/verify cycle. Callers that need
+an explicit output postcondition can validate the returned bytes separately.
+The orientation regression tests do so.
+
 The Telegram handler has already run `prepare_chart_image` on the exact bytes
 sent to the vision provider. To avoid decoding a large screenshot a second time,
 that internal handler uses `_render_overlay_prepared` with those same canonical
