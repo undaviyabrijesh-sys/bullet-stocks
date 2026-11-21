@@ -730,6 +730,14 @@ def _validate_record(record, manifest_dir, line_number, max_image_bytes):
     reference_plot_bounds = record.get("reference_plot_bounds")
     if reference_plot_bounds is None and axis_plot_bounds is not None:
         reference_plot_bounds = axis_plot_bounds
+    if anchors is not None and any(
+        reference_plot_bounds.get(key) != axis_plot_bounds.get(key)
+        for key in ("x_start", "x_end", "y_top", "y_bottom")
+    ):
+        raise ValueError(
+            f"line {line_number} ({fixture_id}): price_axis_plot_bounds must match "
+            "reference_plot_bounds"
+        )
     predicted_plot_bounds = record.get("predicted_plot_bounds")
 
     try:
