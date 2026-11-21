@@ -171,6 +171,25 @@ class OverlayRendererTests(unittest.TestCase):
             # Normalize before applying normalized coordinates or zones shift.
             self.assertEqual(rendered.size, (48, 64))
 
+    def test_oriented_output_is_not_redecoded_after_pillow_encoding(self):
+        original = oriented_sample_image(image_format="PNG", orientation=6)
+
+        with patch.object(
+            overlay_engine, "validate_chart_image", wraps=validate_chart_image
+        ) as validate:
+            normalized, mime_type = prepare_chart_image(original)
+
+        # One complete validation of the untrusted source is sufficient:
+        # EXIF transpose preserves format/pixel count and Pillow encoded the
+        # normalized bytes successfully. Explicit output validation remains
+        # available to downstream callers and tests.
+        validate.assert_called_once_with(original)
+        self.assertEqual(mime_type, "image/png")
+        self.assertEqual(validate_chart_image(normalized), "image/png")
+        with Image.open(BytesIO(normalized)) as image:
+            self.assertEqual(image.size, (48, 64))
+            self.assertNotIn(274, image.getexif())
+
     def test_exif_orientation_one_preserves_original_bytes(self):
         original = oriented_sample_image(orientation=1)
         normalized, mime_type = prepare_chart_image(original)
