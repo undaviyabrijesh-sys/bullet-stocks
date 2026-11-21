@@ -273,6 +273,42 @@ class ChartResponseValidationTests(unittest.TestCase):
         )
         self.assertNotIn("8. Locate the MAIN PRICE-PLOT", combined)
         self.assertIn("First identify plot_bounds", CHART_IMAGE_INSTRUCTIONS)
+    def test_pixel_minimums_match_renderer_before_marking_zone_drawable(self):
+        too_narrow = zone(
+            x_start=0.2, x_end=0.4, y_top=0.3, y_bottom=0.5
+        )
+        drawable = zone(
+            x_start=0.2, x_end=0.6, y_top=0.3, y_bottom=0.5
+        )
+
+        result = sanitize_chart_analysis(
+            payload([too_narrow, drawable]), image_size=(10, 10)
+        )
+
+        self.assertFalse(result["zones"][0]["draw_overlay"])
+        self.assertEqual(
+            [result["zones"][0][key] for key in ("x_start", "x_end", "y_top", "y_bottom")],
+            [0.0, 0.0, 0.0, 0.0],
+        )
+        self.assertTrue(result["zones"][1]["draw_overlay"])
+
+    def test_pixel_minimums_reject_plot_bounds_that_collapse_after_rounding(self):
+        tiny_plot = {
+            "x_start": 0.1, "x_end": 0.2,
+            "y_top": 0.1, "y_bottom": 0.9,
+        }
+        result = sanitize_chart_analysis(
+            payload([zone()], plot_bounds=tiny_plot), image_size=(10, 10)
+        )
+
+        self.assertEqual(result["plot_bounds"], tiny_plot)
+        self.assertFalse(result["zones"][0]["draw_overlay"])
+
+    def test_rejects_invalid_image_dimensions_for_pixel_aware_sanitization(self):
+        for image_size in ((0, 10), (10, False), (10.0, 10), (10,), "10x10"):
+            with self.subTest(image_size=image_size), self.assertRaises(ValueError):
+                sanitize_chart_analysis(payload([zone()]), image_size=image_size)
+
     def test_rejects_missing_or_wrongly_typed_response_fields(self):
         for payload in (
             None,

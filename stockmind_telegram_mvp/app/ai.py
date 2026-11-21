@@ -15,6 +15,7 @@ from .tapetide import TapetideAPIError
 from .chart_limits import MAX_CHART_ZONES
 from .strict_json import loads as strict_json_loads
 from .price_axis import parse_zone_price_bounds
+from .overlay_engine import normalized_plot_bounds_to_pixel_box, normalized_zone_to_pixel_box
 from .unicode_utils import normalize_unicode_scalars
 
 SYSTEM_PROMPT = """
@@ -583,8 +584,13 @@ def _is_normalized_coordinate(value) -> bool:
     return math.isfinite(numeric) and 0 <= numeric <= 1
 
 
-def sanitize_chart_analysis(data: dict) -> dict:
-    """Keep chart prose usable while refusing unsafe or ambiguous overlay geometry."""
+def sanitize_chart_analysis(data: dict, *, image_size=None) -> dict:
+    """Keep chart prose usable while refusing unsafe or ambiguous overlay geometry.
+
+    When the prepared screenshot dimensions are supplied, use the exact shared
+    pixel geometry helpers used by the renderer so sub-pixel zones are not
+    marked drawable when the final overlay would reject them.
+    """
     if not isinstance(data, dict):
         raise ValueError("Invalid chart analysis response.")
     analysis = data.get("analysis")
@@ -593,6 +599,18 @@ def sanitize_chart_analysis(data: dict) -> dict:
         raise ValueError("Chart analysis did not contain readable analysis text.")
     if not isinstance(zones, list):
         raise ValueError("Chart analysis did not contain a zone list.")
+
+    image_dimensions = None
+    if image_size is not None:
+        if not isinstance(image_size, (tuple, list)) or len(image_size) != 2:
+            raise ValueError("image_size must be a (width, height) pair")
+        width, height = image_size
+        if (
+            isinstance(width, bool) or not isinstance(width, int) or width <= 0
+            or isinstance(height, bool) or not isinstance(height, int) or height <= 0
+        ):
+            raise ValueError("image_size dimensions must be positive integers")
+        image_dimensions = (width, height)
 
     raw_plot_bounds = data.get("plot_bounds")
     plot_bounds = None
@@ -608,6 +626,12 @@ def sanitize_chart_analysis(data: dict) -> dict:
                     "x_start": px0, "x_end": px1,
                     "y_top": py0, "y_bottom": py1,
                 }
+
+    plot_pixel_box = (
+        normalized_plot_bounds_to_pixel_box(plot_bounds, *image_dimensions)
+        if plot_bounds is not None and image_dimensions is not None
+        else None
+    )
 
     safe_zones = []
     withheld_price_bounds = 0
@@ -666,6 +690,19 @@ def sanitize_chart_analysis(data: dict) -> dict:
                 and x_end <= plot_bounds["x_end"]
                 and y_top >= plot_bounds["y_top"]
                 and y_bottom <= plot_bounds["y_bottom"]
+            )
+        if draw_overlay and image_dimensions is not None:
+            # Match the renderer's rounded half-open pixel boxes and minimum
+            # drawable size. Normalized geometry alone can collapse to fewer
+            # than three columns or two rows on small screenshots.
+            pixel_box = normalized_zone_to_pixel_box(zone, *image_dimensions)
+            draw_overlay = (
+                pixel_box is not None
+                and plot_pixel_box is not None
+                and pixel_box[0] >= plot_pixel_box[0]
+                and pixel_box[1] >= plot_pixel_box[1]
+                and pixel_box[2] <= plot_pixel_box[2]
+                and pixel_box[3] <= plot_pixel_box[3]
             )
 
         if not draw_overlay:
@@ -1402,7 +1439,9 @@ class ResearchAI:
                 raise
             raise ResearchTurnDeadlineExceeded(timeout_seconds) from None
 
-    async def analyze_chart_image(self, history, user_text, image_bytes, image_mime_type="image/jpeg"):
+    async def analyze_chart_image(
+        self, history, user_text, image_bytes, image_mime_type="image/jpeg", *, image_size=None
+    ):
         """Analyse one screenshot without carrying unrelated conversation turns into vision."""
         if image_mime_type not in {"image/jpeg", "image/png", "image/webp"}:
             raise ValueError("Unsupported image type.")
@@ -1456,7 +1495,7 @@ class ResearchAI:
         data = strict_json_loads(raw)
         if not isinstance(data, dict) or not isinstance(data.get("zones"), list):
             raise ValueError("Invalid chart analysis structure.")
-        result = sanitize_chart_analysis(data)
+        result = sanitize_chart_analysis(data, image_size=image_size)
         result["prediction_metadata"] = build_chart_prediction_metadata(
             response,
             self.vision_model,

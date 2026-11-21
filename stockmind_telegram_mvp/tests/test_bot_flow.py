@@ -53,6 +53,10 @@ class ChartImagePrivacyPreparationTests(unittest.TestCase):
         )
         return output.getvalue()
 
+    def test_prepared_chart_dimensions_are_read_without_decoding_pixels(self):
+        prepared = self._metadata_png()
+        self.assertEqual(bot_module._prepared_chart_image_size(prepared), (64, 48))
+
     def test_strips_exif_and_png_text_before_vision_receives_image(self):
         original = self._metadata_png()
 
@@ -801,6 +805,8 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
             bot_module, "_prepare_chart_image_for_vision",
             return_value=(b"normalized-chart", "image/png"),
         ) as prepare, patch.object(
+            bot_module, "_prepared_chart_image_size", return_value=(640, 480)
+        ) as dimensions, patch.object(
             bot_module, "_render_overlay_prepared", return_value=(b"overlay-jpeg", 1)
         ) as render, patch.object(
             bot_module, "send_overlay_photo", new_callable=AsyncMock, return_value=False
@@ -811,6 +817,8 @@ class ResearchToTelegramFlowTests(unittest.IsolatedAsyncioTestCase):
         research.analyze_chart_image.assert_awaited_once()
         self.assertEqual(research.analyze_chart_image.await_args.args[2], b"normalized-chart")
         self.assertEqual(research.analyze_chart_image.await_args.args[3], "image/png")
+        self.assertEqual(research.analyze_chart_image.await_args.kwargs["image_size"], (640, 480))
+        dimensions.assert_called_once_with(b"normalized-chart")
         render.assert_called_once()
         self.assertEqual(render.call_args.args[0], b"normalized-chart")
         self.status.edit_text.assert_awaited_once_with(

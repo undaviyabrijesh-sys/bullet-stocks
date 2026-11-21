@@ -72,6 +72,14 @@ offline evaluator's existing price_accuracy measures coordinate-derived
 prices against manual reference geometry using manually entered linear/log
 anchors. Comparing the model's stated price_low/price_high labels directly
 with those calibrated coordinate prices remains a separate benchmark task.
+
+For live Telegram analysis, the sanitizer also receives the exact prepared
+screenshot dimensions. It uses the same rounded half-open pixel-box helpers as
+the renderer before retaining `draw_overlay=true`. Zones that collapse below
+the renderer's 3-pixel width or 2-pixel height, or fall outside the quantized
+plot rectangle, are zeroed before delivery. This keeps the structured response
+and the final overlay's drawable-zone decision aligned; it does not change the
+model's visual confidence or claim that a detected zone is market-valid.
 ## Geometry scoring
 
 Call evaluate_zone_predictions(predicted_zones, reference_zones, image_width=1600, image_height=900, iou_threshold=0.5) from app.zone_evaluation. Always pass the original screenshot dimensions.

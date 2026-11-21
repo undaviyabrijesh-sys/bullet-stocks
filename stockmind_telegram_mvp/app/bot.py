@@ -1,6 +1,9 @@
 import asyncio
 import logging
 import time
+from io import BytesIO
+
+from PIL import Image
 from collections import defaultdict, deque
 from contextvars import ContextVar
 from functools import wraps
@@ -204,6 +207,17 @@ def _prepare_chart_image_for_vision(image_bytes: bytes) -> tuple[bytes, str]:
             "The chart image could not be safely sanitized. Please re-export it and try again.",
         ) from exc
     return sanitized_bytes, mime_type
+
+
+def _prepared_chart_image_size(image_bytes: bytes) -> tuple[int, int] | None:
+    """Read dimensions from already validated, metadata-cleaned image bytes."""
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            return image.size
+    except (OSError, SyntaxError, TypeError, ValueError):
+        logger.exception("Could not read dimensions from prepared StockMind chart image")
+        return None
+
 
 market = TapetideClient(TAPETIDE_TOKEN)
 crypto_market = BinanceMarketData()
@@ -556,6 +570,7 @@ async def _run_research_locked_impl(
             await message.answer(chart_image_error_message(language, "invalid"))
             return
         stage_timings["image_prepare"] = _elapsed_ms(image_prepare_started)
+        image_size = _prepared_chart_image_size(image_bytes)
 
     today = datetime.now(IST).date().isoformat()
     reservation = _reserve_research_request(user_id, today)
@@ -580,7 +595,8 @@ async def _run_research_locked_impl(
             analysis_started = time.perf_counter()
             try:
                 chart_result = await research.analyze_chart_image(
-                    history, user_text, image_bytes, image_mime_type
+                    history, user_text, image_bytes, image_mime_type,
+                    image_size=image_size,
                 )
             finally:
                 stage_timings["analysis_execution"] = _elapsed_ms(analysis_started)
