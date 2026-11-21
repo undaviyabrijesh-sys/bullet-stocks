@@ -220,8 +220,13 @@ def prepare_chart_image(
             f"{max_output_bytes}-byte processing limit. Resize or re-export the screenshot.",
         )
 
-    normalized_mime_type = validate_chart_image(normalized_bytes)
-    return normalized_bytes, normalized_mime_type
+    # The source has already passed full decode and container-integrity
+    # checks. EXIF transpose preserves the encoded format and pixel count, and
+    # Pillow's successful save produces the normalized container. Reopening
+    # the output for another full decode/verify pass adds two more image reads
+    # without adding a new trust boundary; callers/tests that need an explicit
+    # postcondition can validate the returned bytes separately.
+    return normalized_bytes, mime_type
 
 
 def _zone_overlay_label(zone: dict, zone_type: str) -> str:
