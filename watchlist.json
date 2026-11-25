@@ -1,7 +1,7 @@
 {
- "date": "2026-11-23",
+ "date": "2026-11-25",
  "strategy_version": 3,
- "scanned": 2419,
+ "scanned": 2420,
  "items": [
   {
    "level": 1499.0,
@@ -10,9 +10,9 @@
    "monthly_sma10": 1145.6000061035156,
    "monthly_sma20_undercut": true,
    "monthly_sma20_undercut_month": "Mar'26",
-   "static_score": 41.60624376808784,
-   "vol_ratio": 0.9064049922726826,
-   "rs": 0.2973327876184497,
+   "static_score": 39.8328272302098,
+   "vol_ratio": 0.7359460099878353,
+   "rs": 0.306328250246531,
    "base_range": 0.43890575899300677,
    "setup_month": "Oct'26",
    "symbol": "ALIVUS"
@@ -24,9 +24,9 @@
    "monthly_sma10": 1424.060009765625,
    "monthly_sma20_undercut": true,
    "monthly_sma20_undercut_month": "Sep'25",
-   "static_score": 9.978657868668149,
-   "vol_ratio": 0.48804019050693326,
-   "rs": -0.1544021584719486,
+   "static_score": 10.039560620195852,
+   "vol_ratio": 0.43499930002657317,
+   "rs": -0.1308766508615804,
    "base_range": 0.3811644895992685,
    "setup_month": "Oct'26",
    "symbol": "GESHIP"
@@ -38,9 +38,9 @@
    "monthly_sma10": 316.6300018310547,
    "monthly_sma20_undercut": true,
    "monthly_sma20_undercut_month": "Jun'22",
-   "static_score": 44.349507882704366,
-   "vol_ratio": 0.993870135165355,
-   "rs": 0.24005299493725318,
+   "static_score": 44.609218744553075,
+   "vol_ratio": 1.1332797709945304,
+   "rs": 0.2186286021543722,
    "base_range": 0.24207790094020565,
    "setup_month": "Oct'26",
    "symbol": "KARURVYSYA"
@@ -52,9 +52,9 @@
    "monthly_sma10": 1544.110009765625,
    "monthly_sma20_undercut": true,
    "monthly_sma20_undercut_month": "Jun'26",
-   "static_score": 36.38055304380845,
-   "vol_ratio": 0.6324665182084429,
-   "rs": 0.18824895392100505,
+   "static_score": 34.9221354504659,
+   "vol_ratio": 0.6910218884724509,
+   "rs": 0.17150706382679037,
    "base_range": 0.20068344430345175,
    "setup_month": "Oct'26",
    "symbol": "TECHM"
